@@ -18,3 +18,10 @@ Features I'd like to add:
 - Text bubbles?
 - Possibility to connect local LLM for conversations
 - More animations, images &amp; quirks
+- Head pats (smh)
+- Mischief mode (screen glitches, stealing your cursor, "you've been hacked" notes)
+- Sitting on top of your windows
+- Peeking from the edge of the screen when you're idle
+- Start with Windows
+- Hiding while you're in fullscreen games or videos
+- Alarms &amp; a study timer
