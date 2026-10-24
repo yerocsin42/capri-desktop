@@ -1,9 +1,7 @@
-<table>
-<tr>
-<td width="50%" align="center"><img src="assets/chip-source.png" alt="Chip" width="250"></td>
-<td width="50%" align="center"><img src="assets/capri.png" alt="Capri" width="250"></td>
-</tr>
-</table>
+<p align="center">
+  <img src="assets/chip-source.png" alt="Chip" width="40%" align="middle">
+  <img src="assets/capri.png" alt="Capri" width="40%" align="middle">
+</p>
 
 Bring Capri (back lol) to life as a desktop companion! Inspired by jpartnma_'s tiktok video.
 
