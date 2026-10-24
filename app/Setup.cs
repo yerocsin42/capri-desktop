@@ -201,12 +201,12 @@ namespace CapriSetup
             chip.SizeMode = PictureBoxSizeMode.Zoom;
             using (Stream image = Assembly.GetExecutingAssembly().GetManifestResourceStream("Capri.Chip.png")) if (image != null) using (Bitmap loaded = new Bitmap(image)) chip.Image = new Bitmap(loaded);
             Controls.Add(chip);
-            LabelAt(removing ? "Remove the app and its shortcuts for this Windows user.\nQuit Capri from the tray before continuing." : "Your quiet corner of the desktop, with a little more Capri.\nDrag to move. Tap for a reaction. Right-click for her menu.", 34, 208, 610, 53, 11, Color.FromArgb(175, 179, 188));
+            LabelAt(removing ? "Remove the app and its shortcuts for this Windows user.\nQuit Capri from the tray before continuing." : "Right-click for her menu.", 34, 208, 610, 53, 11, Color.FromArgb(175, 179, 188));
             desktop = new CheckBox { Text = "Add a desktop shortcut", Checked = false, AutoSize = true, Location = new Point(34, 280), Visible = !removing, ForeColor = ForeColor, BackColor = BackColor };
             launch = new CheckBox { Text = "Open Capri when finished", Checked = true, AutoSize = true, Location = new Point(34, 310), Visible = !removing, ForeColor = ForeColor, BackColor = BackColor };
             Controls.Add(desktop);
             Controls.Add(launch);
-            status = LabelAt(removing ? "Your saved position and size will be kept." : "Installed only for you. No administrator access needed.", 34, 350, 604, 22, 9, Color.FromArgb(146, 151, 161));
+            status = LabelAt(removing ? "Your saved position and size will be kept." : "", 34, 350, 604, 22, 9, Color.FromArgb(146, 151, 161));
             primary = new Button { Text = removing ? "Remove Capri" : "Install Capri", Bounds = new Rectangle(450, 399, 194, 43), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(239, 58, 78), ForeColor = Color.White, Cursor = Cursors.Hand };
             primary.FlatAppearance.BorderSize = 0;
             primary.Click += Perform;
@@ -215,7 +215,6 @@ namespace CapriSetup
             cancel.FlatAppearance.BorderColor = Color.FromArgb(62, 65, 74);
             cancel.Click += delegate { Close(); };
             Controls.Add(cancel);
-            LabelAt("UNOFFICIAL FAN COMPANION  ·  v0.2.0", 34, 412, 269, 20, 8, Color.FromArgb(126, 132, 143));
             AcceptButton = primary;
             CancelButton = cancel;
         }
