@@ -84,14 +84,14 @@ namespace CapriSetup
             Directory.CreateDirectory(destination);
             File.WriteAllBytes(Path.Combine(destination, "Capri.exe"), Payload());
             File.Copy(Application.ExecutablePath, Path.Combine(destination, "Uninstall.exe"), true);
-            File.WriteAllText(marker, "Capri desktop companion 0.1.0");
+            File.WriteAllText(marker, "Capri desktop companion 0.2.0");
             string menu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Capri.lnk");
             Shortcut(menu, Path.Combine(destination, "Capri.exe"));
             if (desktop) Shortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Capri.lnk"), Path.Combine(destination, "Capri.exe"));
             using (RegistryKey key = Registry.CurrentUser.CreateSubKey(RegistryPath))
             {
                 key.SetValue("DisplayName", "Capri");
-                key.SetValue("DisplayVersion", "0.1.0");
+                key.SetValue("DisplayVersion", "0.2.0");
                 key.SetValue("Publisher", "Capri fan project");
                 key.SetValue("InstallLocation", destination);
                 key.SetValue("DisplayIcon", Path.Combine(destination, "Capri.exe"));
@@ -215,7 +215,7 @@ namespace CapriSetup
             cancel.FlatAppearance.BorderColor = Color.FromArgb(62, 65, 74);
             cancel.Click += delegate { Close(); };
             Controls.Add(cancel);
-            LabelAt("UNOFFICIAL FAN COMPANION  ·  v0.1.0", 34, 412, 269, 20, 8, Color.FromArgb(126, 132, 143));
+            LabelAt("UNOFFICIAL FAN COMPANION  ·  v0.2.0", 34, 412, 269, 20, 8, Color.FromArgb(126, 132, 143));
             AcceptButton = primary;
             CancelButton = cancel;
         }

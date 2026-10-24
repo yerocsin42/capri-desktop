@@ -23,12 +23,13 @@ h1 em { font-weight: 600; }
 .demo-capri.dragging img, .demo-capri.no-motion img { animation: none; }
 .demo-capri[hidden] { display: none; }
 .taskbar { position: absolute; left: 0; right: 0; bottom: 0; height: 30px; display: flex; align-items: center; gap: 6px; padding-right: 6px; background: linear-gradient(#3f8cf3 0, #2a63d6 12%, #245edb 50%, #1f4fbf 100%); border-top: 1px solid #6aa3ff; z-index: 3; }
-.xp-start { width: 90px; height: 30px; border: 0; padding: 0; background: url("assets/xp-taskbar.png") 0 0 / auto 30px no-repeat; flex: none; }
+.xp-start { width: 105px; height: 30px; border: 0; padding: 0; background: url("assets/xp-start.png") 0 0 / 100% 100% no-repeat; flex: none; }
 .xp-app { display: flex; align-items: center; gap: 6px; width: 150px; height: 24px; padding: 0 8px; border: 1px solid #10307a; border-radius: 3px; background: #1e4aa8; box-shadow: inset 1px 1px 2px #0006; color: #fff; font-size: 12px; text-align: left; }
 .xp-app:hover { background: #2a5cc4; }
 .xp-app img { width: 16px; height: 11px; object-fit: contain; pointer-events: none; }
 .demo-capri.riding { pointer-events: none; }
 .demo-capri.riding img { animation: none; transform: translateY(-3px) rotate(-5deg); }
+.hint { margin: 12px 0 0; text-align: center; font-size: 13px; color: #6b6f74; }
 .kyoko { position: relative; display: flex; align-items: flex-start; gap: 10px; margin-top: 24px; }
 .kyoko img { width: 120px; height: 120px; object-fit: cover; object-position: 50% 18%; border-radius: 8px; }
 .bubble { order: 2; margin: 10px 0 0; padding: 10px 14px; border: 2px solid #202225; border-radius: 14px; background: #fff; font-size: 15px; font-weight: 600; }

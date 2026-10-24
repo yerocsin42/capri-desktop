@@ -40,7 +40,7 @@
   const followPointer = (event) => {
     const bounds = stage.getBoundingClientRect();
     placeCursor(event.clientX - bounds.left, event.clientY - bounds.top);
-    if (riding) { const height = size * 1043 / 1508; x = event.clientX - bounds.left - size * 0.34 + 12; y = event.clientY - bounds.top - (size - height) / 2 - height * 0.6 - 12; place(); }
+    if (riding) { x = event.clientX - bounds.left - size * 0.267 + 12; y = event.clientY - bounds.top - size * 0.73 - 12; place(); }
   };
   const place = () => {
     x = Math.max(0, Math.min(x, stage.clientWidth - size));
@@ -107,7 +107,7 @@
     if (movement) { event.preventDefault(); x += movement[0]; y += movement[1]; place(); placeCursor(x + size * 0.6, y + size * 0.5); }
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); react(); }
   });
-  stage.addEventListener('keydown', event => { if (event.altKey && event.key === 'Escape' && riding) { event.preventDefault(); setRide(false); } });
+  stage.addEventListener('keydown', event => { if (event.ctrlKey && event.altKey && (event.code === 'KeyC' || event.key.toLowerCase() === 'c') && riding) { event.preventDefault(); setRide(false); } });
   document.querySelector('#demo-restore').addEventListener('click', reset);
   setInterval(() => { if (motion && !riding && !drag && !capri.hidden && !document.hidden) react(); }, 9000);
   new ResizeObserver(() => { if (!initialized) { initialized = true; reset(); } else { place(); placeCursor(x + size * 0.6, y + size * 0.5); } }).observe(stage);

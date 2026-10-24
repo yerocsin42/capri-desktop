@@ -89,13 +89,12 @@ namespace CapriDesktop
         private bool pendingClick;
         private Point pendingPoint;
         private long pendingTime;
-        private bool dismountQueued;
+        private bool hotkey;
         private double leanAngle;
-        private IntPtr hook;
-        private Native.HookProc hookProc;
         private readonly System.Windows.Forms.Timer clickDelay;
         private readonly ToolStripMenuItem rideItem;
         private const int PaddingSize = 36;
+        private const int DismountId = 0x4361;
         internal bool TestFailed;
 
         internal Companion(string data, EventWaitHandle signal, bool smoke)
@@ -126,7 +125,7 @@ namespace CapriDesktop
             menu.ForeColor = Color.FromArgb(238, 239, 241);
             menu.BackColor = Color.FromArgb(26, 27, 31);
             menu.ShowImageMargin = false;
-            ToolStripMenuItem title = new ToolStripMenuItem("CAPRI  /  0.1.0");
+            ToolStripMenuItem title = new ToolStripMenuItem("CAPRI  /  0.2.0");
             title.Enabled = false;
             menu.Items.Add(title);
             menu.Items.Add(new ToolStripSeparator());
@@ -143,7 +142,7 @@ namespace CapriDesktop
             topItem = new ToolStripMenuItem("Always on top", null, delegate { preferences.OnTop = !preferences.OnTop; TopMost = preferences.OnTop; topItem.Checked = preferences.OnTop; SavePreferences(); });
             topItem.Checked = preferences.OnTop;
             menu.Items.Add(topItem);
-            rideItem = new ToolStripMenuItem("Ride cursor", null, delegate { if (riding) StopRide(); else StartRide(); });
+            rideItem = new ToolStripMenuItem("Perch on cursor", null, delegate { if (riding) StopRide(); else StartRide(); });
             menu.Items.Add(rideItem);
             clickDelay = new System.Windows.Forms.Timer();
             clickDelay.Interval = Math.Max(100, SystemInformation.DoubleClickTime);
@@ -280,14 +279,27 @@ namespace CapriDesktop
             {
                 long value = message.LParam.ToInt64();
                 Point point = PointToClient(new Point((short)(value & 65535), (short)((value >> 16) & 65535)));
-                if (point.X < 0 || point.Y < 0 || point.X >= frame.Width || point.Y >= frame.Height || frame.GetPixel(point.X, point.Y).A < 12)
+                if (!Solid(point))
                 {
                     message.Result = new IntPtr(-1);
                     return;
                 }
             }
+            if (message.Msg == 0x0312 && message.WParam.ToInt32() == DismountId) { StopRide(); return; }
             if (message.Msg == 0x02E0) { anchor = KeepOnScreen(anchor); Location = anchor; RenderFrame(); }
             base.WndProc(ref message);
+        }
+
+        private bool Solid(Point point)
+        {
+            for (int dx = -4; dx <= 4; dx += 4)
+                for (int dy = -4; dy <= 4; dy += 4)
+                {
+                    int x = point.X + dx;
+                    int y = point.Y + dy;
+                    if (x >= 0 && y >= 0 && x < frame.Width && y < frame.Height && frame.GetPixel(x, y).A >= 12) return true;
+                }
+            return false;
         }
 
         private void OnClickDelay()
@@ -305,21 +317,6 @@ namespace CapriDesktop
             return elapsed >= 0 && elapsed <= SystemInformation.DoubleClickTime && Math.Abs(a.X - b.X) <= box.Width / 2 && Math.Abs(a.Y - b.Y) <= box.Height / 2;
         }
 
-        internal static bool IsDismountKey(int message, int key, int flags)
-        {
-            return message == 0x0104 && key == 0x1B && (flags & 0x20) != 0;
-        }
-
-        private IntPtr KeyHook(int code, IntPtr wParam, IntPtr lParam)
-        {
-            if (code >= 0 && riding && IsDismountKey(wParam.ToInt32(), Marshal.ReadInt32(lParam), Marshal.ReadInt32(lParam, 8)))
-            {
-                if (!dismountQueued) { dismountQueued = true; BeginInvoke((Action)delegate { dismountQueued = false; StopRide(); }); }
-                return new IntPtr(1);
-            }
-            return Native.CallNextHookEx(hook, code, wParam, lParam);
-        }
-
         private void StartRide()
         {
             if (riding || hidden || !IsHandleCreated) return;
@@ -328,28 +325,25 @@ namespace CapriDesktop
             pressed = false;
             dragging = false;
             Capture = false;
-            if (hookProc == null) hookProc = KeyHook;
-            if (hook == IntPtr.Zero) hook = Native.SetWindowsHookEx(13, hookProc, Native.GetModuleHandle(null), 0);
-            if (hook == IntPtr.Zero)
-            {
-                int error = Marshal.GetLastWin32Error();
-                if (!testing) MessageBox.Show("Capri could not watch for Alt+Esc, so riding stays off. (error " + error + ")", "Capri", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
+            hotkey = Native.RegisterHotKey(Handle, DismountId, 0x0001 | 0x0002 | 0x4000, 0x43);
             riding = true;
             Native.SetWindowLong(Handle, -20, Native.GetWindowLong(Handle, -20) | 0x20);
-            rideItem.Text = "Leave cursor";
+            rideItem.Text = "Hop off";
+            tray.Text = hotkey ? "Capri · Ctrl + Alt + C to hop off" : "Capri · Hop off from this menu";
+            if (!hotkey && !testing) tray.ShowBalloonTip(5000, "Capri", "Ctrl + Alt + C is taken by another app. Right-click Capri's tray icon and choose Hop off.", ToolTipIcon.Info);
             frames.Start();
         }
 
         private void StopRide()
         {
-            if (hook != IntPtr.Zero) { Native.UnhookWindowsHookEx(hook); hook = IntPtr.Zero; }
+            if (hotkey && IsHandleCreated) Native.UnregisterHotKey(Handle, DismountId);
+            hotkey = false;
             if (!riding) return;
             riding = false;
             leanAngle = 0;
             if (IsHandleCreated) Native.SetWindowLong(Handle, -20, Native.GetWindowLong(Handle, -20) & ~0x20);
-            if (rideItem != null) rideItem.Text = "Ride cursor";
+            if (rideItem != null) rideItem.Text = "Perch on cursor";
+            if (tray != null) tray.Text = "Capri · Double-click to restore";
             if (!IsDisposed) { Location = anchor; UpdateAnimation(); SavePreferences(); }
         }
 
@@ -358,8 +352,8 @@ namespace CapriDesktop
             Point cursor = Cursor.Position;
             Rectangle area = Screen.FromPoint(cursor).WorkingArea;
             float seatedHeight = perched == null ? preferences.Size : preferences.Size * perched.Height / (float)perched.Width;
-            int seatX = perched == null ? Width / 2 - 24 : PaddingSize + (int)(preferences.Size * 0.34f) - 12;
-            int seatY = perched == null ? Height - PaddingSize : PaddingSize + (int)((preferences.Size - seatedHeight) / 2 + seatedHeight * 0.6f) + 12;
+            int seatX = perched == null ? Width / 2 - 24 : PaddingSize + (int)(preferences.Size * 0.267f) - 12;
+            int seatY = perched == null ? Height - PaddingSize : PaddingSize + (int)((preferences.Size - seatedHeight) / 2 + seatedHeight * 0.73f) + 12;
             int tx = Math.Max(area.Left, Math.Min(cursor.X - seatX, area.Right - Width));
             int ty = Math.Max(area.Top, Math.Min(cursor.Y - seatY, area.Bottom - Height));
             int nx = anchor.X + (int)Math.Round((tx - anchor.X) * 0.25);
@@ -468,7 +462,6 @@ namespace CapriDesktop
 
         protected override void Dispose(bool disposing)
         {
-            if (hook != IntPtr.Zero) { Native.UnhookWindowsHookEx(hook); hook = IntPtr.Zero; }
             if (disposing)
             {
                 clickDelay.Dispose();
@@ -522,19 +515,23 @@ namespace CapriDesktop
                             OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
                             OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
                             OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
-                            if (!riding || hook == IntPtr.Zero || (Native.GetWindowLong(Handle, -20) & 0x20) == 0) throw new Exception("Double click did not mount with passthrough and hook.");
-                            checks.Add("PASS double click mounted with passthrough style and scoped hook");
-                            if (!IsDismountKey(0x0104, 0x1B, 0x20) || IsDismountKey(0x0104, 0x1B, 0) || IsDismountKey(0x0104, 0x09, 0x20) || IsDismountKey(0x0105, 0x1B, 0x20) || IsDoubleClick(Point.Empty, new Point(200, 200), 10)) throw new Exception("Shortcut predicate failed.");
-                            checks.Add("PASS Alt+Esc predicate only");
+                            if (!riding || (Native.GetWindowLong(Handle, -20) & 0x20) == 0) throw new Exception("Double click did not perch with click-through.");
+                            checks.Add("PASS double click perched with click-through");
+                            checks.Add(hotkey ? "PASS Ctrl+Alt+C registered while perched" : "LIMIT Ctrl+Alt+C taken; tray Hop off fallback");
+                            if (IsDoubleClick(Point.Empty, new Point(200, 200), 10)) throw new Exception("Double click predicate failed.");
+                            Message key = Message.Create(Handle, 0x0312, new IntPtr(DismountId), IntPtr.Zero);
+                            WndProc(ref key);
+                            if (riding || hotkey || (Native.GetWindowLong(Handle, -20) & 0x20) != 0) throw new Exception("Hotkey did not hop off.");
+                            checks.Add("PASS Ctrl+Alt+C message hopped off and released the hotkey");
                             rideItem.PerformClick();
-                            if (riding || hook != IntPtr.Zero || (Native.GetWindowLong(Handle, -20) & 0x20) != 0) throw new Exception("Menu leave did not clean up.");
-                            checks.Add("PASS menu leave unhooked and removed passthrough");
+                            if (!riding || rideItem.Text != "Hop off") throw new Exception("Menu perch failed.");
                             rideItem.PerformClick();
-                            if (!riding) throw new Exception("Menu ride failed.");
+                            if (riding || (Native.GetWindowLong(Handle, -20) & 0x20) != 0) throw new Exception("Hop off menu did not clean up.");
+                            checks.Add("PASS tray Perch on cursor and Hop off");
+                            rideItem.PerformClick();
                             visibilityItem.PerformClick();
-                            if (Visible || !hidden || riding || hook != IntPtr.Zero) throw new Exception("Hide menu did not hide window or clean up ride.");
+                            if (Visible || !hidden || riding || hotkey) throw new Exception("Hide menu did not hide window or clean up perch.");
                             checks.Add(perched == null ? "LIMIT seated artwork unavailable" : "PASS seated artwork loaded");
-                            checks.Add("LIMIT physical Alt+Esc requires a manual check");
                             checks.Add("PASS hide menu");
                             restore.Set();
                         }
@@ -635,12 +632,9 @@ namespace CapriDesktop
         [DllImport("user32.dll")] internal static extern bool SetProcessDPIAware();
         [DllImport("user32.dll")] internal static extern bool SetProcessDpiAwarenessContext(IntPtr context);
         [DllImport("user32.dll")] internal static extern int GetWindowLong(IntPtr window, int index);
-        internal delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll")] internal static extern int SetWindowLong(IntPtr window, int index, int value);
-        [DllImport("user32.dll", SetLastError = true)] internal static extern IntPtr SetWindowsHookEx(int id, HookProc proc, IntPtr module, uint thread);
-        [DllImport("user32.dll", SetLastError = true)] internal static extern bool UnhookWindowsHookEx(IntPtr hook);
-        [DllImport("user32.dll")] internal static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] internal static extern IntPtr GetModuleHandle(string name);
+        [DllImport("user32.dll")] internal static extern bool RegisterHotKey(IntPtr window, int id, int modifiers, int key);
+        [DllImport("user32.dll")] internal static extern bool UnregisterHotKey(IntPtr window, int id);
         [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr window);
         [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr window, IntPtr dc);
         [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr dc);
