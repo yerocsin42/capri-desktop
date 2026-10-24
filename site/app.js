@@ -16,17 +16,22 @@
   const stage = document.querySelector('#demo');
   const capri = document.querySelector('#demo-capri');
   const sprite = capri.querySelector('img');
-  const menu = document.querySelector('#demo-menu');
   const cursor = document.querySelector('#player-cursor');
   const status = document.querySelector('#demo-status');
-  const motionButton = menu.querySelector('[data-action="motion"]');
-  let motion = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const motion = !matchMedia('(prefers-reduced-motion: reduce)').matches;
   let x = 0;
   let y = 0;
   let size = 220;
   let drag = null;
   let initialized = false;
   let reaction;
+  let clickTimer;
+  let riding = false;
+  let dragged = false;
+  const taskbar = document.querySelector('#taskbar');
+  const floor = () => stage.clientHeight - taskbar.offsetHeight;
+  const cancelClick = () => clearTimeout(clickTimer);
+  const setRide = on => { cancelClick(); riding = on; sprite.src = on ? 'assets/perch.png' : 'assets/capri.png'; capri.classList.toggle('riding', on); if (on) stage.focus({ preventScroll: true }); };
   const placeCursor = (left, top) => {
     left = Math.max(0, Math.min(left, stage.clientWidth - 26));
     top = Math.max(0, Math.min(top, stage.clientHeight - 32));
@@ -35,27 +40,25 @@
   const followPointer = (event) => {
     const bounds = stage.getBoundingClientRect();
     placeCursor(event.clientX - bounds.left, event.clientY - bounds.top);
+    if (riding) { const height = size * 1043 / 1508; x = event.clientX - bounds.left - size * 0.34 + 12; y = event.clientY - bounds.top - (size - height) / 2 - height * 0.6 - 12; place(); }
   };
   const place = () => {
     x = Math.max(0, Math.min(x, stage.clientWidth - size));
-    y = Math.max(0, Math.min(y, stage.clientHeight - size));
+    y = Math.max(0, Math.min(y, floor() - size));
     capri.style.left = x + 'px';
     capri.style.top = y + 'px';
     capri.style.width = size + 'px';
     capri.style.height = size + 'px';
   };
-  const closeMenu = () => { menu.hidden = true; };
   const updateMotion = () => {
     capri.classList.toggle('no-motion', !motion);
-    motionButton.setAttribute('aria-checked', String(motion));
-    motionButton.querySelector('span').textContent = motion ? '\u2713' : '';
   };
   const reset = () => {
     size = stage.clientWidth < 550 ? 160 : 220;
     x = stage.clientWidth * (stage.clientWidth < 550 ? 0.46 : 0.62);
-    y = stage.clientHeight * 0.38;
+    y = floor() * 0.3;
+    setRide(false);
     capri.hidden = false;
-    closeMenu();
     place();
     placeCursor(x + size * 0.6, y + size * 0.5);
     status.textContent = 'Capri is back.';
@@ -63,7 +66,7 @@
   const react = () => {
     if (!motion) return;
     if (reaction) reaction.cancel();
-    reaction = sprite.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(-19px) rotate(-2deg)', offset: 0.42 }, { transform: 'translateY(0)' }], { duration: 600, easing: 'cubic-bezier(.2,.65,.35,1)' });
+    reaction = sprite.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(-19px) rotate(-2deg)', offset: 0.38 }, { transform: 'translateY(2px) scaleY(.97) rotate(1deg)', offset: 0.7 }, { transform: 'translateY(0)' }], { duration: 700, easing: 'cubic-bezier(.2,.65,.35,1)' });
   };
   const endDrag = () => { drag = null; capri.classList.remove('dragging'); cursor.classList.remove('pressed'); };
   stage.addEventListener('pointermove', followPointer);
@@ -72,7 +75,6 @@
   stage.addEventListener('pointercancel', endDrag);
   capri.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
-    closeMenu();
     drag = { id: event.pointerId, startX: event.clientX, startY: event.clientY, originX: x, originY: y, moved: false };
     capri.setPointerCapture(event.pointerId);
   });
@@ -80,7 +82,7 @@
     if (!drag || drag.id !== event.pointerId) return;
     const dx = event.clientX - drag.startX;
     const dy = event.clientY - drag.startY;
-    if (dx * dx + dy * dy > 25) drag.moved = true;
+    if (dx * dx + dy * dy > 25) { drag.moved = true; cancelClick(); }
     if (!drag.moved) return;
     capri.classList.add('dragging');
     x = drag.originX + dx;
@@ -92,34 +94,22 @@
     const moved = drag.moved;
     endDrag();
     if (capri.hasPointerCapture(event.pointerId)) capri.releasePointerCapture(event.pointerId);
-    if (!moved) react();
+    dragged = moved;
+    clearTimeout(clickTimer);
+    if (!moved) clickTimer = setTimeout(() => { if (!riding && !drag && !capri.hidden) react(); }, 500);
   });
+  capri.addEventListener('dblclick', event => { cancelClick(); if (dragged || riding) return; setRide(true); followPointer(event); });
   capri.addEventListener('lostpointercapture', endDrag);
-  capri.addEventListener('contextmenu', event => {
-    event.preventDefault();
-    endDrag();
-    menu.hidden = false;
-    const bounds = stage.getBoundingClientRect();
-    menu.style.left = Math.max(8, Math.min(event.clientX - bounds.left, stage.clientWidth - menu.offsetWidth - 8)) + 'px';
-    menu.style.top = Math.max(8, Math.min(event.clientY - bounds.top, stage.clientHeight - menu.offsetHeight - 8)) + 'px';
-    menu.querySelector('button').focus({ preventScroll: true });
-  });
+  stage.addEventListener('pointercancel', cancelClick);
+  stage.addEventListener('pointerdown', event => { if (event.target === stage) stage.focus({ preventScroll: true }); });
   capri.addEventListener('keydown', event => {
     const movement = { ArrowLeft: [-12, 0], ArrowRight: [12, 0], ArrowUp: [0, -12], ArrowDown: [0, 12] }[event.key];
     if (movement) { event.preventDefault(); x += movement[0]; y += movement[1]; place(); placeCursor(x + size * 0.6, y + size * 0.5); }
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); react(); }
   });
-  menu.addEventListener('click', event => {
-    const button = event.target.closest('button[data-action]');
-    if (!button) return;
-    if (button.dataset.action === 'hide') { capri.hidden = true; status.textContent = 'Capri is hidden.'; }
-    if (button.dataset.action === 'size') { size = size >= 220 ? 140 : size + 40; place(); }
-    if (button.dataset.action === 'motion') { motion = !motion; updateMotion(); }
-    closeMenu();
-  });
-  document.addEventListener('pointerdown', event => { if (!menu.hidden && !menu.contains(event.target) && !capri.contains(event.target)) closeMenu(); });
-  document.addEventListener('keydown', event => { if (event.key === 'Escape' && !menu.hidden) { closeMenu(); capri.focus({ preventScroll: true }); } });
+  stage.addEventListener('keydown', event => { if (event.altKey && event.key === 'Escape' && riding) { event.preventDefault(); setRide(false); } });
   document.querySelector('#demo-restore').addEventListener('click', reset);
+  setInterval(() => { if (motion && !riding && !drag && !capri.hidden && !document.hidden) react(); }, 9000);
   new ResizeObserver(() => { if (!initialized) { initialized = true; reset(); } else { place(); placeCursor(x + size * 0.6, y + size * 0.5); } }).observe(stage);
   updateMotion();
 })();

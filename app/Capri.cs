@@ -63,6 +63,7 @@ namespace CapriDesktop
     internal sealed class Companion : Form
     {
         private readonly Bitmap character;
+        private readonly Bitmap perched;
         private readonly NotifyIcon tray;
         private readonly ContextMenuStrip menu;
         private readonly ToolStripMenuItem visibilityItem;
@@ -84,6 +85,16 @@ namespace CapriDesktop
         private bool hidden;
         private double reactionStart = -10;
         private int clicks;
+        private bool riding;
+        private bool pendingClick;
+        private Point pendingPoint;
+        private long pendingTime;
+        private bool dismountQueued;
+        private double leanAngle;
+        private IntPtr hook;
+        private Native.HookProc hookProc;
+        private readonly System.Windows.Forms.Timer clickDelay;
+        private readonly ToolStripMenuItem rideItem;
         private const int PaddingSize = 36;
         internal bool TestFailed;
 
@@ -97,6 +108,10 @@ namespace CapriDesktop
             {
                 if (image == null) throw new FileNotFoundException("The original Capri artwork is missing. Rebuild with assets/capri.png.");
                 using (Bitmap original = new Bitmap(image)) character = new Bitmap(original);
+            }
+            using (Stream image = Assembly.GetExecutingAssembly().GetManifestResourceStream("Capri.Perch.png"))
+            {
+                if (image != null) using (Bitmap original = new Bitmap(image)) perched = new Bitmap(original);
             }
             Text = "Capri";
             AccessibleName = "Capri desktop companion";
@@ -128,6 +143,11 @@ namespace CapriDesktop
             topItem = new ToolStripMenuItem("Always on top", null, delegate { preferences.OnTop = !preferences.OnTop; TopMost = preferences.OnTop; topItem.Checked = preferences.OnTop; SavePreferences(); });
             topItem.Checked = preferences.OnTop;
             menu.Items.Add(topItem);
+            rideItem = new ToolStripMenuItem("Ride cursor", null, delegate { if (riding) StopRide(); else StartRide(); });
+            menu.Items.Add(rideItem);
+            clickDelay = new System.Windows.Forms.Timer();
+            clickDelay.Interval = Math.Max(100, SystemInformation.DoubleClickTime);
+            clickDelay.Tick += delegate { OnClickDelay(); };
             menu.Items.Add(new ToolStripMenuItem("Bring to this screen", null, delegate { RestoreAtCursor(); }));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("Quit Capri", null, delegate { Close(); }));
@@ -142,7 +162,7 @@ namespace CapriDesktop
             tray.Visible = !testing;
             frames = new System.Windows.Forms.Timer();
             frames.Interval = 33;
-            frames.Tick += delegate { RenderFrame(); if (!preferences.Motion && clock.Elapsed.TotalSeconds - reactionStart > 0.7) frames.Stop(); };
+            frames.Tick += delegate { if (riding) FollowCursor(); RenderFrame(); if (!riding && !preferences.Motion && clock.Elapsed.TotalSeconds - reactionStart > 0.7) frames.Stop(); };
             signals = new System.Windows.Forms.Timer();
             signals.Interval = 250;
             signals.Tick += delegate { if (restore.WaitOne(0)) RestoreAtCursor(); };
@@ -231,6 +251,8 @@ namespace CapriDesktop
             int dy = position.Y - pointerStart.Y;
             if (!dragging && dx * dx + dy * dy < 25) return;
             dragging = true;
+            pendingClick = false;
+            clickDelay.Stop();
             anchor = KeepOnScreen(new Point(anchorStart.X + dx, anchorStart.Y + dy));
             Location = anchor;
         }
@@ -244,7 +266,9 @@ namespace CapriDesktop
             if (e.Button != MouseButtons.Left || !pressed) return;
             pressed = false;
             Capture = false;
-            if (!dragging) React(); else SavePreferences();
+            if (dragging) { pendingClick = false; clickDelay.Stop(); SavePreferences(); }
+            else if (pendingClick && IsDoubleClick(pendingPoint, Cursor.Position, clock.ElapsedMilliseconds - pendingTime)) { pendingClick = false; clickDelay.Stop(); StartRide(); }
+            else { pendingClick = true; pendingPoint = Cursor.Position; pendingTime = clock.ElapsedMilliseconds; clickDelay.Stop(); clickDelay.Start(); }
             dragging = false;
         }
 
@@ -266,6 +290,85 @@ namespace CapriDesktop
             base.WndProc(ref message);
         }
 
+        private void OnClickDelay()
+        {
+            clickDelay.Stop();
+            if (!pendingClick) return;
+            pendingClick = false;
+            if (hidden || riding || dragging || pressed) return;
+            React();
+        }
+
+        internal static bool IsDoubleClick(Point a, Point b, long elapsed)
+        {
+            Size box = SystemInformation.DoubleClickSize;
+            return elapsed >= 0 && elapsed <= SystemInformation.DoubleClickTime && Math.Abs(a.X - b.X) <= box.Width / 2 && Math.Abs(a.Y - b.Y) <= box.Height / 2;
+        }
+
+        internal static bool IsDismountKey(int message, int key, int flags)
+        {
+            return message == 0x0104 && key == 0x1B && (flags & 0x20) != 0;
+        }
+
+        private IntPtr KeyHook(int code, IntPtr wParam, IntPtr lParam)
+        {
+            if (code >= 0 && riding && IsDismountKey(wParam.ToInt32(), Marshal.ReadInt32(lParam), Marshal.ReadInt32(lParam, 8)))
+            {
+                if (!dismountQueued) { dismountQueued = true; BeginInvoke((Action)delegate { dismountQueued = false; StopRide(); }); }
+                return new IntPtr(1);
+            }
+            return Native.CallNextHookEx(hook, code, wParam, lParam);
+        }
+
+        private void StartRide()
+        {
+            if (riding || hidden || !IsHandleCreated) return;
+            pendingClick = false;
+            clickDelay.Stop();
+            pressed = false;
+            dragging = false;
+            Capture = false;
+            if (hookProc == null) hookProc = KeyHook;
+            if (hook == IntPtr.Zero) hook = Native.SetWindowsHookEx(13, hookProc, Native.GetModuleHandle(null), 0);
+            if (hook == IntPtr.Zero)
+            {
+                int error = Marshal.GetLastWin32Error();
+                if (!testing) MessageBox.Show("Capri could not watch for Alt+Esc, so riding stays off. (error " + error + ")", "Capri", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            riding = true;
+            Native.SetWindowLong(Handle, -20, Native.GetWindowLong(Handle, -20) | 0x20);
+            rideItem.Text = "Leave cursor";
+            frames.Start();
+        }
+
+        private void StopRide()
+        {
+            if (hook != IntPtr.Zero) { Native.UnhookWindowsHookEx(hook); hook = IntPtr.Zero; }
+            if (!riding) return;
+            riding = false;
+            leanAngle = 0;
+            if (IsHandleCreated) Native.SetWindowLong(Handle, -20, Native.GetWindowLong(Handle, -20) & ~0x20);
+            if (rideItem != null) rideItem.Text = "Ride cursor";
+            if (!IsDisposed) { Location = anchor; UpdateAnimation(); SavePreferences(); }
+        }
+
+        private void FollowCursor()
+        {
+            Point cursor = Cursor.Position;
+            Rectangle area = Screen.FromPoint(cursor).WorkingArea;
+            float seatedHeight = perched == null ? preferences.Size : preferences.Size * perched.Height / (float)perched.Width;
+            int seatX = perched == null ? Width / 2 - 24 : PaddingSize + (int)(preferences.Size * 0.34f) - 12;
+            int seatY = perched == null ? Height - PaddingSize : PaddingSize + (int)((preferences.Size - seatedHeight) / 2 + seatedHeight * 0.6f) + 12;
+            int tx = Math.Max(area.Left, Math.Min(cursor.X - seatX, area.Right - Width));
+            int ty = Math.Max(area.Top, Math.Min(cursor.Y - seatY, area.Bottom - Height));
+            int nx = anchor.X + (int)Math.Round((tx - anchor.X) * 0.25);
+            int ny = anchor.Y + (int)Math.Round((ty - anchor.Y) * 0.25);
+            double velocity = Math.Max(-8, Math.Min(8, (nx - anchor.X) * 0.4));
+            leanAngle = leanAngle * 0.8 + velocity * 0.2;
+            anchor = new Point(Math.Max(area.Left, Math.Min(nx, area.Right - Width)), Math.Max(area.Top, Math.Min(ny, area.Bottom - Height)));
+        }
+
         private void React()
         {
             clicks++;
@@ -278,19 +381,20 @@ namespace CapriDesktop
         {
             hidden = value;
             visibilityItem.Text = value ? "Show Capri" : "Hide Capri";
-            if (value) { frames.Stop(); Hide(); }
+            if (value) { StopRide(); pendingClick = false; clickDelay.Stop(); frames.Stop(); Hide(); }
             else { anchor = KeepOnScreen(anchor); Location = anchor; Show(); RenderFrame(); UpdateAnimation(); }
         }
 
         private void RestoreAtCursor()
         {
+            StopRide();
             Rectangle area = Screen.FromPoint(Cursor.Position).WorkingArea;
             anchor = new Point(area.Right - Width - 28, area.Bottom - Height - 12);
             SetHidden(false);
             SavePreferences();
         }
 
-        private void UpdateAnimation() { if (preferences.Motion && !hidden) frames.Start(); else frames.Stop(); RenderFrame(); }
+        private void UpdateAnimation() { if ((preferences.Motion || riding) && !hidden) frames.Start(); else frames.Stop(); RenderFrame(); }
 
         private void RenderFrame()
         {
@@ -309,8 +413,10 @@ namespace CapriDesktop
                 float breathe = preferences.Motion && !dragging ? (float)Math.Sin(now * 1.75) * 2.2f : 0;
                 float tilt = preferences.Motion && !dragging ? (float)Math.Sin(now * 0.95) * 0.65f : 0;
                 graphics.TranslateTransform(Width / 2f, Height / 2f - bounce + breathe);
-                graphics.RotateTransform(tilt);
-                graphics.DrawImage(character, new RectangleF(-preferences.Size / 2f, -preferences.Size / 2f, preferences.Size, preferences.Size));
+                graphics.RotateTransform(tilt + (float)leanAngle);
+                Bitmap artwork = riding && perched != null ? perched : character;
+                float height = preferences.Size * artwork.Height / (float)artwork.Width;
+                graphics.DrawImage(artwork, new RectangleF(-preferences.Size / 2f, -height / 2f, preferences.Size, height));
             }
             Native.DrawLayered(Handle, next, anchor);
             Bitmap old = frame;
@@ -351,6 +457,8 @@ namespace CapriDesktop
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= DisplaysChanged;
+            StopRide();
+            clickDelay.Stop();
             frames.Stop();
             signals.Stop();
             tray.Visible = false;
@@ -360,13 +468,16 @@ namespace CapriDesktop
 
         protected override void Dispose(bool disposing)
         {
+            if (hook != IntPtr.Zero) { Native.UnhookWindowsHookEx(hook); hook = IntPtr.Zero; }
             if (disposing)
             {
+                clickDelay.Dispose();
                 frames.Dispose();
                 signals.Dispose();
                 tray.Dispose();
                 menu.Dispose();
                 character.Dispose();
+                if (perched != null) perched.Dispose();
                 if (frame != null) frame.Dispose();
             }
             base.Dispose(disposing);
@@ -398,15 +509,32 @@ namespace CapriDesktop
                             Point moved = new Point(pointerStart.X - 80, pointerStart.Y - 35);
                             MovePointer(moved);
                             OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
-                            if (anchor == before) throw new Exception("Drag did not change position.");
+                            if (anchor == before || pendingClick || riding) throw new Exception("Drag did not change position or did not cancel click.");
                             checks.Add("PASS drag handler changed position");
                             int previous = clicks;
                             OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
                             OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
+                            if (!pendingClick || clicks != previous) throw new Exception("Single click was not delayed.");
+                            OnClickDelay();
                             if (clicks != previous + 1 || !frames.Enabled) throw new Exception("Click reaction did not start.");
-                            checks.Add("PASS click handler started reaction");
+                            checks.Add("PASS delayed single click started reaction");
+                            OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
+                            OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
+                            OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
+                            OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
+                            if (!riding || hook == IntPtr.Zero || (Native.GetWindowLong(Handle, -20) & 0x20) == 0) throw new Exception("Double click did not mount with passthrough and hook.");
+                            checks.Add("PASS double click mounted with passthrough style and scoped hook");
+                            if (!IsDismountKey(0x0104, 0x1B, 0x20) || IsDismountKey(0x0104, 0x1B, 0) || IsDismountKey(0x0104, 0x09, 0x20) || IsDismountKey(0x0105, 0x1B, 0x20) || IsDoubleClick(Point.Empty, new Point(200, 200), 10)) throw new Exception("Shortcut predicate failed.");
+                            checks.Add("PASS Alt+Esc predicate only");
+                            rideItem.PerformClick();
+                            if (riding || hook != IntPtr.Zero || (Native.GetWindowLong(Handle, -20) & 0x20) != 0) throw new Exception("Menu leave did not clean up.");
+                            checks.Add("PASS menu leave unhooked and removed passthrough");
+                            rideItem.PerformClick();
+                            if (!riding) throw new Exception("Menu ride failed.");
                             visibilityItem.PerformClick();
-                            if (Visible || !hidden) throw new Exception("Hide menu did not hide window.");
+                            if (Visible || !hidden || riding || hook != IntPtr.Zero) throw new Exception("Hide menu did not hide window or clean up ride.");
+                            checks.Add(perched == null ? "LIMIT seated artwork unavailable" : "PASS seated artwork loaded");
+                            checks.Add("LIMIT physical Alt+Esc requires a manual check");
                             checks.Add("PASS hide menu");
                             restore.Set();
                         }
@@ -507,6 +635,12 @@ namespace CapriDesktop
         [DllImport("user32.dll")] internal static extern bool SetProcessDPIAware();
         [DllImport("user32.dll")] internal static extern bool SetProcessDpiAwarenessContext(IntPtr context);
         [DllImport("user32.dll")] internal static extern int GetWindowLong(IntPtr window, int index);
+        internal delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll")] internal static extern int SetWindowLong(IntPtr window, int index, int value);
+        [DllImport("user32.dll", SetLastError = true)] internal static extern IntPtr SetWindowsHookEx(int id, HookProc proc, IntPtr module, uint thread);
+        [DllImport("user32.dll", SetLastError = true)] internal static extern bool UnhookWindowsHookEx(IntPtr hook);
+        [DllImport("user32.dll")] internal static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] internal static extern IntPtr GetModuleHandle(string name);
         [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr window);
         [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr window, IntPtr dc);
         [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr dc);

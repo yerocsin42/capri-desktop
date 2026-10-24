@@ -21,18 +21,14 @@
     </header>
     <main>
       <h1>Bring Capri <em>back</em> to life on your desktop! :)</h1>
-      <div id="demo" class="demo" role="region" aria-label="Interactive browser demonstration of Capri">
+      <div id="demo" class="demo" tabindex="-1" role="region" aria-label="Interactive browser demonstration of Capri">
         <button id="demo-capri" class="demo-capri" aria-label="Capri. Drag to move, click to react, or use arrow keys and Enter."><img src="assets/capri.png" alt="" width="220" height="220" draggable="false"></button>
-        <div id="demo-menu" class="demo-menu" role="menu" aria-label="Capri controls" hidden>
-          <button type="button" role="menuitem" data-action="hide">Hide Capri</button>
-          <button type="button" role="menuitem" data-action="size">Size</button>
-          <button type="button" role="menuitemcheckbox" aria-checked="true" data-action="motion">Motion <span aria-hidden="true">&#10003;</span></button>
-        </div>
-        <button id="demo-restore" class="restore" type="button" aria-label="Bring Capri back" title="Bring Capri back"><img src="assets/chip.png" alt="" width="36" height="25"></button>
+        <div id="taskbar" class="taskbar"><span class="xp-start" aria-hidden="true"></span><button id="demo-restore" class="xp-app" type="button" aria-label="Bring Capri back"><img src="assets/chip.png" alt="" width="16" height="11">Capri</button></div>
         <div id="player-cursor" class="player-cursor" aria-hidden="true"><svg viewBox="0 0 28 34"><path d="M3 2v24l6-6 5 11 5-2-5-10h10L3 2Z"/></svg></div>
         <span id="demo-status" class="sr-only" role="status"></span>
       </div>
     </main>
+    <aside class="kyoko"><p class="bubble">give me my ai back!</p><img src="assets/kyoko.png" alt="Kyoko shouting" width="479" height="640"></aside>
   </div>
 </body>
 </html>
