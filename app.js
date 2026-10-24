@@ -112,4 +112,32 @@
   setInterval(() => { if (motion && !riding && !drag && !capri.hidden && !document.hidden) react(); }, 9000);
   new ResizeObserver(() => { if (!initialized) { initialized = true; reset(); } else { place(); placeCursor(x + size * 0.6, y + size * 0.5); } }).observe(stage);
   updateMotion();
+
+  const star = document.querySelector('#star');
+  const starCount = star.querySelector('span');
+  const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
+  let stars = null;
+  let starred = false;
+  try { starred = localStorage.getItem('capri-star') === '1'; } catch {}
+  const showStar = () => {
+    starCount.textContent = stars === null ? '' : compact.format(stars);
+    star.setAttribute('aria-pressed', starred);
+  };
+  const readStars = async (options) => {
+    const response = await fetch(star.dataset.api, { ...options, signal: AbortSignal.timeout(6000) });
+    if (!response.ok) throw new Error('Stars unavailable');
+    stars = Math.max((await response.json()).count, stars || 0);
+    showStar();
+  };
+  showStar();
+  readStars().catch(() => {});
+  star.addEventListener('click', () => {
+    if (starred) return;
+    starred = true;
+    try { localStorage.setItem('capri-star', '1'); } catch {}
+    if (stars !== null) stars += 1;
+    showStar();
+    if (motion) star.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.18)', offset: 0.35 }, { transform: 'scale(1)' }], { duration: 320, easing: 'cubic-bezier(.2,.65,.35,1)' });
+    readStars({ method: 'POST' }).catch(() => {});
+  });
 })();
