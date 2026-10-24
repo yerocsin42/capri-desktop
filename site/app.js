@@ -137,7 +137,14 @@
     try { localStorage.setItem('capri-star', '1'); } catch {}
     if (stars !== null) stars += 1;
     showStar();
-    if (motion) star.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.18)', offset: 0.35 }, { transform: 'scale(1)' }], { duration: 320, easing: 'cubic-bezier(.2,.65,.35,1)' });
+    if (motion) {
+      const plus = document.createElement('span');
+      plus.className = 'star-plus';
+      plus.textContent = '+1';
+      plus.setAttribute('aria-hidden', 'true');
+      star.append(plus);
+      plus.animate([{ transform: 'translateY(0)', opacity: 1 }, { transform: 'translateY(-10px)', opacity: 1, offset: 0.5 }, { transform: 'translateY(-18px)', opacity: 0 }], { duration: 900, easing: 'ease-out' }).finished.then(() => plus.remove());
+    }
     readStars({ method: 'POST' }).catch(() => {});
   });
 })();
