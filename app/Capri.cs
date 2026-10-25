@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Net;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
@@ -58,6 +59,16 @@ namespace CapriDesktop
         [DataMember] public int Size = 240;
         [DataMember] public bool Motion = true;
         [DataMember] public bool OnTop = true;
+        [DataMember] public long UpdateCheckedAt;
+    }
+
+    [DataContract]
+    internal sealed class Release
+    {
+        [DataMember(Name = "tag_name")] public string Tag;
+        [DataMember(Name = "html_url")] public string Page;
+        [DataMember(Name = "draft")] public bool Draft;
+        [DataMember(Name = "prerelease")] public bool Prerelease;
     }
 
     internal sealed class Clip
@@ -127,6 +138,11 @@ namespace CapriDesktop
         private double leanAngle;
         private readonly System.Windows.Forms.Timer clickDelay;
         private readonly ToolStripMenuItem rideItem;
+        private readonly ToolStripMenuItem updateItem;
+        private bool updating;
+        private string updatePage;
+        private string balloonPage;
+        private const string ReleasesPage = "https://github.com/yerocsin42/capri-desktop/releases/";
         private const int PaddingSize = 36;
         private const int DismountId = 0x4361;
         private const int BlinkFrom = 9;
@@ -176,6 +192,8 @@ namespace CapriDesktop
             clickDelay.Interval = Math.Max(100, SystemInformation.DoubleClickTime);
             clickDelay.Tick += delegate { OnClickDelay(); };
             menu.Items.Add(new ToolStripMenuItem("Bring to this screen", null, delegate { RestoreAtCursor(); }));
+            updateItem = new ToolStripMenuItem("Check for updates", null, delegate { if (updatePage != null) OpenPage(updatePage); else CheckForUpdates(true); });
+            menu.Items.Add(updateItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("Quit Capri", null, delegate { Close(); }));
             tray = new NotifyIcon();
@@ -186,13 +204,20 @@ namespace CapriDesktop
             tray.Text = "Capri · Double-click to restore";
             tray.ContextMenuStrip = menu;
             tray.DoubleClick += delegate { RestoreAtCursor(); };
+            tray.BalloonTipClicked += delegate { if (balloonPage != null) OpenPage(balloonPage); };
             tray.Visible = !testing;
             frames = new System.Windows.Forms.Timer();
             frames.Interval = 33;
             frames.Tick += delegate { if (riding) FollowCursor(); RenderFrame(); if (!riding && !dragging && !preferences.Motion && clip == idle) frames.Stop(); };
             signals = new System.Windows.Forms.Timer();
             signals.Interval = 250;
-            signals.Tick += delegate { if (restore.WaitOne(0)) RestoreAtCursor(); if (!testing) CheckIdle(Native.IdleMilliseconds()); StayOnTop(); };
+            signals.Tick += delegate
+            {
+                if (restore.WaitOne(0)) RestoreAtCursor();
+                if (!testing) CheckIdle(Native.IdleMilliseconds());
+                StayOnTop();
+                if (!testing && clock.Elapsed.TotalSeconds > 20 && UpdateDue(preferences.UpdateCheckedAt, DateTime.UtcNow.Ticks)) CheckForUpdates(false);
+            };
             signals.Start();
             Size = CanvasSize(preferences.Size);
             Rectangle work = Screen.PrimaryScreen.WorkingArea;
@@ -277,6 +302,71 @@ namespace CapriDesktop
             lastForeground = foreground;
             topTicks = 0;
             Native.SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+        }
+
+        internal static bool UpdateDue(long checkedAt, long now) { return now - checkedAt >= TimeSpan.TicksPerDay || now < checkedAt; }
+
+        private void CheckForUpdates(bool asked)
+        {
+            if (updating) return;
+            updating = true;
+            preferences.UpdateCheckedAt = DateTime.UtcNow.Ticks;
+            SavePreferences();
+            if (asked) updateItem.Text = "Checking for updates...";
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                Release found = null;
+                try { found = FetchLatestRelease(); } catch { }
+                try { if (!IsDisposed) BeginInvoke((Action)delegate { ShowUpdate(found, asked); }); } catch (InvalidOperationException) { }
+            });
+        }
+
+        internal static Release FetchLatestRelease()
+        {
+            ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create("https://api.github.com/repos/yerocsin42/capri-desktop/releases/latest");
+            request.UserAgent = "Capri-Desktop";
+            request.Accept = "application/vnd.github+json";
+            request.Timeout = 10000;
+            request.ReadWriteTimeout = 10000;
+            using (WebResponse response = request.GetResponse())
+            using (Stream body = response.GetResponseStream()) return ParseRelease(body);
+        }
+
+        internal static Release ParseRelease(Stream body) { return (Release)new DataContractJsonSerializer(typeof(Release)).ReadObject(body); }
+
+        internal static bool IsNewer(string tag, Version current)
+        {
+            Version found;
+            if (tag == null || !Version.TryParse(tag.TrimStart('v', 'V'), out found)) return false;
+            return new Version(found.Major, found.Minor, Math.Max(0, found.Build)) > new Version(current.Major, current.Minor, Math.Max(0, current.Build));
+        }
+
+        private void ShowUpdate(Release found, bool asked)
+        {
+            updating = false;
+            Version current = Assembly.GetExecutingAssembly().GetName().Version;
+            bool usable = found != null && !found.Draft && !found.Prerelease && found.Page != null && found.Page.StartsWith(ReleasesPage, StringComparison.Ordinal);
+            if (usable && IsNewer(found.Tag, current))
+            {
+                string version = found.Tag.TrimStart('v', 'V');
+                updatePage = found.Page;
+                updateItem.Text = "Download Capri " + version;
+                balloonPage = found.Page;
+                tray.ShowBalloonTip(8000, "Capri " + version + " is out", "Click here to download the update.", ToolTipIcon.Info);
+                return;
+            }
+            updateItem.Text = "Check for updates";
+            if (!usable) { preferences.UpdateCheckedAt = DateTime.UtcNow.Ticks - TimeSpan.TicksPerDay + TimeSpan.TicksPerHour; SavePreferences(); }
+            if (!asked) return;
+            balloonPage = null;
+            tray.ShowBalloonTip(4000, "Capri", usable ? "You're on the latest version (" + current.ToString(3) + ")." : "Couldn't check for updates right now. Try again later.", ToolTipIcon.Info);
+        }
+
+        private static void OpenPage(string page)
+        {
+            if (!page.StartsWith(ReleasesPage, StringComparison.Ordinal)) return;
+            try { Process.Start(page); } catch (System.ComponentModel.Win32Exception) { }
         }
 
         private void CheckIdle(long quiet)
@@ -423,7 +513,7 @@ namespace CapriDesktop
             Native.SetWindowLong(Handle, -20, Native.GetWindowLong(Handle, -20) | 0x20);
             rideItem.Text = "Hop off";
             tray.Text = hotkey ? "Capri · Ctrl + Alt + C to hop off" : "Capri · Hop off from this menu";
-            if (!hotkey && !testing) tray.ShowBalloonTip(5000, "Capri", "Ctrl + Alt + C is taken by another app. Right-click Capri's tray icon and choose Hop off.", ToolTipIcon.Info);
+            if (!hotkey && !testing) { balloonPage = null; tray.ShowBalloonTip(5000, "Capri", "Ctrl + Alt + C is taken by another app. Right-click Capri's tray icon and choose Hop off.", ToolTipIcon.Info); }
             Play(perchGlitch);
             frames.Start();
         }
@@ -665,6 +755,17 @@ namespace CapriDesktop
                             if (clip != idle) throw new Exception("Boot glitch did not settle into idle.");
                             Play(idle);
                             checks.Add("PASS sleeps after two quiet minutes, boots awake and settles into idle");
+                            Version mine = Assembly.GetExecutingAssembly().GetName().Version;
+                            if (!IsNewer("v9.0.0", mine) || IsNewer("v" + mine.ToString(3), mine) || IsNewer("v0.0.1", mine) || IsNewer("nonsense", mine) || IsNewer(null, mine)) throw new Exception("Update version compare failed.");
+                            long now = DateTime.UtcNow.Ticks;
+                            if (!UpdateDue(0, now) || UpdateDue(now - TimeSpan.TicksPerHour, now) || !UpdateDue(now - TimeSpan.TicksPerDay - 1, now)) throw new Exception("Daily update timing failed.");
+                            using (MemoryStream sample = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("{\"tag_name\":\"v9.0.0\",\"html_url\":\"" + ReleasesPage + "tag/v9.0.0\",\"draft\":false,\"prerelease\":false,\"assets\":[{\"name\":\"Capri-Setup.exe\"}],\"author\":{\"login\":\"capri\"}}")))
+                                ShowUpdate(ParseRelease(sample), false);
+                            if (!menu.Items.Contains(updateItem) || updatePage != ReleasesPage + "tag/v9.0.0" || updateItem.Text != "Download Capri 9.0.0") throw new Exception("A newer release was not offered.");
+                            updatePage = null;
+                            balloonPage = null;
+                            updateItem.Text = "Check for updates";
+                            checks.Add("PASS update check: version compare, daily timing, GitHub release parsing and download offer");
                             Point bounded = KeepOnScreen(new Point(int.MaxValue / 4, int.MaxValue / 4));
                             if (!Screen.FromPoint(new Point(bounded.X + Width / 2, bounded.Y + Height / 2)).WorkingArea.Contains(new Rectangle(bounded, Size))) throw new Exception("Screen bounds failed.");
                             checks.Add("PASS screen bounds");
