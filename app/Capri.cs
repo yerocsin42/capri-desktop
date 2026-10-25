@@ -238,7 +238,7 @@ namespace CapriDesktop
             menu.ForeColor = Color.FromArgb(238, 239, 241);
             menu.BackColor = Color.FromArgb(26, 27, 31);
             menu.ShowImageMargin = false;
-            ToolStripMenuItem title = new ToolStripMenuItem("CAPRI  /  0.3.1");
+            ToolStripMenuItem title = new ToolStripMenuItem("CAPRI  /  0.4.0");
             title.Enabled = false;
             menu.Items.Add(title);
             menu.Items.Add(new ToolStripSeparator());
