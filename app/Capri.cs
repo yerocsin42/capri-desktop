@@ -97,7 +97,7 @@ namespace CapriDesktop
         private readonly Clip blinkGlitch = new Clip("blink_glitch", 4, 8, 1.11f);
         private readonly Clip grin = new Clip("grin", 16, 8, 1.11f);
         private readonly Clip glitch = new Clip("glitch", 10, 15, 1.11f);
-        private readonly Clip dangle = new Clip("dangle", 12, 12, 1.11f);
+        private readonly Clip dangle = new Clip("dangle", 24, 10, 1.11f);
         private readonly Clip sleep = new Clip("sleep", 16, 6, 1.11f);
         private readonly Clip wake = new Clip("wake", 13, 15, 1.11f);
         private readonly Clip perch = new Clip("perch", 16, 8, 1);

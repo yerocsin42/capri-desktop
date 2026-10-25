@@ -22,7 +22,7 @@
   const cursor = document.querySelector('#player-cursor');
   const status = document.querySelector('#demo-status');
   const motion = !matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const clips = { idle: [16, 8], blink: [4, 8], blink_glitch: [4, 8], grin: [16, 8], glitch: [10, 15], dangle: [12, 12], sleep: [16, 6], wake: [13, 15], perch: [16, 8], perch_blink: [4, 8], perch_blink_glitch: [4, 8], perch_glitch: [10, 15], mouth: [5, 12] };
+  const clips = { idle: [16, 8], blink: [4, 8], blink_glitch: [4, 8], grin: [16, 8], glitch: [10, 15], dangle: [24, 10], sleep: [16, 6], wake: [13, 15], perch: [16, 8], perch_blink: [4, 8], perch_blink_glitch: [4, 8], perch_glitch: [10, 15], mouth: [5, 12] };
   const loaded = new Set(['idle']);
   let clip = 'idle';
   let clipStart = performance.now();
@@ -55,7 +55,7 @@
     const seated = clip.startsWith('perch');
     if (riding && !seated && loaded.has('perch')) play('perch');
     if ((!riding && seated) || (clip === 'dangle' && !(drag && drag.moved))) play('idle');
-    let index = Math.floor((now - clipStart) / 1000 * clips[clip][1]);
+    let index = Math.max(0, Math.floor((now - clipStart) / 1000 * clips[clip][1]));
     if ((clip === 'glitch' && index >= clips.glitch[0]) || (clip === 'wake' && index >= clips.wake[0]) || (clip === 'grin' && index >= clips.grin[0] * 2)) { play('idle'); index = 0; }
     if (clip === 'perch_glitch' && index >= clips.perch_glitch[0]) { play('perch'); index = 0; }
     if ((clip === 'idle' || clip === 'perch') && motion) {
