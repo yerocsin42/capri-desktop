@@ -84,14 +84,14 @@ namespace CapriSetup
             Directory.CreateDirectory(destination);
             File.WriteAllBytes(Path.Combine(destination, "Capri.exe"), Payload());
             File.Copy(Application.ExecutablePath, Path.Combine(destination, "Uninstall.exe"), true);
-            File.WriteAllText(marker, "Capri desktop companion 0.2.0");
+            File.WriteAllText(marker, "Capri desktop companion 0.3.0");
             string menu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Capri.lnk");
             Shortcut(menu, Path.Combine(destination, "Capri.exe"));
             if (desktop) Shortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Capri.lnk"), Path.Combine(destination, "Capri.exe"));
             using (RegistryKey key = Registry.CurrentUser.CreateSubKey(RegistryPath))
             {
                 key.SetValue("DisplayName", "Capri");
-                key.SetValue("DisplayVersion", "0.2.0");
+                key.SetValue("DisplayVersion", "0.3.0");
                 key.SetValue("Publisher", "Capri fan project");
                 key.SetValue("InstallLocation", destination);
                 key.SetValue("DisplayIcon", Path.Combine(destination, "Capri.exe"));
