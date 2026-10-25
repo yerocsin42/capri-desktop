@@ -14,8 +14,10 @@ button:focus-visible, a:focus-visible { outline: 2px solid #8ac74b; outline-offs
 .download svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .download-count { margin-left: -3px; color: #a3a7ab; font-variant-numeric: tabular-nums; }
 .download-count:empty { display: none; }
-.github { display: flex; align-items: center; justify-content: center; width: 32px; height: 40px; }
-.github svg { width: 23px; height: 23px; fill: currentColor; }
+.github, .discord { display: flex; align-items: center; justify-content: center; width: 32px; height: 40px; }
+.github svg, .discord svg { width: 23px; height: 23px; fill: currentColor; }
+.discord svg { width: 25px; height: 25px; }
+.github:hover, .discord:hover { color: #5c6066; }
 .heads-up { width: min(380px, calc(100% - 32px)); margin: auto; padding: 0; border: 2px solid #202225; border-radius: 14px; background: #fff; color: #202225; }
 .heads-up::backdrop { background: transparent; }
 .heads-up > div { padding: 20px 22px 18px; }
@@ -103,5 +105,54 @@ h1 em { font-weight: 600; }
   .player-cursor { width: 23px; height: 28px; }
   .kyoko img { width: 90px; height: 90px; }
   .bubble { font-size: 13px; }
+}
+.guide-link { font-size: 13px; color: #202225; }
+.guide-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.guide-short { display: none; }
+.discord-join { display: inline-flex; align-items: center; gap: 10px; margin-top: 20px; padding: 12px 20px; border-radius: 6px; background: #202225; color: #fff; font-size: 13px; }
+.discord-join:hover { background: #393d37; }
+.discord-join svg { width: 19px; height: 19px; fill: currentColor; }
+.guide { max-width: 680px; margin: 0 auto; }
+.guide h1 { margin-bottom: 20px; }
+.guide-jump { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px; margin-bottom: 34px; font: 13px "Share Tech Mono", Consolas, monospace; color: #6b6f74; }
+.guide-jump a:hover { color: #202225; }
+.step { padding: 26px 0 30px; border-top: 1px solid #e7e8e5; scroll-margin-top: 16px; }
+.step h2 { display: flex; align-items: baseline; gap: 12px; margin: 0 0 16px; font-size: 21px; font-weight: 600; letter-spacing: -.4px; }
+.step h2 small, .step h3 small { font-size: 13px; font-weight: 400; letter-spacing: 0; color: #8a8e93; }
+.step h3 { margin: 24px 0 10px; font-size: 15px; font-weight: 600; }
+.step-number { display: inline-grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: 50%; background: #202225; color: #fff; font: 14px "Share Tech Mono", Consolas, monospace; transform: translateY(-2px); }
+.moves { margin: 0; padding: 0 0 0 22px; font-size: 15px; line-height: 1.5; }
+.moves li { padding: 4px 0 4px 4px; }
+.moves li::marker { color: #8a8e93; font: 13px "Share Tech Mono", Consolas, monospace; }
+.moves .download.inline { margin: 2px 0; }
+.step b { font-weight: 600; }
+.step a:not(.download) { text-decoration: underline; text-underline-offset: 2px; }
+.step code { padding: 1px 5px; border-radius: 4px; background: #f1f2f0; font: 13px "Share Tech Mono", Consolas, monospace; }
+.note { margin: 12px 0 0; font-size: 14px; line-height: 1.5; color: #6b6f74; }
+.shot { display: block; width: min(380px, 100%); height: auto; margin-top: 18px; border-radius: 10px; }
+.prompt { position: relative; margin: 10px 0 6px; padding: 14px 16px 44px; border: 1px solid #e7e8e5; border-radius: 8px; background: #fafaf9; }
+.prompt p { margin: 0; font: 13px/1.55 "Share Tech Mono", Consolas, monospace; color: #3a3d41; }
+.copy { position: absolute; right: 10px; bottom: 10px; padding: 6px 14px; border: 1.5px solid #202225; border-radius: 6px; background: #fff; color: #202225; font-size: 12px; cursor: pointer; }
+.copy:hover { background: #f1f2f0; }
+.perms, .keys, .stuck { display: grid; grid-template-columns: max-content 1fr; gap: 8px 18px; margin: 10px 0 4px; font-size: 14px; }
+.perms dt, .keys dt { font: 13px "Share Tech Mono", Consolas, monospace; color: #202225; }
+.perms dd, .keys dd, .stuck dd { margin: 0; color: #6b6f74; }
+.perms dd { color: #202225; font-weight: 600; }
+.stuck { grid-template-columns: minmax(0, 15em) 1fr; gap: 14px 22px; line-height: 1.45; }
+.stuck dt { font-weight: 600; }
+.credit { margin: 8px 0 0; padding-top: 22px; border-top: 1px solid #e7e8e5; font-size: 13px; color: #8a8e93; text-align: center; }
+@media (max-width: 600px) {
+  .links { gap: 12px; }
+  .guide-long { display: none; }
+  .guide-short { display: inline; }
+  .github, .discord { width: 26px; }
+  .step h2 { font-size: 19px; flex-wrap: wrap; row-gap: 2px; }
+  .stuck { grid-template-columns: 1fr; gap: 2px; }
+  .stuck dd { margin-bottom: 12px; }
+}
+@media (max-width: 360px) {
+  .links { gap: 10px; }
+  .download { padding: 12px; }
+  .download-count { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
