@@ -48,6 +48,33 @@ h1 em { font-weight: 600; }
 .player-cursor { position: absolute; left: 0; top: 0; width: 25px; height: 31px; pointer-events: none; z-index: 8; transform: translate(72%, 46%); filter: drop-shadow(0 2px 2px #0004); }
 .player-cursor svg { width: 100%; height: 100%; fill: #fff; stroke: #1a1b1d; stroke-width: 1.7; stroke-linejoin: round; transform-origin: 4px 3px; transition: transform .1s; }
 .player-cursor.pressed svg { transform: scale(.88); }
+@font-face { font-family: "Share Tech Mono"; src: url("assets/fonts/ShareTechMono-Regular.ttf") format("truetype"); font-display: swap; }
+.talk-pill { position: absolute; left: 0; top: 0; display: flex; align-items: center; height: 34px; padding: 0 3px; border: 1.2px solid #464952; border-radius: 17px; background: #141519f5; z-index: 4; }
+.talk-pill[hidden], .talk-box[hidden], .talk-typer[hidden] { display: none; }
+.talk-pill button { display: grid; place-items: center; width: 42px; height: 28px; padding: 0; border: 0; border-radius: 14px; background: none; color: #e8ecf0; }
+.talk-pill button:hover { color: #3ad6eb; background: #ffffff1e; }
+.talk-pill svg { width: 22px; height: 22px; }
+.talk-pill #talk-type svg { fill: currentColor; }
+.talk-pill #talk-type .gap { fill: none; stroke: #141519; stroke-width: 1.1; }
+.talk-pill #talk-voice svg { fill: none; stroke: currentColor; stroke-width: 2.3; stroke-linecap: round; }
+.talk-pill > span { width: 1.2px; height: 16px; background: #464952; }
+.talk-box, .talk-typer { position: absolute; left: 0; top: 0; width: calc(34ch + 38px); max-width: calc(100% - 8px);font: 14px/19px "Share Tech Mono", Consolas, monospace; z-index: 5; }
+.talk-box { padding: 12px 14px 10px 24px; color: #38b0ff; }
+.talk-box p { margin: 0; overflow-wrap: anywhere; }
+.talk-frame { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; z-index: -1; }
+.talk-heard { color: #7a808a; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.talk-name { color: #e82440; }
+.talk-caret { display: inline-block; width: .85ch; height: 14px; margin-left: 1px; vertical-align: -2px; background: currentColor; }
+.talk-box.thinking .talk-caret { animation: talk-blink .8s steps(1) infinite; }
+.talk-box.online .talk-caret { animation: talk-blink 1s steps(1) infinite; }
+.talk-box.glitch { animation: talk-in .2s steps(4) both; }
+.talk-box.leaving { animation: talk-out .25s steps(4) both; }
+.talk-typer { display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 14px 0 24px; z-index: 6; }
+.talk-typer label { flex: none; color: #7a808a; font-style: italic; }
+.talk-typer input { flex: 1; min-width: 0; padding: 0; border: 0; outline: none; background: none; color: #e8ecf0; font: inherit; }
+@keyframes talk-blink { 50% { opacity: 0; } }
+@keyframes talk-in { 0% { opacity: 0; transform: translateX(-8px) skewX(10deg); } 25% { opacity: 1; transform: translateX(6px); clip-path: inset(30% 0 20% 0); } 50% { transform: translateX(-3px); clip-path: inset(0 0 45% 0); } 75% { transform: translateX(2px); } 100% { opacity: 1; transform: none; } }
+@keyframes talk-out { 0% { opacity: 1; transform: none; } 40% { transform: translateX(7px); clip-path: inset(20% 0 30% 0); } 70% { opacity: .6; transform: translateX(-5px) skewX(-8deg); } 100% { opacity: 0; transform: translateX(3px); } }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 @keyframes idle { 0%,100% { transform: translateY(0) rotate(-.35deg); } 50% { transform: translateY(-4px) rotate(.35deg); } }
 @media (max-width: 600px) {

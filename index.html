@@ -24,6 +24,13 @@
       <div id="demo" class="demo" tabindex="-1" role="region" aria-label="Interactive browser demonstration of Capri">
         <button id="demo-capri" class="demo-capri" aria-label="Capri. Drag to move, click to react, or use arrow keys and Enter."><span class="sprite"></span></button>
         <div id="taskbar" class="taskbar"><span class="xp-start" aria-hidden="true"></span><button id="demo-restore" class="xp-app" type="button" aria-label="Bring Capri back"><img src="assets/chip.png" alt="" width="16" height="11">Capri</button></div>
+        <div id="talk-pill" class="talk-pill" hidden>
+          <button id="talk-type" type="button" aria-label="Type to Capri"><svg viewBox="0 0 24 24" aria-hidden="true"><g transform="rotate(-45 12 12)"><rect x="4" y="9.5" width="12" height="5" rx="1.2"/><path d="M16.6 9.5 21 12l-4.4 2.5Z"/><path class="gap" d="M7.2 9v6M16 9v6"/></g></svg></button>
+          <span aria-hidden="true"></span>
+          <button id="talk-voice" type="button" aria-label="Talk to Capri out loud"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.8 9.5v5M8.4 7v10M12 5v14M15.6 7.5v9M19.2 10v4"/></svg></button>
+        </div>
+        <div id="talk-box" class="talk-box" hidden aria-hidden="true"><svg class="talk-frame"></svg><p class="talk-heard"></p><p class="talk-reply"><span class="talk-name">CAPRI:</span> <span class="talk-words"></span><span class="talk-caret"></span></p></div>
+        <form id="talk-typer" class="talk-typer" hidden><svg class="talk-frame" aria-hidden="true"></svg><label for="talk-input">&gt; you:</label><input id="talk-input" type="text" maxlength="240" autocomplete="off" spellcheck="false" enterkeyhint="send"></form>
         <div id="player-cursor" class="player-cursor" aria-hidden="true"><svg viewBox="0 0 28 34"><path d="M3 2v24l6-6 5 11 5-2-5-10h10L3 2Z"/></svg></div>
         <span id="demo-status" class="sr-only" role="status"></span>
       </div>
