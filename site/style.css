@@ -14,6 +14,14 @@ button:focus-visible, a:focus-visible { outline: 2px solid #8ac74b; outline-offs
 .download svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .github { display: flex; align-items: center; justify-content: center; width: 32px; height: 40px; }
 .github svg { width: 23px; height: 23px; fill: currentColor; }
+.heads-up { width: min(380px, calc(100% - 32px)); margin: auto; padding: 0; border: 2px solid #202225; border-radius: 14px; background: #fff; color: #202225; }
+.heads-up::backdrop { background: transparent; }
+.heads-up > div { padding: 20px 22px 18px; }
+.heads-up p { margin: 0 0 16px; font-size: 14px; line-height: 1.55; }
+.heads-up a { text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.heads-up form { display: flex; justify-content: flex-end; margin: 0; }
+.heads-up button { padding: 8px 20px; border: 2px solid #202225; border-radius: 6px; background: #fff; color: #202225; font-size: 13px; cursor: pointer; }
+.heads-up button:hover { background: #f1f2f0; }
 h1 { text-align: center; font-size: clamp(21px, 2.5vw, 32px); font-weight: 400; line-height: 1.4; letter-spacing: -1px; margin: 32px 0 38px; }
 h1 em { font-weight: 600; }
 .demo { position: relative; width: 100%; aspect-ratio: 614 / 350; min-height: 300px; overflow: hidden; border: 1px solid #e7e8e5; border-radius: 8px; background: url("assets/background.png") center / cover no-repeat; user-select: none; isolation: isolate; }
@@ -47,8 +55,7 @@ h1 em { font-weight: 600; }
   .header { height: 82px; }
   .chip { width: 62px; height: 43px; }
   .links { gap: 17px; }
-  .download { padding: 12px 16px; font-size: 12px; gap: 9px; }
-  h1 { max-width: 325px; margin: 27px auto 30px; font-size: 23px; letter-spacing: -.7px; }
+  .download { padding: 12px 16px; font-size: 12px; gap: 9px; }  h1 { max-width: 325px; margin: 27px auto 30px; font-size: 23px; letter-spacing: -.7px; }
   .demo { min-height: 350px; }
   .demo-capri { width: 160px; height: 160px; }
   .player-cursor { width: 23px; height: 28px; }
