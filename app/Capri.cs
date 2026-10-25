@@ -102,6 +102,7 @@ namespace CapriDesktop
         private readonly Clip perchBlink = new Clip("perch_blink", 4, 8, 1);
         private readonly Clip perchBlinkGlitch = new Clip("perch_blink_glitch", 4, 8, 1);
         private readonly Clip perchGlitch = new Clip("perch_glitch", 10, 15, 1);
+        private readonly Clip mouth = new Clip("mouth", 5, 12, 1.11f);
         private readonly Random random = new Random();
         private readonly NotifyIcon tray;
         private readonly ContextMenuStrip menu;
@@ -142,6 +143,10 @@ namespace CapriDesktop
         private bool updating;
         private string updatePage;
         private string balloonPage;
+        private string speech;
+        private double speechStart;
+        private const double LettersPerSecond = 28;
+        private const double MouthRate = 12;
         private const string ReleasesPage = "https://github.com/yerocsin42/capri-desktop/releases/";
         private const int PaddingSize = 36;
         private const int DismountId = 0x4361;
@@ -208,7 +213,7 @@ namespace CapriDesktop
             tray.Visible = !testing;
             frames = new System.Windows.Forms.Timer();
             frames.Interval = 33;
-            frames.Tick += delegate { if (riding) FollowCursor(); RenderFrame(); if (!riding && !dragging && !preferences.Motion && clip == idle) frames.Stop(); };
+            frames.Tick += delegate { if (riding) FollowCursor(); RenderFrame(); if (!riding && !dragging && !preferences.Motion && clip == idle && speech == null) frames.Stop(); };
             signals = new System.Windows.Forms.Timer();
             signals.Interval = 250;
             signals.Tick += delegate
@@ -289,7 +294,7 @@ namespace CapriDesktop
                 idleCycle = cycle;
                 double roll = random.NextDouble();
                 blinkWith = roll < 0.1 ? (clip == perch ? perchBlinkGlitch : blinkGlitch) : roll < 0.55 ? (clip == perch ? perchBlink : blink) : null;
-                if (now >= nextGlitch) { nextGlitch = now + 30 + random.NextDouble() * 30; Play(clip == perch ? perchGlitch : glitch); return 0; }
+                if (now >= nextGlitch && speech == null) { nextGlitch = now + 30 + random.NextDouble() * 30; Play(clip == perch ? perchGlitch : glitch); return 0; }
             }
             return index % clip.Count;
         }
@@ -372,7 +377,7 @@ namespace CapriDesktop
         private void CheckIdle(long quiet)
         {
             if (clip == sleep) { if (quiet < 1000) Play(wake); return; }
-            if (quiet >= 120000 && clip == idle && preferences.Motion && !riding && !dragging && !hidden) Play(sleep);
+            if (quiet >= 120000 && clip == idle && preferences.Motion && !riding && !dragging && !hidden && speech == null) Play(sleep);
         }
 
         private static Size CanvasSize(int size) { return new Size(size + PaddingSize * 2, size + PaddingSize * 2); }
@@ -575,25 +580,53 @@ namespace CapriDesktop
         private void UpdateAnimation()
         {
             if (!preferences.Motion && !riding && clip != glitch && clip != dangle && clip != wake) Play(idle);
-            if ((preferences.Motion || riding || clip != idle) && !hidden) frames.Start(); else frames.Stop();
+            if ((preferences.Motion || riding || clip != idle || speech != null) && !hidden) frames.Start(); else frames.Stop();
             RenderFrame();
         }
 
         private void RenderFrame()
         {
             if (!IsHandleCreated || hidden || IsDisposed) return;
-            int cell = Advance(clock.Elapsed.TotalSeconds);
+            double now = clock.Elapsed.TotalSeconds;
+            int cell = Advance(now);
             Clip shown = clip;
             if ((clip == idle || clip == perch) && blinkWith != null && cell >= BlinkFrom && cell < BlinkFrom + blinkWith.Count) { shown = blinkWith; cell -= BlinkFrom; }
+            int talk = MouthCell(now, shown);
             Bitmap next = new Bitmap(Width, Height, PixelFormat.Format32bppPArgb);
-            using (Graphics graphics = Graphics.FromImage(next)) Draw(graphics, shown, cell);
+            using (Graphics graphics = Graphics.FromImage(next)) Draw(graphics, shown, cell, talk);
             Native.DrawLayered(Handle, next, anchor);
             Bitmap old = frame;
             frame = next;
             if (old != null) old.Dispose();
         }
 
-        private void Draw(Graphics graphics, Clip shown, int cell)
+        internal void Say(string text)
+        {
+            speech = string.IsNullOrEmpty(text) ? null : text;
+            speechStart = clock.Elapsed.TotalSeconds;
+            if (speech != null && (clip == sleep || clip == wake || clip == glitch || clip == grin)) Play(idle);
+            UpdateAnimation();
+        }
+
+        private int MouthCell(double now, Clip shown)
+        {
+            if (speech == null) return -1;
+            int step = (int)((now - speechStart) * MouthRate);
+            int letter = (int)(step / MouthRate * LettersPerSecond);
+            if (letter >= speech.Length) { speech = null; return -1; }
+            return clip == idle && shown != blinkGlitch ? MouthFor(speech[letter], step) : -1;
+        }
+
+        internal static int MouthFor(char letter, int step)
+        {
+            char lower = char.ToLowerInvariant(letter);
+            if ("aeo".IndexOf(lower) >= 0) return char.IsUpper(letter) ? 4 : 3;
+            if ("iuy".IndexOf(lower) >= 0) return 2;
+            if ("mbp".IndexOf(lower) >= 0 || !char.IsLetter(letter)) return 0;
+            return step % 2 == 1 ? 1 : 2;
+        }
+
+        private void Draw(Graphics graphics, Clip shown, int cell, int talk = -1)
         {
             graphics.CompositingMode = CompositingMode.SourceOver;
             graphics.CompositingQuality = CompositingQuality.HighQuality;
@@ -610,6 +643,7 @@ namespace CapriDesktop
             float tall = preferences.Size * shown.Height;
             float wide = tall * width / shown.Strip.Height;
             graphics.DrawImage(shown.Strip, new RectangleF(-wide / 2f, -tall / 2f, wide, tall), new RectangleF(cell * width, 0, width, shown.Strip.Height), GraphicsUnit.Pixel);
+            if (talk >= 0) graphics.DrawImage(mouth.Strip, new RectangleF(-wide / 2f, -tall / 2f, wide, tall), new RectangleF(talk * width, 0, width, mouth.Strip.Height), GraphicsUnit.Pixel);
         }
 
         private Preferences LoadPreferences()
@@ -663,7 +697,7 @@ namespace CapriDesktop
                 signals.Dispose();
                 tray.Dispose();
                 menu.Dispose();
-                foreach (Clip owned in new[] { idle, blink, blinkGlitch, grin, glitch, dangle, sleep, wake, perch, perchBlink, perchBlinkGlitch, perchGlitch }) owned.Strip.Dispose();
+                foreach (Clip owned in new[] { idle, blink, blinkGlitch, grin, glitch, dangle, sleep, wake, perch, perchBlink, perchBlinkGlitch, perchGlitch, mouth }) owned.Strip.Dispose();
                 if (frame != null) frame.Dispose();
             }
             base.Dispose(disposing);
@@ -755,6 +789,41 @@ namespace CapriDesktop
                             if (clip != idle) throw new Exception("Boot glitch did not settle into idle.");
                             Play(idle);
                             checks.Add("PASS sleeps after two quiet minutes, boots awake and settles into idle");
+                            if (MouthFor('a', 0) != 3 || MouthFor('O', 0) != 4 || MouthFor('i', 0) != 2 || MouthFor('m', 0) != 0 || MouthFor(' ', 0) != 0 || MouthFor('!', 0) != 0 || MouthFor('k', 1) != 1 || MouthFor('k', 2) != 2) throw new Exception("Mouth shapes picked the wrong letters.");
+                            const string spoken = "Hey OK, bye!";
+                            int mouthPixels = 0;
+                            Say(spoken);
+                            if (speech != spoken || !frames.Enabled) throw new Exception("Say did not start talking.");
+                            double said = clock.Elapsed.TotalSeconds;
+                            speechStart = said;
+                            if (MouthCell(said, idle) != 2) throw new Exception("First letter did not open her teeth.");
+                            speechStart = said - 2.5 / MouthRate;
+                            if (MouthCell(said, idle) != 4) throw new Exception("Capital O did not scream.");
+                            if (MouthCell(said, blinkGlitch) != -1) throw new Exception("Mouth drew over a glitched blink.");
+                            using (Bitmap quiet = new Bitmap(Width, Height, PixelFormat.Format32bppPArgb))
+                            using (Bitmap open = new Bitmap(Width, Height, PixelFormat.Format32bppPArgb))
+                            {
+                                bool motion = preferences.Motion;
+                                preferences.Motion = false;
+                                using (Graphics graphics = Graphics.FromImage(quiet)) Draw(graphics, idle, 0);
+                                using (Graphics graphics = Graphics.FromImage(open)) Draw(graphics, idle, 0, 3);
+                                preferences.Motion = motion;
+                                for (int x = 0; x < Width; x++) for (int y = 0; y < Height; y++) if (Math.Abs(quiet.GetPixel(x, y).GetBrightness() - open.GetPixel(x, y).GetBrightness()) > 0.3f) mouthPixels++;
+                                if (mouthPixels < 4 || mouthPixels > 1200) throw new Exception("Open mouth changed " + mouthPixels + " pixels.");
+                            }
+                            CheckIdle(130000);
+                            if (clip != idle) throw new Exception("Fell asleep mid-sentence.");
+                            Play(idle);
+                            Say(spoken);
+                            nextGlitch = 0;
+                            clipStart -= 2.1;
+                            RenderFrame();
+                            if (clip != idle) throw new Exception("Glitched mid-sentence.");
+                            speechStart = clock.Elapsed.TotalSeconds - spoken.Length / LettersPerSecond - 1;
+                            RenderFrame();
+                            if (speech != null || MouthCell(clock.Elapsed.TotalSeconds, idle) != -1) throw new Exception("Did not stop talking at the end of the line.");
+                            nextGlitch = clock.Elapsed.TotalSeconds + 60;
+                            checks.Add("PASS talks: letter mouths, typing-synced flaps, jaw overlay (" + mouthPixels + " px), no sleep or glitch mid-sentence, stops at the end");
                             Version mine = Assembly.GetExecutingAssembly().GetName().Version;
                             if (!IsNewer("v9.0.0", mine) || IsNewer("v" + mine.ToString(3), mine) || IsNewer("v0.0.1", mine) || IsNewer("nonsense", mine) || IsNewer(null, mine)) throw new Exception("Update version compare failed.");
                             long now = DateTime.UtcNow.Ticks;
@@ -779,15 +848,16 @@ namespace CapriDesktop
                             SavePreferences();
                             if (LoadPreferences().Size != 240) throw new Exception("Settings did not round-trip.");
                             checks.Add("PASS settings round-trip in isolated test directory");
-                            Clip[] strips = { idle, blink, blinkGlitch, grin, glitch, dangle, sleep, wake, perch, perchBlink, perchBlinkGlitch, perchGlitch };
-                            int[] cells = { 0, 1, 1, 0, 1, 3, 0, 4, 8, 1, 1, 1 };
+                            Clip[] strips = { idle, blink, blinkGlitch, grin, glitch, dangle, sleep, wake, perch, perchBlink, perchBlinkGlitch, perchGlitch, idle };
+                            int[] cells = { 0, 1, 1, 0, 1, 3, 0, 4, 8, 1, 1, 1, 0 };
+                            if (mouth.Strip.Width % mouth.Count != 0 || mouth.Strip.Width / mouth.Count != idle.Strip.Width / idle.Count || mouth.Strip.Height != idle.Strip.Height) throw new Exception("Mouth strip does not match the idle cells.");
                             using (Bitmap sheet = new Bitmap(Width * strips.Length, Height, PixelFormat.Format32bppArgb))
                             {
                                 for (int i = 0; i < strips.Length; i++)
                                     using (Bitmap still = new Bitmap(Width, Height, PixelFormat.Format32bppPArgb))
                                     {
                                         if (strips[i].Strip.Width % strips[i].Count != 0) throw new Exception("Clip " + i + " has uneven cells.");
-                                        using (Graphics graphics = Graphics.FromImage(still)) Draw(graphics, strips[i], cells[i]);
+                                        using (Graphics graphics = Graphics.FromImage(still)) Draw(graphics, strips[i], cells[i], i == strips.Length - 1 ? 3 : -1);
                                         int solid = 0;
                                         for (int x = 0; x < Width; x += 4) for (int y = 0; y < Height; y += 4) if (still.GetPixel(x, y).A > 128) solid++;
                                         if (solid < 200) throw new Exception("Clip " + i + " drew nothing.");
@@ -795,7 +865,7 @@ namespace CapriDesktop
                                     }
                                 sheet.Save(Path.Combine(output, "clips.png"), ImageFormat.Png);
                             }
-                            checks.Add("PASS all 12 clips draw: idle, blinks, grin, glitch, drag, sleep, wake and perch");
+                            checks.Add("PASS all 12 clips draw: idle, blinks, grin, glitch, drag, sleep, wake and perch, plus the talking mouth");
                             backdrop = new Form();
                             backdrop.Text = "Capri clean test desktop";
                             backdrop.FormBorderStyle = FormBorderStyle.None;
