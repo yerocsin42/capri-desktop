@@ -63,6 +63,9 @@ namespace CapriDesktop
         [DataMember] public string Model;
         [DataMember] public bool Welcomed;
         [DataMember] public bool NoSitting;
+        [DataMember] public string VoiceKey;
+        [DataMember] public string VoiceId;
+        [DataMember] public string VoiceModel;
     }
 
     [DataContract]
@@ -180,6 +183,11 @@ namespace CapriDesktop
         private int asking;
         private bool finding;
         internal Func<string, string> Think;
+        internal Func<string, byte[]> Speak;
+        private readonly Voice voice = new Voice();
+        private VoiceListing voices;
+        private int[] mouths;
+        private double pace = LettersPerSecond;
         private const string ReleasesPage = "https://github.com/yerocsin42/capri-desktop/releases/";
         private const string OllamaPage = "https://ollama.com/download";
         private const int PaddingSize = 36;
@@ -251,6 +259,10 @@ namespace CapriDesktop
             tray.BalloonTipClicked += delegate { if (balloonPage != null) OpenPage(balloonPage); };
             tray.Visible = !testing;
             mainframe = new Mainframe(this, tray.Icon, Assembly.GetExecutingAssembly().GetName().Version.ToString(3));
+            voice.Key = Voice.Unprotect(preferences.VoiceKey);
+            voice.VoiceId = string.IsNullOrEmpty(preferences.VoiceId) ? Voice.Default : preferences.VoiceId;
+            voice.Model = string.IsNullOrEmpty(preferences.VoiceModel) ? null : preferences.VoiceModel;
+            ShowVoice();
             pill.Typing += OpenTyper;
             pill.Voice += VoiceSoon;
             box.Dismissed += delegate { if (box.Leaving < 0) box.Leaving = clock.Elapsed.TotalSeconds; };
@@ -309,6 +321,7 @@ namespace CapriDesktop
                 SavePreferences();
             }
             if (!testing) FindBrain();
+            if (!testing && voice.Key != null) ListVoices(voice.Key, false);
             RefreshIcons();
         }
 
@@ -896,6 +909,83 @@ namespace CapriDesktop
             SavePreferences();
         }
 
+        internal void ConnectVoice(string key)
+        {
+            key = (key ?? "").Trim();
+            if (key.Length > 0) ListVoices(key, true);
+        }
+
+        internal void ForgetVoice()
+        {
+            voice.Stop();
+            voice.Key = null;
+            voices = null;
+            preferences.VoiceKey = null;
+            SavePreferences();
+            ShowVoice();
+        }
+
+        internal void ChooseVoice(string id)
+        {
+            id = (id ?? "").Trim();
+            if (id.Length == 0) id = Voice.Default;
+            if (id == voice.VoiceId) { ShowVoice(false); return; }
+            voice.VoiceId = id;
+            preferences.VoiceId = id == Voice.Default ? null : id;
+            SavePreferences();
+            ShowVoice();
+        }
+
+        internal void ChooseVoiceModel(string id)
+        {
+            voice.Model = string.IsNullOrEmpty(id) ? null : id;
+            preferences.VoiceModel = voice.Model;
+            SavePreferences();
+            ShowVoice();
+        }
+
+        internal void TestVoice()
+        {
+            if (voice.Key == null && Speak == null) { mainframe.VoiceNote("Paste your ElevenLabs API key first.", true); return; }
+            if (hidden) SetHidden(false);
+            brain.Cancel();
+            heard = "voice check";
+            box.Prompt = "> sys: ";
+            Answer(++asking, "Voice link online. Miss me, choom?", TalkState.Talking);
+        }
+
+        private void ListVoices(string key, bool connecting)
+        {
+            mainframe.VoiceNote(connecting ? "Checking key..." : "Loading voices...", false);
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                VoiceListing found = null;
+                string problem = null;
+                int status = 0;
+                try { found = Voice.Fetch(key); }
+                catch (VoiceException error) { problem = error.Message; status = error.Status; }
+                catch (Exception) { problem = "Couldn't read your ElevenLabs voices."; }
+                Post(delegate
+                {
+                    if (connecting && status == 401) { mainframe.VoiceNote(problem, true); return; }
+                    if (connecting) { voice.Key = key; preferences.VoiceKey = Voice.Protect(key); SavePreferences(); }
+                    if (voice.Key != key) return;
+                    if (found != null) voices = found;
+                    ShowVoice();
+                    if (problem != null) mainframe.VoiceNote(problem, true);
+                });
+            });
+        }
+
+        private void ShowVoice(bool note = true)
+        {
+            mainframe.ShowVoice(voice.Key == null ? null : Voice.Tail(voice.Key), voice.VoiceId, voice.Model, voices);
+            if (!note) return;
+            string name = voice.VoiceId == Voice.Default ? "default voice" : "custom voice";
+            if (voices != null) foreach (VoiceEntry entry in voices.Voices) if (entry.Id == voice.VoiceId && entry.Name != null) name = entry.Name;
+            mainframe.VoiceNote(voice.Key == null ? "Needs your ElevenLabs API key." : "ElevenLabs · " + name, false);
+        }
+
         private float TalkScale()
         {
             int dpi = 96;
@@ -938,7 +1028,7 @@ namespace CapriDesktop
         {
             heard = "(voice)";
             box.Prompt = "> you: ";
-            Answer(++asking, "Voice link's still in the shop, choom. Type to me for now.", TalkState.Talking);
+            Answer(++asking, "My ears are still in the shop, choom. Type to me for now.", TalkState.Talking);
         }
 
         internal void Hear(string text) { Hear(text, text, "> you: "); }
@@ -950,6 +1040,7 @@ namespace CapriDesktop
             if (text.Length > 240) text = text.Substring(0, 240);
             if (hidden) SetHidden(false);
             brain.Cancel();
+            voice.Stop();
             int ticket = ++asking;
             heard = shown;
             box.Prompt = prompt;
@@ -992,16 +1083,52 @@ namespace CapriDesktop
         private void Answer(int ticket, string said, TalkState state)
         {
             if (ticket != asking || IsDisposed) return;
+            voice.Stop();
+            Func<string, byte[]> speak = Speak;
+            if (speak == null && !testing && voice.Ready) speak = voice.Speak;
+            string words = Voice.Spoken(said);
+            if (speak == null || words.Length == 0) { Begin(ticket, said, state, null); return; }
+            reply = null;
+            replyDone = -1;
+            Say(null);
+            talkState = TalkState.Thinking;
+            box.Leaving = -1;
+            UpdateAnimation();
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                byte[] wav = null;
+                string problem = null;
+                try { wav = speak(words); }
+                catch (VoiceException error) { problem = error.Message; }
+                catch (Exception) { problem = "Voice glitched. Text only for now."; }
+                Post(delegate
+                {
+                    if (problem != null && ticket == asking) mainframe.VoiceNote(problem, true);
+                    Begin(ticket, said, state, wav);
+                });
+            });
+        }
+
+        private void Begin(int ticket, string said, TalkState state, byte[] wav)
+        {
+            if (ticket != asking || IsDisposed) return;
             reply = said;
             replyStart = clock.Elapsed.TotalSeconds;
             replyDone = -1;
             talkState = state;
             box.Leaving = -1;
+            pace = LettersPerSecond;
             Say(said);
+            double seconds = wav == null ? 0 : Voice.Seconds(wav);
+            if (seconds < 0.2) return;
+            pace = Math.Max(8, said.Length / seconds);
+            mouths = Voice.Mouths(wav, MouthRate);
+            if (!testing) voice.Play(wav);
         }
 
         private void CloseTalk()
         {
+            voice.Stop();
             talkState = TalkState.Off;
             reply = null;
             replyDone = -1;
@@ -1014,7 +1141,7 @@ namespace CapriDesktop
         private void UpdateTalk(double now)
         {
             if (talkState == TalkState.Off) { if (box.Visible) box.Hide(); return; }
-            int revealed = reply == null ? 0 : (int)((now - replyStart) * LettersPerSecond);
+            int revealed = reply == null ? 0 : (int)((now - replyStart) * pace);
             if (reply != null && revealed >= reply.Length && replyDone < 0)
             {
                 replyDone = now;
@@ -1064,6 +1191,7 @@ namespace CapriDesktop
         {
             speech = string.IsNullOrEmpty(text) ? null : text;
             speechStart = clock.Elapsed.TotalSeconds;
+            mouths = null;
             if (speech != null && (clip == sleep || clip == wake || clip == glitch || clip == grin)) Play(idle);
             UpdateAnimation();
         }
@@ -1072,6 +1200,11 @@ namespace CapriDesktop
         {
             if (speech == null) return -1;
             int step = (int)((now - speechStart) * MouthRate);
+            if (mouths != null)
+            {
+                if (step >= mouths.Length) { speech = null; mouths = null; return -1; }
+                return clip == idle && shown != blinkGlitch ? mouths[step] : -1;
+            }
             int letter = (int)(step / MouthRate * LettersPerSecond);
             if (letter >= speech.Length) { speech = null; return -1; }
             return clip == idle && shown != blinkGlitch ? MouthFor(speech[letter], step) : -1;
@@ -1144,6 +1277,7 @@ namespace CapriDesktop
             frames.Stop();
             signals.Stop();
             brain.Cancel();
+            voice.Stop();
             engine.Cancel = true;
             engine.Stop();
             mainframe.Quitting = true;
@@ -1181,6 +1315,8 @@ namespace CapriDesktop
                 test.Interval = 500;
                 int step = 0;
                 int thoughts = 0;
+                byte[] tone = null;
+                string voiced = null;
                 Form backdrop = null;
                 System.Collections.Generic.List<string> checks = new System.Collections.Generic.List<string>();
                 test.Tick += delegate
@@ -1435,6 +1571,55 @@ namespace CapriDesktop
                             mainframe.ShowOllama(new[] { "gemma4:e4b", "qwen3:1.7b" }, "gemma4:e4b");
                             ChooseModel("qwen3:1.7b");
                             if (brain.Model != "qwen3:1.7b" || preferences.Model != "qwen3:1.7b") throw new Exception("Model choice did not stick.");
+                            string sealedKey = Voice.Protect("sk_test_capri_1234");
+                            if (Voice.Unprotect(sealedKey) != "sk_test_capri_1234" || sealedKey.Contains("sk_test") || Voice.Unprotect("not a key") != null || Voice.Tail("sk_test_capri_1234") != "1234") throw new Exception("Key storage failed.");
+                            if (Voice.Spoken("[GLITCH] Hey *choom*, [static] ready?") != "Hey choom, ready?" || Voice.Spoken("[STATIC]") != "") throw new Exception("Spoken text kept her tags: " + Voice.Spoken("[GLITCH] Hey *choom*, [static] ready?"));
+                            if (Voice.Explain(401, "") != "ElevenLabs rejected the key." || Voice.Explain(401, "{\"detail\":{\"status\":\"quota_exceeded\"}}") != "Out of ElevenLabs credits." || Voice.Explain(400, "{\"detail\":{\"status\":\"invalid\",\"message\":\"Text is \\\"too\\\" long\"}}") != "Text is \"too\" long" || Voice.Explain(500, "oops") != "ElevenLabs error 500.") throw new Exception("ElevenLabs errors read wrong.");
+                            using (MemoryStream raw = new MemoryStream())
+                            using (BinaryWriter writer = new BinaryWriter(raw))
+                            {
+                                writer.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
+                                writer.Write(-1);
+                                writer.Write(System.Text.Encoding.ASCII.GetBytes("WAVEfmt "));
+                                writer.Write(16);
+                                writer.Write((short)1);
+                                writer.Write((short)1);
+                                writer.Write(16000);
+                                writer.Write(32000);
+                                writer.Write((short)2);
+                                writer.Write((short)16);
+                                writer.Write(System.Text.Encoding.ASCII.GetBytes("LIST"));
+                                writer.Write(4);
+                                writer.Write(System.Text.Encoding.ASCII.GetBytes("INFOdata"));
+                                writer.Write(-1);
+                                for (int i = 0; i < 16000; i++) writer.Write((short)(i < 8000 ? 0 : Math.Sin(i * 0.2) * (2000 + 14000 * Math.Abs(Math.Sin(i / 1300.0)))));
+                                writer.Flush();
+                                tone = Voice.Clean(raw.ToArray());
+                            }
+                            int toneRate;
+                            if (Voice.Samples(tone, out toneRate).Length != 16000 || toneRate != 16000 || BitConverter.ToInt32(tone, 40) != 32000 || Math.Abs(Voice.Seconds(tone) - 1) > 0.001 || Voice.Samples(new byte[] { 82, 73, 70, 70, 0, 0, 0, 0, 87, 65, 86, 69, 102, 109, 116, 32, 248, 255, 255, 255 }, out toneRate).Length != 0) throw new Exception("WAV cleanup failed.");
+                            int[] shapes = Voice.Mouths(tone, MouthRate);
+                            int widest = -1;
+                            for (int i = 7; i < shapes.Length; i++) widest = Math.Max(widest, shapes[i]);
+                            if (shapes.Length != 12 || shapes[0] != -1 || shapes[4] != -1 || widest < 3) throw new Exception("Mouth envelope failed: " + string.Join(",", shapes));
+                            VoicePage page = Voice.Read<VoicePage>(System.Text.Encoding.UTF8.GetBytes("{\"voices\":[{\"voice_id\":\"abc\",\"name\":\"Capri 1\",\"category\":\"generated\",\"labels\":{}},{\"voice_id\":\"def\",\"name\":\"Rachel\",\"category\":\"premade\"}],\"has_more\":false,\"total_count\":2,\"next_page_token\":null}"));
+                            System.Collections.Generic.List<VoiceModel> listed = Voice.Read<System.Collections.Generic.List<VoiceModel>>(System.Text.Encoding.UTF8.GetBytes("[{\"model_id\":\"eleven_v3\",\"name\":\"Eleven v3\",\"can_do_text_to_speech\":true,\"languages\":[]}]"));
+                            if (page.Voices.Count != 2 || page.More || page.Voices[0].Name != "Capri 1" || listed.Count != 1 || !listed[0].Speaks) throw new Exception("ElevenLabs listing did not parse.");
+                            voices = new VoiceListing();
+                            voices.Voices.AddRange(page.Voices);
+                            voices.Models.AddRange(listed);
+                            voice.Key = "sk_test_capri_1234";
+                            ChooseVoice("abc");
+                            ChooseVoiceModel("eleven_v3");
+                            if (preferences.VoiceId != "abc" || preferences.VoiceModel != "eleven_v3" || mainframe.VoiceStatus != "ElevenLabs · Capri 1 | abc | v3 | Forget") throw new Exception("Voice picks did not show: " + mainframe.VoiceStatus);
+                            snap("mainframe-voice.png");                            ChooseVoice("  ");
+                            ChooseVoiceModel(null);
+                            if (voice.VoiceId != Voice.Default || preferences.VoiceId != null || voice.Model != null || mainframe.VoiceStatus != "ElevenLabs · default voice | " + Voice.Default + " | Default model | Forget") throw new Exception("Blank voice did not fall back to the default: " + mainframe.VoiceStatus);
+                            preferences.VoiceKey = sealedKey;
+                            ForgetVoice();
+                            if (voice.Key != null || voices != null || preferences.VoiceKey != null || mainframe.VoiceStatus != "Needs your ElevenLabs API key. | " + Voice.Default + " | Default model | Connect") throw new Exception("Forget did not clear the key: " + mainframe.VoiceStatus);
+                            snap("mainframe-voice-empty.png");
+                            checks.Add("PASS voice: key sealed with DPAPI, tags stripped, errors read, WAV cleanup, mouth from the audio, listing parse, voice and model picks, default voice, forget");
                             mainframe.Close();
                             if (mainframe.IsDisposed || !mainframe.Visible || mainframe.WindowState != FormWindowState.Minimized) throw new Exception("Closing the Mainframe quit instead of minimizing.");
                             checks.Add("PASS Mainframe starts in the taskbar, a second launch opens it, it picks a model, and its close button minimizes it");
@@ -1534,13 +1719,41 @@ namespace CapriDesktop
                             }
                             typer.Hide();
                             checks.Add("PASS talk loop: TALKING types out with her mouth, ONLINE, dismiss closes; refusal and help line skip the brain; no brain shows DORMANT; reply box sits above her message");
+                            Speak = delegate(string words) { voiced = words; return tone; };
+                            heard = "voice check";
+                            Answer(++asking, "[GLITCH] Voice link online. Miss me, choom?", TalkState.Talking);
+                            if (talkState != TalkState.Thinking || reply != null) throw new Exception("Voice did not hold THINKING while she found her words.");
+                        }
+                        else if (step == 3)
+                        {
+                            const string line = "[GLITCH] Voice link online. Miss me, choom?";
+                            if (voiced != "Voice link online. Miss me, choom?") throw new Exception("Voice was sent the wrong words: " + voiced);
+                            if (talkState != TalkState.Talking || reply != line || mouths == null || mouths.Length != 12 || Math.Abs(pace - line.Length / Voice.Seconds(tone)) > 0.01) throw new Exception("Voice reply did not start in time with the audio: " + talkState + " " + pace);
+                            double now = clock.Elapsed.TotalSeconds;
+                            speechStart = now - 0.1;
+                            if (MouthCell(now, idle) != -1) throw new Exception("Mouth moved during silence.");
+                            speechStart = now - 0.75;
+                            if (MouthCell(now, idle) < 0) throw new Exception("Mouth stayed shut while she spoke.");
+                            replyStart = now - 0.5;
+                            RenderFrame();
+                            if (box.Revealed < line.Length / 2 - 2 || box.Revealed > line.Length / 2 + 2) throw new Exception("Typing did not keep pace with the audio: " + box.Revealed);
+                            speechStart = now - 1.1;
+                            if (MouthCell(now, idle) != -1 || speech != null) throw new Exception("Mouth kept going after the audio ended.");
+                            Speak = delegate(string words) { throw new VoiceException("Out of ElevenLabs credits."); };
+                            Answer(++asking, "Still here.", TalkState.Talking);
+                        }
+                        else if (step == 4)
+                        {
+                            if ((talkState != TalkState.Talking && talkState != TalkState.Online) || reply != "Still here." || mouths != null || pace != LettersPerSecond || mainframe.VoiceStatus.IndexOf("Out of ElevenLabs credits.", StringComparison.Ordinal) != 0) throw new Exception("Voice failure did not fall back to text: " + mainframe.VoiceStatus);
+                            checks.Add("PASS voice reply: THINKING while it speaks, tags not read aloud, typing paced to the audio, mouth follows the audio, failure falls back to text and shows in the Mainframe");
+                            Speak = null;
                             heard = "Hello Capri.";
-                            Answer(++asking, expected, TalkState.Talking);
+                            Answer(++asking, "Hey choom! Net's been quiet, too quiet. Time to stir up some trouble.", TalkState.Talking);
                             replyStart -= 10;
                             speechStart = replyStart;
                             RenderFrame();
                         }
-                        else if (step == 3)
+                        else if (step == 5)
                         {
                             using (Bitmap capture = new Bitmap(backdrop.Width, backdrop.Height))
                             using (Graphics graphics = Graphics.FromImage(capture))
