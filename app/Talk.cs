@@ -19,7 +19,7 @@ namespace CapriDesktop
         internal static readonly Color Cyan = Color.FromArgb(58, 214, 235);
         internal static readonly Color Red = Color.FromArgb(232, 36, 64);
         internal static readonly Color Yellow = Color.FromArgb(244, 214, 70);
-        internal static readonly Color Blue = Color.FromArgb(84, 128, 255);
+        internal static readonly Color Neon = Color.FromArgb(56, 176, 255);
         internal static readonly Color Ink = Color.FromArgb(232, 236, 240);
         internal static readonly Color Dim = Color.FromArgb(122, 128, 138);
 
@@ -115,16 +115,6 @@ namespace CapriDesktop
             }
             if (line.Length > 0 || lines.Count == 0) lines.Add(line);
             return lines;
-        }
-
-        internal static Color Tag(TalkState state)
-        {
-            switch (state)
-            {
-                case TalkState.Online: return Red;
-                case TalkState.Dormant: return Blue;
-                default: return Yellow;
-            }
         }
     }
 
@@ -319,6 +309,7 @@ namespace CapriDesktop
         private readonly Random random = new Random();
         private Rectangle panelOnScreen;
         private const int Columns = 34;
+        private const string Speaker = "CAPRI: ";
 
         internal SpeechBox() : base("Capri says") { Cursor = Cursors.Hand; }
 
@@ -357,16 +348,15 @@ namespace CapriDesktop
             using (Font text = Look.Mono(14 * s, FontStyle.Regular))
             using (Font heard = Look.Mono(14 * s, FontStyle.Italic))
             using (Font bold = Look.Mono(14 * s, FontStyle.Bold))
-            using (Font tag = Look.Mono(11 * s, FontStyle.Bold))
             {
                 float cw = Look.CharWidth(text);
                 float line = 19 * s;
                 float margin = 12 * s;
                 float top = 10 * s;
                 float tail = 16 * s;
-                List<string> lines = Look.Wrap(Reply ?? "", Columns);
+                List<string> lines = Look.Wrap(Speaker + (Reply ?? ""), Columns);
                 float panelWidth = 24 * s + Columns * cw + 14 * s;
-                float panelHeight = 13 * s + line * (2 + lines.Count) + 10 * s;
+                float panelHeight = 13 * s + line * (1 + lines.Count) + 10 * s;
                 int width = (int)Math.Ceiling(panelWidth + margin * 2);
                 int height = (int)Math.Ceiling(top + panelHeight + tail + 4 * s);
                 bool below = head.Y - height < area.Top;
@@ -399,31 +389,23 @@ namespace CapriDesktop
                     if (you.Length > Columns) you = you.Substring(0, Columns - 3) + "...";
                     using (Brush dim = new SolidBrush(Look.Dim)) graphics.DrawString(you, heard, dim, x, row2, StringFormat.GenericTypographic);
                     row2 += line;
-                    using (Brush yellow = new SolidBrush(Look.Yellow)) graphics.DrawString("CAPRI >", bold, yellow, x, row2, StringFormat.GenericTypographic);
-                    row2 += line;
-                    int remaining = State == TalkState.Thinking ? 0 : Math.Max(0, Revealed);
+                    int remaining = Speaker.Length + (State == TalkState.Thinking ? 0 : Math.Max(0, Revealed));
                     PointF caret = new PointF(x, row2);
-                    using (Brush ink = new SolidBrush(Look.Ink))
+                    using (Brush red = new SolidBrush(Look.Red))
+                    using (Brush ink = new SolidBrush(Look.Neon))
                     {
                         for (int i = 0; i < lines.Count && remaining > 0; i++)
                         {
                             int take = Math.Min(lines[i].Length, remaining);
-                            graphics.DrawString(lines[i].Substring(0, take), text, ink, x, row2 + i * line, StringFormat.GenericTypographic);
+                            string shown = lines[i].Substring(0, take);
+                            int name = i == 0 ? Math.Min(take, Speaker.Length - 1) : 0;
+                            if (name > 0) graphics.DrawString(shown.Substring(0, name), bold, red, x, row2, StringFormat.GenericTypographic);
+                            graphics.DrawString(shown.Substring(name), text, ink, x + name * cw, row2 + i * line, StringFormat.GenericTypographic);
                             caret = new PointF(x + take * cw, row2 + i * line);
                             remaining -= take + 1;
                             if (remaining >= 0 && i + 1 < lines.Count) caret = new PointF(x, row2 + (i + 1) * line);
                         }
                         if (cursorOn) graphics.FillRectangle(ink, caret.X + s, caret.Y + s, cw * 0.85f, line - 5 * s);
-                    }
-                    if (State != TalkState.Off)
-                    {
-                        string label = "CAPRI // " + State.ToString().ToUpperInvariant();
-                        float tagWidth = label.Length * Look.CharWidth(tag) + 14 * s;
-                        RectangleF box = new RectangleF(panel.Left + 22 * s, panel.Top - 9 * s, tagWidth, 18 * s);
-                        Color colour = Look.Tag(State);
-                        using (Brush back = new SolidBrush(Look.Panel)) graphics.FillRectangle(back, box);
-                        using (Pen border = new Pen(colour, 1.4f * s)) graphics.DrawRectangle(border, box.X, box.Y, box.Width, box.Height);
-                        using (Brush ink = new SolidBrush(colour)) graphics.DrawString(label, tag, ink, box.X + 7 * s, box.Y + 3 * s, StringFormat.GenericTypographic);
                     }
                 }
                 return image;
