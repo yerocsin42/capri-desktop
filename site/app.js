@@ -22,7 +22,7 @@
   const cursor = document.querySelector('#player-cursor');
   const status = document.querySelector('#demo-status');
   const motion = !matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const clips = { idle: [16, 8], blink: [4, 8], blink_glitch: [4, 8], grin: [16, 8], glitch: [10, 15], dangle: [12, 12], sleep: [16, 6], wake: [13, 15], perch: [16, 8], perch_blink: [4, 8], perch_blink_glitch: [4, 8], perch_glitch: [10, 15] };
+  const clips = { idle: [16, 8], blink: [4, 8], blink_glitch: [4, 8], grin: [16, 8], glitch: [10, 15], dangle: [12, 12], sleep: [16, 6], wake: [13, 15], perch: [16, 8], perch_blink: [4, 8], perch_blink_glitch: [4, 8], perch_glitch: [10, 15], mouth: [5, 12] };
   const loaded = new Set(['idle']);
   let clip = 'idle';
   let clipStart = performance.now();
@@ -31,16 +31,25 @@
   let nextGlitch = clipStart + 12000 + Math.random() * 12000;
   let lastInput = clipStart;
   let shown = '';
+  let layered = '';
   const play = name => { clip = loaded.has(name) ? name : riding && loaded.has('perch') ? 'perch' : 'idle'; clipStart = performance.now(); cycle = 0; blinkWith = ''; };
-  const show = (name, cell) => {
-    const count = clips[name][0];
-    if (!shown.startsWith(name + ':')) {
-      sprite.style.backgroundImage = 'url("assets/sprites/' + name + '.webp")';
-      sprite.style.backgroundSize = count * 100 + '% 100%';
+  const show = (name, cell, mouth) => {
+    const layers = mouth >= 0 ? ['mouth', name] : [name];
+    if (layered !== layers.join()) {
+      layered = layers.join();
+      sprite.style.backgroundImage = layers.map(layer => 'url("assets/sprites/' + layer + '.webp")').join(', ');
+      sprite.style.backgroundSize = layers.map(layer => clips[layer][0] * 100 + '% 100%').join(', ');
     }
-    if (shown === name + ':' + cell) return;
-    shown = name + ':' + cell;
-    sprite.style.backgroundPosition = cell / (count - 1) * 100 + '% 0';
+    if (shown === name + ':' + cell + ':' + mouth) return;
+    shown = name + ':' + cell + ':' + mouth;
+    sprite.style.backgroundPosition = (mouth >= 0 ? mouth / 4 * 100 + '% 0, ' : '') + cell / (clips[name][0] - 1) * 100 + '% 0';
+  };
+  const mouthFor = (letter, step) => {
+    const lower = letter.toLowerCase();
+    if ('aeo'.includes(lower)) return letter !== lower ? 4 : 3;
+    if ('iuy'.includes(lower)) return 2;
+    if ('mbp'.includes(lower) || !/\p{L}/u.test(letter)) return 0;
+    return step % 2 ? 1 : 2;
   };
   const animate = now => {
     const seated = clip.startsWith('perch');
@@ -56,15 +65,22 @@
         const roll = Math.random();
         const prefix = clip === 'perch' ? 'perch_' : '';
         blinkWith = roll < 0.1 ? prefix + 'blink_glitch' : roll < 0.55 ? prefix + 'blink' : '';
-        if (now >= nextGlitch) { nextGlitch = now + 12000 + Math.random() * 12000; play(clip === 'perch' ? 'perch_glitch' : 'glitch'); index = 0; }
+        if (now >= nextGlitch && talkState === 'off') { nextGlitch = now + 12000 + Math.random() * 12000; play(clip === 'perch' ? 'perch_glitch' : 'glitch'); index = 0; }
       }
-      if (clip === 'idle' && now - lastInput > 30000 && !riding && !drag) play('sleep');
+      if (clip === 'idle' && now - lastInput > 30000 && !riding && !drag && talkState === 'off' && typer.hidden) play('sleep');
     }
     let name = clip;
     let cell = motion ? index % clips[clip][0] : 0;
     if ((name === 'idle' || name === 'perch') && blinkWith && loaded.has(blinkWith) && cell >= 9 && cell < 13) { name = blinkWith; cell -= 9; }
     capri.classList.toggle('still', clip === 'sleep' || clip === 'dangle');
-    show(name, cell);
+    let mouth = -1;
+    if (talkState === 'talking' && motion && clip === 'idle' && name !== 'blink_glitch' && loaded.has('mouth')) {
+      const step = Math.floor((now - replyStart) / 1000 * 12);
+      const letter = Math.floor(step / 12 * 28);
+      if (letter < answer.length) mouth = mouthFor(answer[letter], step);
+    }
+    show(name, cell, mouth);
+    updateTalk(now);
     requestAnimationFrame(animate);
   };
   const wake = () => { lastInput = performance.now(); if (clip === 'sleep') play('wake'); };
@@ -112,6 +128,8 @@
     size = stage.clientWidth < 550 ? 160 : 220;
     x = stage.clientWidth * (stage.clientWidth < 550 ? 0.46 : 0.62);
     y = floor() * 0.3;
+    closeTalk();
+    closeTyper();
     setRide(false);
     capri.hidden = false;
     play('grin');
@@ -163,6 +181,156 @@
   document.querySelector('#demo-restore').addEventListener('click', reset);
   new ResizeObserver(() => { if (!initialized) { initialized = true; reset(); } else { place(); placeCursor(x + size * 0.6, y + size * 0.5); } }).observe(stage);
   updateMotion();
+
+  const answer = "I can't reply through here choom, you needa install my chip";
+  const pill = document.querySelector('#talk-pill');
+  const typer = document.querySelector('#talk-typer');
+  const input = document.querySelector('#talk-input');
+  const box = document.querySelector('#talk-box');
+  const heardLine = box.querySelector('.talk-heard');
+  const words = box.querySelector('.talk-words');
+  const drawn = new Map();
+  let talkState = 'off';
+  let thinkUntil = 0;
+  let replyStart = 0;
+  let replyDone = 0;
+  let leaving = 0;
+  let pillUntil = 0;
+  const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
+  const head = () => ({ x: x + size * 0.52, y: y - 4 });
+  const feet = () => ({ x: x + size * 0.58, y: y + size * 0.99 });
+  const plate = (left, top, width, height, cut, tipX, tipY, tail, both) => {
+    const right = both ? cut : 0;
+    const near = Math.max(left + cut + 2, tipX - tail * 0.8);
+    const far = Math.min(left + width - right - 2, tipX + tail * 0.2);
+    const bottom = top + height;
+    const points = [[left + cut, top]];
+    if (tipY < top) points.push([near, top], [tipX, tipY], [far, top]);
+    points.push([left + width - right, top]);
+    if (both) points.push([left + width, top + cut], [left + width, bottom - cut]);
+    points.push([left + width - right, bottom]);
+    if (tipY > bottom) points.push([far, bottom], [tipX, tipY], [near, bottom]);
+    points.push([left + cut, bottom], [left, bottom - cut], [left, top + cut]);
+    return 'M' + points.map(point => point[0].toFixed(1) + ' ' + point[1].toFixed(1)).join('L') + 'Z';
+  };
+  const frame = (svg, id, width, height, path, bar) => {
+    const key = width + ' ' + height + ' ' + path;
+    if (drawn.get(svg) === key) return;
+    drawn.set(svg, key);
+    svg.setAttribute('width', width);
+    svg.setAttribute('height', height);
+    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    svg.innerHTML = '<defs><pattern id="' + id + '" width="4" height="3" patternUnits="userSpaceOnUse"><rect width="4" height="1" fill="#ffffff09"/></pattern></defs>' +
+      '<path d="' + path + '" fill="none" stroke="#3ad6eb2e" stroke-width="7"/>' +
+      '<path d="' + path + '" fill="#090b0fee"/>' +
+      '<path d="' + path + '" fill="url(#' + id + ')"/>' +
+      '<path d="' + path + '" fill="none" stroke="#3ad6eb" stroke-width="2"/>' +
+      '<rect x="10" y="' + bar + '" width="3" height="' + Math.max(0, height - bar * 2) + '" fill="#e82440"/>';
+  };
+  const underPill = () => ({ x: feet().x, y: feet().y + 42 });
+  let boxBelow = false;
+  const placeBox = () => {
+    const width = box.offsetWidth;
+    const height = box.offsetHeight;
+    const tail = 16;
+    const low = floor() - 4;
+    const above = head();
+    const under = underPill();
+    boxBelow = above.y - tail - height < 4 && (under.y + tail + height <= low || low - under.y > above.y);
+    const tip = boxBelow ? under : above;
+    const left = clamp(tip.x - width * 0.7, 4, stage.clientWidth - width - 4);
+    const top = clamp(boxBelow ? tip.y + tail : tip.y - tail - height, 4, low - height);
+    box.style.left = left + 'px';
+    box.style.top = top + 'px';
+    frame(box.querySelector('svg'), 'talk-scan-box', width, height, plate(0, 0, width, height, 10, clamp(tip.x - left, 32, width - 10), boxBelow ? Math.max(tip.y - top, -tail) : Math.min(tip.y - top, height + tail), 18, false), 13);
+  };
+  const placeTyper = () => {
+    const width = typer.offsetWidth;
+    const height = typer.offsetHeight;
+    const low = floor() - 4;
+    let left;
+    let top;
+    if (!box.hidden) {
+      left = box.offsetLeft;
+      const outward = boxBelow ? box.offsetTop + box.offsetHeight + 8 : box.offsetTop - height - 16;
+      top = outward >= 4 && outward + height <= low ? outward : boxBelow ? box.offsetTop - height - 16 : box.offsetTop + box.offsetHeight + 8;
+    } else {
+      left = clamp(head().x - width * 0.7, 4, stage.clientWidth - width - 4);
+      top = head().y - height - 18;
+      if (top < 4) top = underPill().y;
+    }
+    top = clamp(top, 4, low - height);
+    typer.style.left = left + 'px';
+    typer.style.top = top + 'px';
+    frame(typer.querySelector('svg'), 'talk-scan-typer', width, height, plate(1, 1, width - 2, height - 2, 10, -1, height / 2, 0, true), 10);
+  };
+  const placePill = () => {
+    const width = pill.offsetWidth;
+    const height = pill.offsetHeight;
+    pill.style.left = clamp(feet().x - 4 - width / 2, 4, stage.clientWidth - width - 4) + 'px';
+    pill.style.top = clamp(feet().y + 4, 4, stage.clientHeight - height - 2) + 'px';
+  };
+  const closeTalk = () => { talkState = 'off'; leaving = 0; box.hidden = true; box.classList.remove('glitch', 'leaving'); };
+  const closeTyper = () => { if (typer.hidden) return; typer.hidden = true; if (talkState === 'online') replyDone = performance.now(); };
+  const dismiss = () => { if (talkState !== 'off' && !leaving) { leaving = performance.now(); box.classList.add('leaving'); } };
+  const hear = text => {
+    text = text.trim().slice(0, 240);
+    if (!text) return;
+    lastInput = performance.now();
+    heardLine.textContent = '> you: ' + text;
+    words.textContent = '';
+    talkState = 'thinking';
+    thinkUntil = performance.now() + 700;
+    leaving = 0;
+    box.classList.remove('leaving');
+    if (box.hidden) {
+      box.hidden = false;
+      if (motion) { box.classList.remove('glitch'); void box.offsetWidth; box.classList.add('glitch'); }
+    }
+    box.style.minHeight = '';
+    words.textContent = answer;
+    box.style.minHeight = box.offsetHeight + 'px';
+    words.textContent = '';
+  };
+  const openTyper = () => {
+    if (!typer.hidden) { closeTyper(); return; }
+    typer.hidden = false;
+    placeTyper();
+    input.focus({ preventScroll: true });
+    pillUntil = performance.now() + 1500;
+  };
+  const updateTalk = now => {
+    const free = !capri.hidden && !riding && !(drag && drag.moved);
+    const showPill = free && (now < pillUntil || !typer.hidden || talkState !== 'off' || pill.contains(document.activeElement));
+    if (pill.hidden === showPill) pill.hidden = !showPill;
+    if (showPill) placePill();
+    if (talkState === 'thinking' && now >= thinkUntil) { talkState = 'talking'; replyStart = now; status.textContent = 'Capri says: ' + answer; }
+    if (talkState === 'talking' && (!motion || (now - replyStart) / 1000 * 28 >= answer.length)) { talkState = 'online'; replyDone = now; }
+    if (talkState === 'online' && typer.hidden && now > replyDone + Math.min(14, 4 + answer.length * 0.05) * 1000) dismiss();
+    if (leaving && now - leaving > 250) closeTalk();
+    if (!box.hidden) {
+      const shownWords = talkState === 'thinking' ? '' : talkState === 'online' ? answer : answer.slice(0, Math.floor((now - replyStart) / 1000 * 28));
+      if (words.textContent !== shownWords) words.textContent = shownWords;
+      ['thinking', 'talking', 'online'].forEach(state => box.classList.toggle(state, talkState === state));
+      placeBox();
+    }
+    if (!typer.hidden) placeTyper();
+  };
+  box.addEventListener('animationend', () => box.classList.remove('glitch'));
+  box.addEventListener('click', dismiss);
+  typer.addEventListener('submit', event => { event.preventDefault(); const text = input.value; input.value = ''; hear(text); });
+  input.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); closeTyper(); capri.focus({ preventScroll: true }); } });
+  document.querySelector('#talk-type').addEventListener('click', openTyper);
+  document.querySelector('#talk-voice').addEventListener('click', () => hear('(voice)'));
+  document.addEventListener('pointerdown', event => { if (!typer.hidden && !typer.contains(event.target) && !pill.contains(event.target)) closeTyper(); });
+  stage.addEventListener('pointermove', event => {
+    const bounds = stage.getBoundingClientRect();
+    const px = event.clientX - bounds.left;
+    const py = event.clientY - bounds.top;
+    if (px > x - 40 && px < x + size + 40 && py > y - 40 && py < y + size + 70) pillUntil = performance.now() + 1500;
+  });
+  capri.addEventListener('pointerdown', () => { pillUntil = performance.now() + 4000; });
+  capri.addEventListener('focus', () => { pillUntil = performance.now() + 4000; });
 
   const star = document.querySelector('#star');
   const starCount = star.querySelector('span');
