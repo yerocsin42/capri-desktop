@@ -138,7 +138,6 @@ namespace CapriDesktop
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            TopMost = true;
             AutoScaleMode = AutoScaleMode.None;
         }
 
@@ -149,7 +148,7 @@ namespace CapriDesktop
             get
             {
                 CreateParams value = base.CreateParams;
-                value.ExStyle |= 0x00080000 | 0x00000080 | 0x08000000;
+                value.ExStyle |= 0x00080000 | 0x00000080 | 0x08000000 | 0x00000008;
                 return value;
             }
         }
@@ -552,7 +551,6 @@ namespace CapriDesktop
             string text = input.Text.Trim();
             if (text.Length == 0) return;
             input.Text = "";
-            Hide();
             if (Submitted != null) Submitted(text);
         }
 

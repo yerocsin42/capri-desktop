@@ -29,7 +29,7 @@ namespace CapriDesktop
             using (Mutex mutex = new Mutex(true, "Local\\Capri.Desktop." + identity + (smoke ? ".Test" : ""), out first))
             using (EventWaitHandle restore = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\Capri.Restore." + identity + (smoke ? ".Test" : "")))
             {
-                if (!first) { restore.Set(); return 0; }
+                if (!first) { Native.AllowSetForegroundWindow(-1); restore.Set(); return 0; }
                 try
                 {
                     string data = smoke ? Path.GetFullPath(args[1]) : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Capri");
@@ -810,7 +810,6 @@ namespace CapriDesktop
             if (text.Length == 0) return;
             if (text.Length > 240) text = text.Substring(0, 240);
             if (hidden) SetHidden(false);
-            typer.Hide();
             brain.Cancel();
             int ticket = ++asking;
             heard = shown;
@@ -1253,10 +1252,12 @@ namespace CapriDesktop
                             pill.Press(1);
                             if (!typer.Visible || typer.Bottom > Top + PaddingSize) throw new Exception("Pencil did not open the typing box above her.");
                             typer.Send("hi");
-                            if (typer.Visible || talkState != TalkState.Thinking || heard != "hi") throw new Exception("Sending did not start thinking.");
+                            if (!typer.Visible) throw new Exception("Sending closed the typing box.");
+                            if (typer.Draft.Length > 0 || talkState != TalkState.Thinking || heard != "hi") throw new Exception("Sending did not start thinking: " + talkState + " draft '" + typer.Draft + "'");
                             RenderFrame();
                             if (!box.Visible || box.State != TalkState.Thinking) throw new Exception("Speech box did not open on THINKING.");
-                            checks.Add("PASS pill under her, pencil opens the typing box above her head, Enter sends and THINKING shows");
+                            typer.Hide();
+                            checks.Add("PASS pill under her, pencil opens the typing box above her head, Enter sends, THINKING shows and the typing box stays open");
                             backdrop = new Form();
                             backdrop.Text = "Capri clean test desktop";
                             backdrop.FormBorderStyle = FormBorderStyle.None;
@@ -1407,6 +1408,7 @@ namespace CapriDesktop
         [DllImport("user32.dll")] internal static extern bool RegisterHotKey(IntPtr window, int id, int modifiers, int key);
         [DllImport("user32.dll")] internal static extern bool UnregisterHotKey(IntPtr window, int id);
         [DllImport("user32.dll")] internal static extern int GetDpiForWindow(IntPtr window);
+        [DllImport("user32.dll")] internal static extern bool AllowSetForegroundWindow(int process);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, string lParam);
         [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr window);
         [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr window, IntPtr dc);
