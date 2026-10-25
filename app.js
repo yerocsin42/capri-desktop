@@ -12,6 +12,9 @@
     enableDownload(await response.json());
   };
   readRelease('https://api.github.com/repos/' + repo + '/releases/latest').catch(() => readRelease('release.json')).catch(() => {});
+  const headsUp = document.querySelector('#heads-up');
+  install.addEventListener('click', () => { if (headsUp.showModal && !headsUp.open) headsUp.showModal(); });
+  headsUp.addEventListener('click', event => { if (event.target === headsUp) headsUp.close(); });
 
   const stage = document.querySelector('#demo');
   const capri = document.querySelector('#demo-capri');
