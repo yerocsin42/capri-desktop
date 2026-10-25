@@ -15,23 +15,75 @@
 
   const stage = document.querySelector('#demo');
   const capri = document.querySelector('#demo-capri');
-  const sprite = capri.querySelector('img');
+  const sprite = capri.querySelector('.sprite');
   const cursor = document.querySelector('#player-cursor');
   const status = document.querySelector('#demo-status');
   const motion = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const clips = { idle: [16, 8], blink: [4, 8], blink_glitch: [4, 8], grin: [16, 8], glitch: [10, 15], dangle: [12, 12], sleep: [16, 6], wake: [13, 15], perch: [16, 8], perch_blink: [4, 8], perch_blink_glitch: [4, 8], perch_glitch: [10, 15] };
+  const loaded = new Set(['idle']);
+  let clip = 'idle';
+  let clipStart = performance.now();
+  let cycle = 0;
+  let blinkWith = '';
+  let nextGlitch = clipStart + 12000 + Math.random() * 12000;
+  let lastInput = clipStart;
+  let shown = '';
+  const play = name => { clip = loaded.has(name) ? name : riding && loaded.has('perch') ? 'perch' : 'idle'; clipStart = performance.now(); cycle = 0; blinkWith = ''; };
+  const show = (name, cell) => {
+    const count = clips[name][0];
+    if (!shown.startsWith(name + ':')) {
+      sprite.style.backgroundImage = 'url("assets/sprites/' + name + '.webp")';
+      sprite.style.backgroundSize = count * 100 + '% 100%';
+    }
+    if (shown === name + ':' + cell) return;
+    shown = name + ':' + cell;
+    sprite.style.backgroundPosition = cell / (count - 1) * 100 + '% 0';
+  };
+  const animate = now => {
+    const seated = clip.startsWith('perch');
+    if (riding && !seated && loaded.has('perch')) play('perch');
+    if ((!riding && seated) || (clip === 'dangle' && !(drag && drag.moved))) play('idle');
+    let index = Math.floor((now - clipStart) / 1000 * clips[clip][1]);
+    if ((clip === 'glitch' && index >= clips.glitch[0]) || (clip === 'wake' && index >= clips.wake[0]) || (clip === 'grin' && index >= clips.grin[0] * 2)) { play('idle'); index = 0; }
+    if (clip === 'perch_glitch' && index >= clips.perch_glitch[0]) { play('perch'); index = 0; }
+    if ((clip === 'idle' || clip === 'perch') && motion) {
+      const current = Math.floor(index / clips[clip][0]);
+      if (current !== cycle) {
+        cycle = current;
+        const roll = Math.random();
+        const prefix = clip === 'perch' ? 'perch_' : '';
+        blinkWith = roll < 0.1 ? prefix + 'blink_glitch' : roll < 0.55 ? prefix + 'blink' : '';
+        if (now >= nextGlitch) { nextGlitch = now + 12000 + Math.random() * 12000; play(clip === 'perch' ? 'perch_glitch' : 'glitch'); index = 0; }
+      }
+      if (clip === 'idle' && now - lastInput > 30000 && !riding && !drag) play('sleep');
+    }
+    let name = clip;
+    let cell = motion ? index % clips[clip][0] : 0;
+    if ((name === 'idle' || name === 'perch') && blinkWith && loaded.has(blinkWith) && cell >= 9 && cell < 13) { name = blinkWith; cell -= 9; }
+    capri.classList.toggle('still', clip === 'sleep' || clip === 'dangle');
+    show(name, cell);
+    requestAnimationFrame(animate);
+  };
+  const wake = () => { lastInput = performance.now(); if (clip === 'sleep') play('wake'); };
+  ['pointermove', 'pointerdown', 'keydown', 'wheel'].forEach(type => document.addEventListener(type, wake, { passive: true }));
+  addEventListener('load', () => Object.keys(clips).forEach(name => {
+    const strip = new Image();
+    strip.src = 'assets/sprites/' + name + '.webp';
+    strip.decode().then(() => loaded.add(name)).catch(() => {});
+  }));
+  requestAnimationFrame(animate);
   let x = 0;
   let y = 0;
   let size = 220;
   let drag = null;
   let initialized = false;
-  let reaction;
   let clickTimer;
   let riding = false;
   let dragged = false;
   const taskbar = document.querySelector('#taskbar');
   const floor = () => stage.clientHeight - taskbar.offsetHeight;
   const cancelClick = () => clearTimeout(clickTimer);
-  const setRide = on => { cancelClick(); riding = on; sprite.src = on ? 'assets/perch.png' : 'assets/capri.png'; capri.classList.toggle('riding', on); if (on) stage.focus({ preventScroll: true }); };
+  const setRide = on => { cancelClick(); const was = riding; riding = on; if (on && !was) play('perch_glitch'); if (was && !on) play('grin'); capri.classList.toggle('riding', on); if (on) stage.focus({ preventScroll: true }); };
   const placeCursor = (left, top) => {
     left = Math.max(0, Math.min(left, stage.clientWidth - 26));
     top = Math.max(0, Math.min(top, stage.clientHeight - 32));
@@ -59,15 +111,12 @@
     y = floor() * 0.3;
     setRide(false);
     capri.hidden = false;
+    play('grin');
     place();
     placeCursor(x + size * 0.6, y + size * 0.5);
     status.textContent = 'Capri is back.';
   };
-  const react = () => {
-    if (!motion) return;
-    if (reaction) reaction.cancel();
-    reaction = sprite.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(-19px) rotate(-2deg)', offset: 0.38 }, { transform: 'translateY(2px) scaleY(.97) rotate(1deg)', offset: 0.7 }, { transform: 'translateY(0)' }], { duration: 700, easing: 'cubic-bezier(.2,.65,.35,1)' });
-  };
+  const react = () => { if (motion) play('glitch'); };
   const endDrag = () => { drag = null; capri.classList.remove('dragging'); cursor.classList.remove('pressed'); };
   stage.addEventListener('pointermove', followPointer);
   stage.addEventListener('pointerdown', event => { followPointer(event); cursor.classList.add('pressed'); });
@@ -82,7 +131,7 @@
     if (!drag || drag.id !== event.pointerId) return;
     const dx = event.clientX - drag.startX;
     const dy = event.clientY - drag.startY;
-    if (dx * dx + dy * dy > 25) { drag.moved = true; cancelClick(); }
+    if (dx * dx + dy * dy > 25 && !drag.moved) { drag.moved = true; cancelClick(); play('dangle'); }
     if (!drag.moved) return;
     capri.classList.add('dragging');
     x = drag.originX + dx;
@@ -109,7 +158,6 @@
   });
   stage.addEventListener('keydown', event => { if (event.ctrlKey && event.altKey && (event.code === 'KeyC' || event.key.toLowerCase() === 'c') && riding) { event.preventDefault(); setRide(false); } });
   document.querySelector('#demo-restore').addEventListener('click', reset);
-  setInterval(() => { if (motion && !riding && !drag && !capri.hidden && !document.hidden) react(); }, 9000);
   new ResizeObserver(() => { if (!initialized) { initialized = true; reset(); } else { place(); placeCursor(x + size * 0.6, y + size * 0.5); } }).observe(stage);
   updateMotion();
 
