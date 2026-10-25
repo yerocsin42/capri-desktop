@@ -64,8 +64,8 @@ namespace CapriDesktop
     internal sealed class Agent : IDisposable
     {
         internal const double Pace = 15;
-        internal const int Version = 2;
-        private const string Patience = "\"turn\":{\"turn_timeout\":30}";
+        internal const int Version = 3;
+        private const string Patience = "\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45}";
         internal event Action<int> Opened;
         internal event Action<string> Heard;
         internal event Action<string> Replied;
@@ -78,7 +78,7 @@ namespace CapriDesktop
         private Thread worker;
         private volatile bool ready;
 
-        internal static string Prompt { get { return Brain.Persona + "\nYou are talking out loud in a live voice chat: keep every reply to one or two short spoken sentences, and never write tags in square brackets.\nIf the user goes quiet, that's fine: they're probably busy or gaming. Don't beg them to talk or say they left you hanging. Check in only now and then, keep it short, and never repeat a check-in line."; } }
+        internal static string Prompt { get { return Brain.Persona + "\nYou are talking out loud in a live voice chat: keep every reply to one or two short spoken sentences, and never write tags in square brackets.\nIf the user goes quiet, that's fine: they're probably busy or gaming. Don't beg them to talk or say they left you hanging. If they stay quiet, check in once with one short line, then let them be."; } }
 
         internal static string Create(string key, string voiceId)
         {

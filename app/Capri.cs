@@ -195,6 +195,16 @@ namespace CapriDesktop
         private bool chatting;
         private bool dropping;
         private int chatTicket;
+        private const double WakeLevel = 0.02;
+        private readonly object waking = new object();
+        private readonly System.Collections.Generic.List<short[]> preroll = new System.Collections.Generic.List<short[]>();
+        private System.Collections.Generic.List<short[]> backlog;
+        private bool resting;
+        private int loudRun;
+        private bool spoke;
+        private bool checkedIn;
+        private double quietSince = -1;
+        private double wokeAt = -1;
         private VoiceListing voices;
         private int[] mouths;
         private double pace = LettersPerSecond;
@@ -293,6 +303,7 @@ namespace CapriDesktop
                 if (!testing) CheckIdle(Native.IdleMilliseconds());
                 StayOnTop();
                 CheckSeat(clock.Elapsed.TotalSeconds);
+                CheckChat(clock.Elapsed.TotalSeconds);
                 UpdatePill(clock.Elapsed.TotalSeconds);
                 if (!testing && clock.Elapsed.TotalSeconds > 20 && UpdateDue(preferences.UpdateCheckedAt, DateTime.UtcNow.Ticks)) CheckForUpdates(false);
             };
@@ -507,7 +518,7 @@ namespace CapriDesktop
         private void DisplaysChanged(object sender, EventArgs e)
         {
             if (IsDisposed) return;
-            BeginInvoke((Action)delegate { if (seat != null) Fall(); anchor = KeepOnScreen(anchor); Location = anchor; RenderFrame(); });
+            BeginInvoke((Action)delegate { if (seat != null) StandUp(); anchor = KeepOnScreen(anchor); Location = anchor; RenderFrame(); });
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -671,16 +682,15 @@ namespace CapriDesktop
             return true;
         }
 
-        private void Fall()
+        private void StandUp()
         {
             seat = null;
             coveredSince = -1;
             seatLost = -1;
-            falling = true;
+            falling = false;
             fallTo = null;
-            fallSpeed = 0;
-            fallStep = clock.Elapsed.TotalSeconds;
-            Play(dangle);
+            leanAngle = 0;
+            Play(glitch);
             frames.Start();
         }
 
@@ -724,7 +734,7 @@ namespace CapriDesktop
             if (!Ledges.Showing(seat.Window, out bounds) || !Ledges.Seatable(seat.Window, bounds))
             {
                 if (seatLost < 0) seatLost = now;
-                if (!Ledges.Alive(seat.Window) || now - seatLost >= 0.3) Fall();
+                if (!Ledges.Alive(seat.Window) || now - seatLost >= 0.3) StandUp();
                 return;
             }
             seatLost = -1;
@@ -744,7 +754,7 @@ namespace CapriDesktop
             if (!seat.Icon.IsEmpty && now - iconsAt > 2) RefreshIcons();
             if (!Ledges.Covered(seat, Hip().X, Skip())) { coveredSince = -1; return; }
             if (coveredSince < 0) coveredSince = now;
-            if (now - coveredSince >= 0.7) Fall();
+            if (now - coveredSince >= 0.7) StandUp();
         }
 
         private void RefreshIcons()
@@ -760,7 +770,7 @@ namespace CapriDesktop
                     iconsBusy = false;
                     icons = found;
                     iconsAt = clock.Elapsed.TotalSeconds;
-                    if (seat != null && !seat.Icon.IsEmpty && !falling && !found.Contains(seat.Icon)) Fall();
+                    if (seat != null && !seat.Icon.IsEmpty && !falling && !found.Contains(seat.Icon)) StandUp();
                 });
             });
         }
@@ -1070,6 +1080,11 @@ namespace CapriDesktop
             pillUntil = clock.Elapsed.TotalSeconds + 1.5;
             brain.Cancel();
             CloseTalk();
+            OpenLink();
+        }
+
+        private void OpenLink()
+        {
             mainframe.VoiceNote("Opening voice chat...", false);
             int ticket = ++chatTicket;
             string key = voice.Key;
@@ -1120,7 +1135,7 @@ namespace CapriDesktop
             opened.Replied += delegate(string text) { Post(delegate { if (agent == opened) ChatReplied(text); }); };
             opened.Audio += delegate(short[] samples) { Post(delegate { if (agent != opened || dropping) return; speaker.Play(samples); if (!frames.Enabled && !hidden) frames.Start(); }); };
             opened.Interrupted += delegate { Post(delegate { if (agent == opened) speaker.Clear(); }); };
-            opened.Closed += delegate(string problem) { Post(delegate { if (agent != opened) return; if (problem != null) ChatFailed(problem); else StopChat(); }); };
+            opened.Closed += delegate(string problem) { Post(delegate { if (agent != opened) return; if (problem != null) ChatFailed(problem); else Rest(); }); };
             agent = opened;
             opened.Start(url, voiceId);
         }
@@ -1133,6 +1148,15 @@ namespace CapriDesktop
                 if (!testing) ears.Start();
             }
             catch (VoiceException error) { ChatFailed(error.Message); return; }
+            spoke = false;
+            checkedIn = false;
+            quietSince = -1;
+            lock (waking)
+            {
+                wokeAt = backlog != null ? clock.Elapsed.TotalSeconds : -1;
+                if (backlog != null) foreach (short[] held in backlog) agent.Send(held);
+                backlog = null;
+            }
             mainframe.VoiceNote("Voice chat on. Talk to her.", false);
         }
 
@@ -1148,6 +1172,9 @@ namespace CapriDesktop
         private void ChatHeard(string text)
         {
             if (!chatting) return;
+            spoke = true;
+            checkedIn = false;
+            wokeAt = -1;
             int ticket = ++asking;
             heard = text;
             box.Prompt = "> you: ";
@@ -1164,7 +1191,10 @@ namespace CapriDesktop
 
         private void ChatReplied(string text)
         {
-            if (!chatting || dropping) return;
+            if (!chatting) return;
+            checkedIn = !spoke;
+            spoke = false;
+            if (dropping) return;
             string said = Safety.Filter(Voice.Spoken(text));
             if (said != Voice.Spoken(text)) { dropping = true; speaker.Clear(); }
             reply = said;
@@ -1188,8 +1218,41 @@ namespace CapriDesktop
             ears.Muted = false;
             speaker.Clear();
             dropping = false;
+            checkedIn = false;
+            quietSince = -1;
+            wokeAt = -1;
+            lock (waking) { resting = false; backlog = null; preroll.Clear(); loudRun = 0; }
             pill.SetChat(false, false);
             ShowVoice();
+        }
+
+        private void CheckChat(double now)
+        {
+            bool due = agent != null && (checkedIn || (wokeAt >= 0 && now - wokeAt >= 8));
+            if (!due || speaker.Busy) { quietSince = -1; return; }
+            if (quietSince < 0) quietSince = now;
+            else if (now - quietSince >= 1.2) Rest();
+        }
+
+        private void Rest()
+        {
+            if (!chatting) return;
+            Agent closing = agent;
+            agent = null;
+            chatTicket++;
+            if (closing != null) closing.Stop();
+            dropping = false;
+            checkedIn = false;
+            quietSince = -1;
+            wokeAt = -1;
+            lock (waking) { resting = true; backlog = null; preroll.Clear(); loudRun = 0; }
+            mainframe.VoiceNote("Voice chat resting. Talk and she'll pick up.", false);
+        }
+
+        private void Wake()
+        {
+            if (!chatting || agent != null) { lock (waking) backlog = null; return; }
+            OpenLink();
         }
 
         private void ToggleMic()
@@ -1201,6 +1264,28 @@ namespace CapriDesktop
 
         private void Listen(short[] chunk)
         {
+            lock (waking)
+            {
+                if (resting)
+                {
+                    preroll.Add(chunk);
+                    if (preroll.Count > 5) preroll.RemoveAt(0);
+                    loudRun = !speaker.Busy && Speaker.Loudness(chunk, 0, chunk.Length) >= WakeLevel ? loudRun + 1 : 0;
+                    if (loudRun < 2) return;
+                    resting = false;
+                    loudRun = 0;
+                    backlog = new System.Collections.Generic.List<short[]>(preroll);
+                    preroll.Clear();
+                    Post(Wake);
+                    return;
+                }
+                if (backlog != null)
+                {
+                    backlog.Add(chunk);
+                    if (backlog.Count > 80) backlog.RemoveAt(0);
+                    return;
+                }
+            }
             Agent open = agent;
             if (open != null) open.Send(speaker.Busy ? new short[chunk.Length] : chunk);
         }
@@ -1589,6 +1674,7 @@ namespace CapriDesktop
                                     if (Ledges.Covered(seat, Hip().X, Skip())) throw new Exception("A popup like a tooltip or menu knocked her off.");
                                 }
                                 Ledge held = seat;
+                                Point sat = anchor;
                                 using (Shelf cover = new Shelf())
                                 {
                                     cover.FormBorderStyle = FormBorderStyle.FixedSingle;
@@ -1599,7 +1685,7 @@ namespace CapriDesktop
                                     CheckSeat(over + 0.4);
                                     if (seat == null || falling) throw new Exception("A window passing over her knocked her off straight away.");
                                     CheckSeat(over + 0.8);
-                                    if (!falling || seat != null) throw new Exception("A window parked over her seat did not knock her off.");
+                                    if (falling || seat != null || anchor != sat || clip != glitch) throw new Exception("A window parked over her seat did not stand her up where she sat.");
                                 }
                                 Land(held);
                                 clipStart -= 1;
@@ -1623,10 +1709,11 @@ namespace CapriDesktop
                                 HoldSeat(gone);
                                 if (falling || seat == null) throw new Exception("A window blinking out for a moment knocked her off.");
                                 HoldSeat(gone + 0.4);
-                                if (!falling || seat != null || clip != dangle) throw new Exception("She did not fall when the window went away.");
-                                for (int i = 0; i < 200 && falling; i++) Tumble(fallStep + 0.033);
-                                if (falling || seat == null) throw new Exception("She did not land after falling.");
-                                checks.Add("PASS dropped above a window she fell, sat on its top edge, rode along when it moved, ignored popups and windows passing over, fell when a window parked over her or it closed, and landed on the next ledge (landed on " + (seat.Floor ? "the taskbar" : seat.Window != IntPtr.Zero ? "a window" : "a desktop icon") + ")");
+                                if (falling || seat != null || anchor != sat || clip != glitch) throw new Exception("She did not stand up where she sat when the window went away.");
+                                clipStart -= 1;
+                                RenderFrame();
+                                if (clip != idle || anchor != sat) throw new Exception("Standing up did not settle into idle in place.");
+                                checks.Add("PASS dropped above a window she fell, sat on its top edge, rode along when it moved, ignored popups and windows passing over, and stood up where she sat when a window parked over her or it closed");
                             }
                             checks.Add("PASS ledge covering math; desktop icons read: " + Ledges.Icons().Count);
                             seat = null;
@@ -2040,18 +2127,7 @@ namespace CapriDesktop
                                         context.Response.OutputStream.Write(bytes, 0, bytes.Length);
                                         context.Response.Close();
                                     };
-                                    HttpListenerContext talk;
-                                    while (true)
-                                    {
-                                        HttpListenerContext request = server.GetContext();
-                                        if (request.Request.IsWebSocketRequest) { talk = request; break; }
-                                        string body;
-                                        using (StreamReader reader = new StreamReader(request.Request.InputStream)) body = reader.ReadToEnd();
-                                        string path = request.Request.Url.PathAndQuery;
-                                        lock (asked) asked.Add("http " + request.Request.HttpMethod + " " + path + " " + request.Request.Headers["xi-api-key"] + " " + body);
-                                        answer(request, path.IndexOf("get-signed-url", StringComparison.Ordinal) >= 0 ? "{\"signed_url\":\"ws://localhost:" + port + "/talk?token=t\"}" : "{\"agent_id\":\"agent_test\"}");
-                                    }
-                                    System.Net.WebSockets.WebSocket socket = talk.AcceptWebSocketAsync(null).Result.WebSocket;
+                                    System.Net.WebSockets.WebSocket socket = null;
                                     Func<string> receive = delegate
                                     {
                                         byte[] buffer = new byte[65536];
@@ -2074,28 +2150,62 @@ namespace CapriDesktop
                                         foreach (byte value in audio) if (value != 0) return "loud";
                                         return "silent";
                                     };
-                                    lock (asked) asked.Add("init " + receive());
-                                    send("{\"type\":\"conversation_initiation_metadata\",\"conversation_initiation_metadata_event\":{\"conversation_id\":\"conv_test\",\"agent_output_audio_format\":\"pcm_16000\",\"user_input_audio_format\":\"pcm_16000\"}}");
-                                    send("{\"type\":\"ping\",\"ping_event\":{\"event_id\":7,\"ping_ms\":20}}");
-                                    bool ponged = false;
-                                    int chunks = 0;
-                                    while (!ponged || chunks < 3)
+                                    for (int conversation = 1; ; conversation++)
                                     {
-                                        string text = receive();
-                                        if (text == null) return;
-                                        if (text.IndexOf("\"pong\"", StringComparison.Ordinal) >= 0) { ponged = true; lock (asked) asked.Add("pong " + text); }
-                                        string kind = chunk(text);
-                                        if (kind != null) { chunks++; lock (asked) asked.Add("chunk " + kind); }
-                                    }
-                                    send("{\"type\":\"user_transcript\",\"user_transcription_event\":{\"user_transcript\":\"hi\"}}");
-                                    send("{\"type\":\"agent_response\",\"agent_response_event\":{\"agent_response\":\"[GLITCH] Loud and clear, choom.\"}}");
-                                    send("{\"type\":\"audio\",\"audio_event\":{\"audio_base_64\":\"" + lineAudio + "\",\"event_id\":1,\"alignment\":{\"chars\":[\"L\"],\"char_durations_ms\":[40],\"char_start_times_ms\":[0]}}}");
-                                    while (true)
-                                    {
-                                        string text = receive();
-                                        if (text == null) return;
-                                        string kind = chunk(text);
-                                        if (kind != null) lock (asked) asked.Add("late " + kind);
+                                        HttpListenerContext talk;
+                                        while (true)
+                                        {
+                                            HttpListenerContext request = server.GetContext();
+                                            if (request.Request.IsWebSocketRequest) { talk = request; break; }
+                                            string body;
+                                            using (StreamReader reader = new StreamReader(request.Request.InputStream)) body = reader.ReadToEnd();
+                                            string path = request.Request.Url.PathAndQuery;
+                                            lock (asked) asked.Add("http " + request.Request.HttpMethod + " " + path + " " + request.Request.Headers["xi-api-key"] + " " + body);
+                                            answer(request, path.IndexOf("get-signed-url", StringComparison.Ordinal) >= 0 ? "{\"signed_url\":\"ws://localhost:" + port + "/talk?token=t\"}" : "{\"agent_id\":\"agent_test\"}");
+                                        }
+                                        socket = talk.AcceptWebSocketAsync(null).Result.WebSocket;
+                                        lock (asked) asked.Add("init " + receive());
+                                        send("{\"type\":\"conversation_initiation_metadata\",\"conversation_initiation_metadata_event\":{\"conversation_id\":\"conv_test\",\"agent_output_audio_format\":\"pcm_16000\",\"user_input_audio_format\":\"pcm_16000\"}}");
+                                        if (conversation > 1)
+                                        {
+                                            int woke = 0;
+                                            while (woke < 3)
+                                            {
+                                                string text = receive();
+                                                if (text == null) break;
+                                                string kind = chunk(text);
+                                                if (kind == null) continue;
+                                                lock (asked) asked.Add("woke " + kind);
+                                                if (kind == "loud") woke++;
+                                            }
+                                            socket.CloseOutputAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "", CancellationToken.None).Wait();
+                                            continue;
+                                        }
+                                        send("{\"type\":\"ping\",\"ping_event\":{\"event_id\":7,\"ping_ms\":20}}");
+                                        bool ponged = false;
+                                        int chunks = 0;
+                                        while (!ponged || chunks < 3)
+                                        {
+                                            string text = receive();
+                                            if (text == null) return;
+                                            if (text.IndexOf("\"pong\"", StringComparison.Ordinal) >= 0) { ponged = true; lock (asked) asked.Add("pong " + text); }
+                                            string kind = chunk(text);
+                                            if (kind != null) { chunks++; lock (asked) asked.Add("chunk " + kind); }
+                                        }
+                                        send("{\"type\":\"user_transcript\",\"user_transcription_event\":{\"user_transcript\":\"hi\"}}");
+                                        send("{\"type\":\"agent_response\",\"agent_response_event\":{\"agent_response\":\"[GLITCH] Loud and clear, choom.\"}}");
+                                        send("{\"type\":\"audio\",\"audio_event\":{\"audio_base_64\":\"" + lineAudio + "\",\"event_id\":1,\"alignment\":{\"chars\":[\"L\"],\"char_durations_ms\":[40],\"char_start_times_ms\":[0]}}}");
+                                        try
+                                        {
+                                            while (true)
+                                            {
+                                                string text = receive();
+                                                if (text == null) break;
+                                                string kind = chunk(text);
+                                                if (kind != null) lock (asked) asked.Add("late " + kind);
+                                            }
+                                        }
+                                        catch (Exception) { }
                                     }
                                 }
                                 catch (Exception error) { lock (asked) asked.Add("server " + error.GetType().Name); }
@@ -2141,7 +2251,7 @@ namespace CapriDesktop
                             if (heard != "hi" || reply != "Loud and clear, choom." || (talkState != TalkState.Talking && talkState != TalkState.Online) || !speaker.Busy) throw new Exception("Voice chat did not hear and answer: " + heard + " / " + reply + " / " + talkState + " / " + log);
                             Play(idle);
                             if (MouthCell(clock.Elapsed.TotalSeconds, idle) < 0) throw new Exception("Her mouth did not follow the agent's audio.");
-                            string[] wanted = { "http POST /v1/convai/agents/create sk_test_capri_1234 {\"name\":\"Capri\"", "\"turn\":{\"turn_timeout\":30}", "http PATCH /v1/convai/agents/agent_old sk_test_capri_1234 {\"conversation_config\":{\"turn\":{\"turn_timeout\":30}}}", "Don\u0027t beg them to talk", "\"prompt\":{\"prompt\":\"You are Capri", "\"llm\":\"gemini-2.5-flash\"", "\"tts\":{\"voice_id\":\"" + Voice.Default + "\"}", "\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true}},\"tts\":{\"voice_id\":true}}}", "http GET /v1/convai/conversation/get-signed-url?agent_id=agent_old sk_test_capri_1234", "init {\"type\":\"conversation_initiation_client_data\",\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "pong {\"type\":\"pong\",\"event_id\":7}", "chunk silent | chunk loud | chunk loud" };
+                            string[] wanted = { "http POST /v1/convai/agents/create sk_test_capri_1234 {\"name\":\"Capri\"", "\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45}", "http PATCH /v1/convai/agents/agent_old sk_test_capri_1234 {\"conversation_config\":{\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45}}}", "check in once", "Don\u0027t beg them to talk", "\"prompt\":{\"prompt\":\"You are Capri", "\"llm\":\"gemini-2.5-flash\"", "\"tts\":{\"voice_id\":\"" + Voice.Default + "\"}", "\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true}},\"tts\":{\"voice_id\":true}}}", "http GET /v1/convai/conversation/get-signed-url?agent_id=agent_old sk_test_capri_1234", "init {\"type\":\"conversation_initiation_client_data\",\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "pong {\"type\":\"pong\",\"event_id\":7}", "chunk silent | chunk loud | chunk loud" };
                             foreach (string piece in wanted) if (log.IndexOf(piece, StringComparison.Ordinal) < 0) throw new Exception("Agent traffic was missing " + piece + ": " + log);
                             short[] loud = new short[Ears.Chunk];
                             for (int i = 0; i < loud.Length; i++) loud[i] = (short)(Math.Sin(i * 0.3) * 9000);
@@ -2159,13 +2269,40 @@ namespace CapriDesktop
                             ChatHeard("hi again");
                             ChatReplied("well shit, choom");
                             if (!dropping || reply == "well shit, choom") throw new Exception("A rude agent reply got through.");
+                            ChatReplied("Still there, choom?");
+                            if (!checkedIn) throw new Exception("A line she said unprompted was not taken as a check-in.");
+                            speaker.Clear();
+                            double quiet = clock.Elapsed.TotalSeconds;
+                            CheckChat(quiet);
+                            CheckChat(quiet + 0.6);
+                            if (agent == null) throw new Exception("She hung up before her check-in had time to land.");
+                            CheckChat(quiet + 1.3);
+                            if (agent != null || !chatting || !resting || !pill.Chatting || mainframe.VoiceStatus.IndexOf("Voice chat resting", StringComparison.Ordinal) != 0) throw new Exception("She did not hang up and rest after one check-in: " + mainframe.VoiceStatus);
+                            short[] speech = new short[Ears.Chunk];
+                            for (int i = 0; i < speech.Length; i++) speech[i] = (short)(Math.Sin(i * 0.3) * 9000);
+                            ears.Feed(new short[Ears.Chunk]);
+                            ears.Feed(speech);
+                            if (!resting) throw new Exception("One loud blip woke her.");
+                            ears.Feed(speech);
+                            if (resting) throw new Exception("Talking did not wake her.");
+                            ears.Feed(speech);
+                        }
+                        else if (step == 8)
+                        {
+                        }
+                        else if (step == 9)
+                        {
+                            string log;
+                            lock (asked) log = string.Join(" | ", asked.ToArray());
+                            if (System.Text.RegularExpressions.Regex.Matches(log, "get-signed-url").Count < 2 || System.Text.RegularExpressions.Regex.Matches(log, "init \\{").Count < 2 || log.IndexOf("woke silent | woke loud | woke loud | woke loud", StringComparison.Ordinal) < 0) throw new Exception("Talking did not reopen the link and replay what she missed: " + log);
+                            if (agent != null || !chatting || !resting || mainframe.VoiceStatus.IndexOf("Voice chat resting", StringComparison.Ordinal) != 0) throw new Exception("A clean hang-up from ElevenLabs did not leave her resting: " + mainframe.VoiceStatus + " / " + log);
                             pill.Press(2);
-                            if (pill.Chatting || chatting || agent != null || ears.Listening || speaker.Busy) throw new Exception("Wave did not end voice chat.");
+                            if (pill.Chatting || chatting || agent != null || ears.Listening || speaker.Busy || resting) throw new Exception("Wave did not end voice chat.");
                             Voice.Host = agentHost;
                             fakeAgent.Stop();
                             voice.Key = null;
                             ShowVoice();
-                            checks.Add("PASS voice chat: makes an ElevenLabs agent with her persona and voice that waits 30 s before checking in, patches an older agent once, opens a signed live link, answers pings, streams the mic, mic button sits apart on the right only while it's on and mutes the mic, her mouth follows the agent's audio, the mic goes quiet while she talks, blocked lines and rude replies are caught, wave ends it");
+                            checks.Add("PASS voice chat: makes an ElevenLabs agent with her persona and voice that checks in once after 15 s of quiet, patches an older agent once, opens a signed live link, answers pings, streams the mic, mic button sits apart on the right only while it's on and mutes the mic, her mouth follows the agent's audio, the mic goes quiet while she talks, blocked lines and rude replies are caught, one check-in then she hangs up and rests, talking wakes her and replays the first words, a clean hang-up from ElevenLabs rests too, wave ends it");
                             Speak = null;
                             heard = "Hello Capri.";
                             Answer(++asking, "Hey choom! Net's been quiet, too quiet. Time to stir up some trouble.", TalkState.Talking);
@@ -2173,7 +2310,7 @@ namespace CapriDesktop
                             speechStart = replyStart;
                             RenderFrame();
                         }
-                        else if (step == 8)
+                        else if (step == 10)
                         {
                             using (Bitmap capture = new Bitmap(backdrop.Width, backdrop.Height))
                             using (Graphics graphics = Graphics.FromImage(capture))
