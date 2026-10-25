@@ -3,6 +3,8 @@ const sha256 = async (text) => {
   return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
 };
 
+const counters = { '/star': 'stars', '/download': 'downloads' };
+
 export default {
   async fetch(request, env, ctx) {
     const cors = {
@@ -13,18 +15,19 @@ export default {
     const reply = (body, status = 200) => Response.json(body, { status, headers: { ...cors, 'Cache-Control': 'no-store' } });
 
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
-    if (new URL(request.url).pathname !== '/star' || !['GET', 'POST'].includes(request.method)) return reply({ error: 'Not found' }, 404);
+    const table = counters[new URL(request.url).pathname];
+    if (!table || !['GET', 'POST'].includes(request.method)) return reply({ error: 'Not found' }, 404);
 
     if (request.method === 'POST') {
       const day = Math.floor(Date.now() / 86400000);
       const visitor = request.headers.get('CF-Connecting-IP') || 'local';
-      const key = await sha256(visitor + ':' + day + ':' + env.SALT);
+      const key = await sha256(table + ':' + visitor + ':' + day + ':' + env.SALT);
       const tap = await env.DB.prepare('INSERT OR IGNORE INTO taps (key, day) VALUES (?, ?)').bind(key, day).run();
-      if (tap.meta.changes === 1) await env.DB.prepare('UPDATE stars SET count = count + 1').run();
+      if (tap.meta.changes === 1) await env.DB.prepare('UPDATE ' + table + ' SET count = count + 1').run();
       ctx.waitUntil(env.DB.prepare('DELETE FROM taps WHERE day < ?').bind(day).run());
     }
 
-    const { count } = await env.DB.prepare('SELECT count FROM stars').first();
+    const { count } = await env.DB.prepare('SELECT count FROM ' + table).first();
     return reply({ count });
   }
 };

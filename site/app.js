@@ -366,4 +366,80 @@
     }
     readStars({ method: 'POST' }).catch(() => {});
   });
+
+  const downloadCount = install.querySelector('.download-count');
+  let downloads = null;
+  const readDownloads = async (options) => {
+    const response = await fetch(install.dataset.api, { ...options, signal: AbortSignal.timeout(6000) });
+    if (!response.ok) throw new Error('Downloads unavailable');
+    downloads = Math.max((await response.json()).count, downloads || 0);
+    downloadCount.textContent = compact.format(downloads);
+  };
+  readDownloads().catch(() => {});
+  install.addEventListener('click', () => { readDownloads({ method: 'POST', keepalive: true }).catch(() => {}); });
+
+  const changelog = document.querySelector('#changelog');
+  const track = changelog.querySelector('.changelog-track');
+  const day = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
+  const readChanges = async () => {
+    const response = await fetch('https://api.github.com/repos/' + repo + '/commits?sha=main&per_page=20', { signal: AbortSignal.timeout(6000) });
+    if (!response.ok) throw new Error('Changes unavailable');
+    const commits = (await response.json()).filter(item => item && item.commit && typeof item.html_url === 'string' && item.html_url.startsWith('https://github.com/' + repo + '/commit/'));
+    const entry = item => {
+      const row = document.createElement('li');
+      const link = document.createElement('a');
+      link.href = item.html_url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      const when = document.createElement('time');
+      when.dateTime = item.commit.author.date;
+      when.textContent = day.format(new Date(item.commit.author.date));
+      const text = document.createElement('span');
+      text.className = 'changelog-text';
+      text.textContent = item.commit.message.split('\n')[0];
+      link.append(when, text);
+      row.append(link);
+      return row;
+    };
+    const rows = commits.filter(item => !item.commit.message.startsWith('Merge ')).map(entry);
+    if (!rows.length) throw new Error('No changes');
+    track.replaceChildren(...rows);
+    changelog.hidden = false;
+    if (!motion || pane.scrollHeight <= pane.clientHeight) return;
+    for (const row of rows) {
+      const copy = row.cloneNode(true);
+      copy.setAttribute('aria-hidden', 'true');
+      copy.querySelector('a').tabIndex = -1;
+      track.append(copy);
+    }
+    rolling = true;
+    requestAnimationFrame(roll);
+  };
+  const pane = changelog.querySelector('.changelog-window');
+  let rolling = false;
+  let hovering = false;
+  let rolled = 0;
+  let lastFrame = 0;
+  const roll = (now) => {
+    if (!rolling) return;
+    if (lastFrame && !hovering) {
+      rolled += Math.min(now - lastFrame, 100) / 1000 * 26;
+      const loop = track.scrollHeight / 2;
+      if (rolled >= loop) rolled -= loop;
+      pane.scrollTop = rolled;
+    }
+    lastFrame = now;
+    requestAnimationFrame(roll);
+  };
+  const stopRolling = () => {
+    if (!rolling) return;
+    rolling = false;
+    const top = pane.scrollTop % (track.scrollHeight / 2);
+    for (const copy of track.querySelectorAll('li[aria-hidden="true"]')) copy.remove();
+    pane.scrollTop = top;
+  };
+  for (const name of ['wheel', 'touchstart', 'pointerdown', 'keydown']) pane.addEventListener(name, stopRolling, { passive: true });
+  pane.addEventListener('pointerenter', () => { hovering = true; });
+  pane.addEventListener('pointerleave', () => { hovering = false; });
+  readChanges().catch(() => {});
 })();
