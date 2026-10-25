@@ -1,0 +1,259 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+namespace CapriDesktop
+{
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct WaveFormat
+    {
+        internal short Tag, Channels;
+        internal int SampleRate, BytesPerSecond;
+        internal short Align, Bits, Extra;
+
+        internal static WaveFormat Mono(int rate) { return new WaveFormat { Tag = 1, Channels = 1, SampleRate = rate, BytesPerSecond = rate * 2, Align = 2, Bits = 16 }; }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct WaveHeader
+    {
+        internal IntPtr Data;
+        internal int Length, Recorded;
+        internal IntPtr User;
+        internal int Flags, Loops;
+        internal IntPtr Next, Reserved;
+    }
+
+    internal sealed class Ears : IDisposable
+    {
+        internal const int Rate = 16000;
+        internal const int Chunk = Rate / 10;
+        private const int Buffers = 4;
+        internal event Action<short[]> Heard;
+        internal event Action<double> Level;
+        internal volatile bool Muted;
+        private IntPtr device;
+        private IntPtr[] headers;
+        private Thread worker;
+        private AutoResetEvent signal;
+        private volatile bool running;
+
+        [DllImport("winmm.dll")] private static extern int waveInOpen(out IntPtr device, int id, ref WaveFormat format, IntPtr callback, IntPtr instance, int flags);
+        [DllImport("winmm.dll")] private static extern int waveInPrepareHeader(IntPtr device, IntPtr header, int size);
+        [DllImport("winmm.dll")] private static extern int waveInUnprepareHeader(IntPtr device, IntPtr header, int size);
+        [DllImport("winmm.dll")] private static extern int waveInAddBuffer(IntPtr device, IntPtr header, int size);
+        [DllImport("winmm.dll")] private static extern int waveInStart(IntPtr device);
+        [DllImport("winmm.dll")] private static extern int waveInReset(IntPtr device);
+        [DllImport("winmm.dll")] private static extern int waveInClose(IntPtr device);
+
+        internal bool Listening { get { return running; } }
+
+        internal void Start()
+        {
+            if (running) return;
+            WaveFormat format = WaveFormat.Mono(Rate);
+            signal = new AutoResetEvent(false);
+            int size = Marshal.SizeOf(typeof(WaveHeader));
+            if (waveInOpen(out device, -1, ref format, signal.SafeWaitHandle.DangerousGetHandle(), IntPtr.Zero, 0x00050000) != 0)
+            {
+                signal.Dispose();
+                signal = null;
+                throw new VoiceException("Can't open your microphone.");
+            }
+            headers = new IntPtr[Buffers];
+            for (int i = 0; i < Buffers; i++)
+            {
+                WaveHeader header = new WaveHeader { Data = Marshal.AllocHGlobal(Chunk * 2), Length = Chunk * 2 };
+                headers[i] = Marshal.AllocHGlobal(size);
+                Marshal.StructureToPtr(header, headers[i], false);
+                waveInPrepareHeader(device, headers[i], size);
+                waveInAddBuffer(device, headers[i], size);
+            }
+            running = true;
+            waveInStart(device);
+            worker = new Thread(Pump);
+            worker.IsBackground = true;
+            worker.Name = "Capri ears";
+            worker.Start();
+        }
+
+        internal void Stop()
+        {
+            if (!running) return;
+            running = false;
+            signal.Set();
+            worker.Join(1000);
+            waveInReset(device);
+            int size = Marshal.SizeOf(typeof(WaveHeader));
+            foreach (IntPtr pointer in headers)
+            {
+                waveInUnprepareHeader(device, pointer, size);
+                WaveHeader header = (WaveHeader)Marshal.PtrToStructure(pointer, typeof(WaveHeader));
+                Marshal.FreeHGlobal(header.Data);
+                Marshal.FreeHGlobal(pointer);
+            }
+            waveInClose(device);
+            device = IntPtr.Zero;
+            headers = null;
+            signal.Dispose();
+            signal = null;
+        }
+
+        public void Dispose() { Stop(); }
+
+        private void Pump()
+        {
+            int size = Marshal.SizeOf(typeof(WaveHeader));
+            int flags = (int)Marshal.OffsetOf(typeof(WaveHeader), "Flags");
+            int next = 0;
+            try
+            {
+                while (running)
+                {
+                    signal.WaitOne(250);
+                    while (running)
+                    {
+                        IntPtr pointer = headers[next];
+                        WaveHeader header = (WaveHeader)Marshal.PtrToStructure(pointer, typeof(WaveHeader));
+                        if ((header.Flags & 1) == 0) break;
+                        short[] chunk = new short[header.Recorded / 2];
+                        Marshal.Copy(header.Data, chunk, 0, chunk.Length);
+                        Marshal.WriteInt32(pointer, flags, header.Flags & ~1);
+                        waveInAddBuffer(device, pointer, size);
+                        next = (next + 1) % Buffers;
+                        try { Feed(chunk); }
+                        catch (Exception) { }
+                    }
+                }
+            }
+            catch (Exception) { }
+        }
+
+        internal void Feed(short[] chunk)
+        {
+            Action<double> level = Level;
+            if (level != null) level(Muted ? 0 : Speaker.Loudness(chunk, 0, chunk.Length));
+            Action<short[]> heard = Heard;
+            if (heard != null) heard(Muted ? new short[chunk.Length] : chunk);
+        }
+    }
+
+    internal sealed class Speaker : IDisposable
+    {
+        private readonly bool silent;
+        private readonly List<IntPtr> pending = new List<IntPtr>();
+        private readonly List<int> shapes = new List<int>();
+        private readonly List<short> leftover = new List<short>();
+        private IntPtr device;
+        private int rate;
+        private double loudest = 0.05;
+        private long began;
+        private long until;
+
+        [DllImport("winmm.dll")] private static extern int waveOutOpen(out IntPtr device, int id, ref WaveFormat format, IntPtr callback, IntPtr instance, int flags);
+        [DllImport("winmm.dll")] private static extern int waveOutPrepareHeader(IntPtr device, IntPtr header, int size);
+        [DllImport("winmm.dll")] private static extern int waveOutUnprepareHeader(IntPtr device, IntPtr header, int size);
+        [DllImport("winmm.dll")] private static extern int waveOutWrite(IntPtr device, IntPtr header, int size);
+        [DllImport("winmm.dll")] private static extern int waveOutReset(IntPtr device);
+        [DllImport("winmm.dll")] private static extern int waveOutClose(IntPtr device);
+
+        internal Speaker(bool quiet) { silent = quiet; }
+
+        internal static double Loudness(short[] samples, int start, int count)
+        {
+            if (count <= 0) return 0;
+            double sum = 0;
+            for (int i = start; i < start + count; i++) sum += (double)samples[i] * samples[i];
+            return Math.Sqrt(sum / count) / 32768.0;
+        }
+
+        internal void Open(int sampleRate)
+        {
+            if (sampleRate == rate && (silent || device != IntPtr.Zero)) return;
+            Close();
+            rate = sampleRate;
+            if (silent) return;
+            WaveFormat format = WaveFormat.Mono(rate);
+            if (waveOutOpen(out device, -1, ref format, IntPtr.Zero, IntPtr.Zero, 0) != 0)
+            {
+                device = IntPtr.Zero;
+                throw new VoiceException("Can't open your speakers.");
+            }
+        }
+
+        internal bool Busy { get { return Stopwatch.GetTimestamp() < Interlocked.Read(ref until) + Stopwatch.Frequency * 35 / 100; } }
+
+        internal void Play(short[] samples)
+        {
+            if (rate == 0 || samples.Length == 0) return;
+            Sweep();
+            long now = Stopwatch.GetTimestamp();
+            if (now >= Interlocked.Read(ref until)) { began = now; shapes.Clear(); leftover.Clear(); Interlocked.Exchange(ref until, now); }
+            Interlocked.Add(ref until, samples.Length * Stopwatch.Frequency / rate);
+            leftover.AddRange(samples);
+            int step = Math.Max(1, rate / 12);
+            short[] all = leftover.ToArray();
+            int at = 0;
+            for (; at + step <= all.Length; at += step)
+            {
+                double level = Loudness(all, at, step);
+                loudest = Math.Max(loudest * 0.995, level);
+                int index = shapes.Count;
+                shapes.Add(level <= Math.Max(0.004, loudest * 0.08) ? -1 : level < loudest * 0.3 ? (index % 3 == 0 ? 0 : 1) : level < loudest * 0.55 ? (index % 2 == 1 ? 2 : 1) : level < loudest * 0.85 ? 3 : 4);
+            }
+            leftover.RemoveRange(0, at);
+            if (silent || device == IntPtr.Zero) return;
+            int size = Marshal.SizeOf(typeof(WaveHeader));
+            WaveHeader header = new WaveHeader { Data = Marshal.AllocHGlobal(samples.Length * 2), Length = samples.Length * 2 };
+            Marshal.Copy(samples, 0, header.Data, samples.Length);
+            IntPtr pointer = Marshal.AllocHGlobal(size);
+            Marshal.StructureToPtr(header, pointer, false);
+            waveOutPrepareHeader(device, pointer, size);
+            waveOutWrite(device, pointer, size);
+            pending.Add(pointer);
+        }
+
+        internal int Shape()
+        {
+            long now = Stopwatch.GetTimestamp();
+            if (now >= Interlocked.Read(ref until) || shapes.Count == 0) return -1;
+            int index = (int)((now - began) * 12 / Stopwatch.Frequency);
+            return index >= 0 && index < shapes.Count ? shapes[index] : -1;
+        }
+
+        internal void Clear()
+        {
+            if (device != IntPtr.Zero) waveOutReset(device);
+            Sweep();
+            shapes.Clear();
+            leftover.Clear();
+            Interlocked.Exchange(ref until, 0);
+        }
+
+        private void Sweep()
+        {
+            int size = Marshal.SizeOf(typeof(WaveHeader));
+            for (int i = pending.Count - 1; i >= 0; i--)
+            {
+                WaveHeader header = (WaveHeader)Marshal.PtrToStructure(pending[i], typeof(WaveHeader));
+                if ((header.Flags & 1) == 0) continue;
+                waveOutUnprepareHeader(device, pending[i], size);
+                Marshal.FreeHGlobal(header.Data);
+                Marshal.FreeHGlobal(pending[i]);
+                pending.RemoveAt(i);
+            }
+        }
+
+        internal void Close()
+        {
+            Clear();
+            if (device != IntPtr.Zero) waveOutClose(device);
+            device = IntPtr.Zero;
+            rate = 0;
+        }
+
+        public void Dispose() { Close(); }
+    }
+}

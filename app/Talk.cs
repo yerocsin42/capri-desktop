@@ -182,13 +182,21 @@ namespace CapriDesktop
     {
         internal event Action Typing;
         internal event Action Voice;
+        internal event Action Mute;
         private int hover;
         private float scale = 1;
         private Point centre;
+        private bool chatting;
+        private bool muted;
+        private int level;
 
         internal TalkPill() : base("Talk to Capri") { Cursor = Cursors.Hand; }
 
         internal static Size Measure(float scale) { return new Size((int)Math.Round(100 * scale), (int)Math.Round(40 * scale)); }
+
+        internal bool Chatting { get { return chatting; } }
+
+        internal bool Muted { get { return muted; } }
 
         internal void Place(Point topCentre, float value)
         {
@@ -198,41 +206,101 @@ namespace CapriDesktop
             Redraw();
         }
 
-        private void Redraw()
+        internal void SetChat(bool on, bool micMuted)
         {
-            Bitmap image = Render(scale, hover);
-            Present(image, new Point(centre.X - image.Width / 2, centre.Y));
+            if (on == chatting && micMuted == muted) return;
+            chatting = on;
+            muted = micMuted;
+            level = 0;
+            if (Visible) Redraw();
         }
 
-        internal static Bitmap Render(float s, int hover)
+        internal void SetLevel(double value)
+        {
+            int step = chatting && !muted ? Math.Min(6, (int)(Math.Sqrt(value) * 24)) : 0;
+            if (step == level) return;
+            level = step;
+            if (Visible) Redraw();
+        }
+
+        private void Redraw()
+        {
+            Bitmap image = Render(scale, hover, chatting, muted, level);
+            Present(image, new Point(centre.X - Measure(scale).Width / 2, centre.Y));
+        }
+
+        internal static Bitmap Render(float s, int hover, bool chatting = false, bool muted = false, int level = 0)
         {
             Size size = Measure(s);
-            Bitmap image = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppPArgb);
+            Bitmap image = new Bitmap(chatting ? size.Width + (int)Math.Round(4 * s) + size.Height : size.Width, size.Height, PixelFormat.Format32bppPArgb);
             using (Graphics graphics = Graphics.FromImage(image))
             {
                 graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
                 float margin = 3 * s;
                 RectangleF pill = new RectangleF(margin, margin, size.Width - margin * 2, size.Height - margin * 2);
-                using (GraphicsPath path = Look.Rounded(pill, pill.Height / 2))
+                Plate(graphics, pill, s);
+                if (chatting)
                 {
-                    using (Brush fill = new SolidBrush(Color.FromArgb(244, 20, 21, 25))) graphics.FillPath(fill, path);
-                    using (Pen edge = new Pen(Color.FromArgb(70, 73, 82), 1.2f * s)) graphics.DrawPath(edge, path);
+                    RectangleF button = new RectangleF(image.Width - size.Height + margin, margin, size.Height - margin * 2, size.Height - margin * 2);
+                    Plate(graphics, button, s);
+                    PointF spot = new PointF(button.X + button.Width / 2, button.Y + button.Height / 2);
+                    if (hover == 3)
+                    {
+                        float radius = button.Height * 0.4f;
+                        using (Brush glow = new SolidBrush(Color.FromArgb(30, 255, 255, 255))) graphics.FillEllipse(glow, spot.X - radius, spot.Y - radius, radius * 2, radius * 2);
+                    }
+                    DrawMic(graphics, spot, s, hover == 3 ? Look.Cyan : Look.Ink, muted);
                 }
                 float middle = pill.X + pill.Width / 2;
                 using (Pen divider = new Pen(Color.FromArgb(70, 73, 82), 1.2f * s)) graphics.DrawLine(divider, middle, pill.Y + pill.Height * 0.27f, middle, pill.Bottom - pill.Height * 0.27f);
                 PointF pencil = new PointF(pill.X + pill.Width * 0.26f, pill.Y + pill.Height / 2);
                 PointF wave = new PointF(pill.X + pill.Width * 0.74f, pill.Y + pill.Height / 2);
-                if (hover != 0)
+                if (hover == 1 || hover == 2)
                 {
                     PointF lit = hover == 1 ? pencil : wave;
                     float radius = pill.Height * 0.4f;
                     using (Brush glow = new SolidBrush(Color.FromArgb(30, 255, 255, 255))) graphics.FillEllipse(glow, lit.X - radius, lit.Y - radius, radius * 2, radius * 2);
                 }
                 DrawPencil(graphics, pencil, s, hover == 1 ? Look.Cyan : Look.Ink);
-                DrawWave(graphics, wave, s, hover == 2 ? Look.Cyan : Look.Ink);
+                DrawWave(graphics, wave, s, hover == 2 || chatting ? Look.Cyan : Look.Ink, chatting ? 0.45f + level * 0.14f : 1);
             }
             return image;
+        }
+
+        private static void Plate(Graphics graphics, RectangleF area, float s)
+        {
+            using (GraphicsPath path = Look.Rounded(area, area.Height / 2))
+            {
+                using (Brush fill = new SolidBrush(Color.FromArgb(244, 20, 21, 25))) graphics.FillPath(fill, path);
+                using (Pen edge = new Pen(Color.FromArgb(70, 73, 82), 1.2f * s)) graphics.DrawPath(edge, path);
+            }
+        }
+
+        private static void DrawMic(Graphics graphics, PointF centre, float s, Color colour, bool muted)
+        {
+            float x = centre.X;
+            float y = centre.Y + 0.5f * s;
+            using (Brush ink = new SolidBrush(colour))
+            using (GraphicsPath capsule = Look.Rounded(new RectangleF(x - 3.2f * s, y - 9 * s, 6.4f * s, 11 * s), 3.2f * s))
+                graphics.FillPath(ink, capsule);
+            using (Pen line = new Pen(colour, 1.8f * s))
+            {
+                line.StartCap = LineCap.Round;
+                line.EndCap = LineCap.Round;
+                graphics.DrawArc(line, x - 6 * s, y - 8 * s, 12 * s, 12 * s, 0, 180);
+                graphics.DrawLine(line, x, y + 4 * s, x, y + 7 * s);
+                graphics.DrawLine(line, x - 3.5f * s, y + 7 * s, x + 3.5f * s, y + 7 * s);
+            }
+            if (!muted) return;
+            using (Pen gap = new Pen(Color.FromArgb(20, 21, 25), 4.2f * s))
+            using (Pen slash = new Pen(Look.Red, 2 * s))
+            {
+                slash.StartCap = LineCap.Round;
+                slash.EndCap = LineCap.Round;
+                graphics.DrawLine(gap, x - 7.5f * s, y - 9.5f * s, x + 7.5f * s, y + 7.5f * s);
+                graphics.DrawLine(slash, x - 7.5f * s, y - 9.5f * s, x + 7.5f * s, y + 7.5f * s);
+            }
         }
 
         private static void DrawPencil(Graphics graphics, PointF centre, float s, Color colour)
@@ -254,7 +322,7 @@ namespace CapriDesktop
             graphics.Restore(state);
         }
 
-        private static void DrawWave(Graphics graphics, PointF centre, float s, Color colour)
+        private static void DrawWave(Graphics graphics, PointF centre, float s, Color colour, float stretch = 1)
         {
             float[] heights = { 5, 10, 14, 9, 4 };
             using (Pen bar = new Pen(colour, 2.3f * s))
@@ -264,13 +332,18 @@ namespace CapriDesktop
                 for (int i = 0; i < heights.Length; i++)
                 {
                     float x = centre.X + (i - 2) * 3.6f * s;
-                    float half = heights[i] * s / 2;
+                    float half = Math.Max(1.5f, heights[i] * stretch) * s / 2;
                     graphics.DrawLine(bar, x, centre.Y - half, x, centre.Y + half);
                 }
             }
         }
 
-        private int PartAt(int x) { return x < Width / 2 ? 1 : 2; }
+        private int PartAt(int x)
+        {
+            int wide = Measure(scale).Width;
+            if (chatting && x >= wide) return 3;
+            return x < wide / 2 ? 1 : 2;
+        }
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
@@ -288,12 +361,15 @@ namespace CapriDesktop
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
-            if (e.Button != MouseButtons.Left) return;
-            if (PartAt(e.X) == 1) { if (Typing != null) Typing(); }
-            else if (Voice != null) Voice();
+            if (e.Button == MouseButtons.Left) Press(PartAt(e.X));
         }
 
-        internal void Press(int part) { if (part == 1) { if (Typing != null) Typing(); } else if (Voice != null) Voice(); }
+        internal void Press(int part)
+        {
+            if (part == 1) { if (Typing != null) Typing(); }
+            else if (part == 3) { if (Mute != null) Mute(); }
+            else if (Voice != null) Voice();
+        }
     }
 
     internal sealed class SpeechBox : Overlay

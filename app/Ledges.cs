@@ -67,6 +67,17 @@ namespace CapriDesktop
             return bounds.Width > 0 && bounds.Height > 0;
         }
 
+        internal static bool Alive(IntPtr window) { return IsWindow(window); }
+
+        private static bool Solid(IntPtr window, Rectangle bounds)
+        {
+            int style = Native.GetWindowLong(window, -16);
+            int extended = Native.GetWindowLong(window, -20);
+            if ((extended & 0x80) != 0 && (extended & 0x40000) == 0) return false;
+            if ((style & 0x00C00000) != 0x00C00000) return false;
+            return bounds.Width >= 120 && bounds.Height >= 60;
+        }
+
         internal static bool Seatable(IntPtr window, Rectangle bounds)
         {
             int extended = Native.GetWindowLong(window, -20);
@@ -147,7 +158,7 @@ namespace CapriDesktop
             {
                 if (window == seat.Window) return false;
                 Rectangle bounds;
-                if (!skip.Contains(window) && Showing(window, out bounds) && x >= bounds.Left && x < bounds.Right && seat.Y >= bounds.Top && seat.Y < bounds.Bottom) { covered = true; return false; }
+                if (!skip.Contains(window) && Showing(window, out bounds) && Solid(window, bounds) && x >= bounds.Left && x < bounds.Right && seat.Y >= bounds.Top && seat.Y < bounds.Bottom) { covered = true; return false; }
                 return true;
             };
             EnumWindows(visit, IntPtr.Zero);

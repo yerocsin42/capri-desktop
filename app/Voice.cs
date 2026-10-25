@@ -50,7 +50,7 @@ namespace CapriDesktop
 
     internal sealed class Voice
     {
-        private const string Host = "https://api.elevenlabs.io";
+        internal static string Host = "https://api.elevenlabs.io";
         internal const string Default = "MkTSSXNgnBULS6ek4pon";
         private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("Capri.ElevenLabs");
         internal volatile string Key;
@@ -74,19 +74,20 @@ namespace CapriDesktop
 
         internal static string Spoken(string said) { return Regex.Replace(Regex.Replace(said ?? "", @"\[[^\]]*\]", " ").Replace("*", ""), @"\s+", " ").Trim(); }
 
-        private static HttpWebRequest Open(string path, string key, string method)
+        internal static HttpWebRequest Open(string path, string key, string method)
         {
             ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(Host + path);
             request.Method = method;
             request.UserAgent = "Capri-Desktop";
             request.Headers["xi-api-key"] = key;
+            request.ServicePoint.Expect100Continue = false;
             request.Timeout = 20000;
             request.ReadWriteTimeout = 20000;
             return request;
         }
 
-        private static byte[] Send(HttpWebRequest request, byte[] body)
+        internal static byte[] Send(HttpWebRequest request, byte[] body)
         {
             try
             {
@@ -108,10 +109,11 @@ namespace CapriDesktop
             {
                 HttpWebResponse response = error.Response as HttpWebResponse;
                 if (response == null) throw new VoiceException("Can't reach ElevenLabs. Check your internet.");
+                int status = (int)response.StatusCode;
                 string detail;
                 using (response)
                 using (StreamReader reader = new StreamReader(response.GetResponseStream())) detail = reader.ReadToEnd();
-                throw new VoiceException(Explain((int)response.StatusCode, detail), (int)response.StatusCode);
+                throw new VoiceException(Explain(status, detail), status);
             }
             catch (IOException) { throw new VoiceException("Can't reach ElevenLabs. Check your internet."); }
         }
@@ -122,15 +124,22 @@ namespace CapriDesktop
             if (detail.Contains("quota_exceeded")) return "Out of ElevenLabs credits.";
             if (detail.Contains("missing_permissions")) return "Key needs Voices and Text to Speech access.";
             if (detail.Contains("voice_not_found")) return "Voice not found. Add it to your ElevenLabs voices.";
-            if (status == 401) return "ElevenLabs rejected the key.";
-            if (status == 429) return "ElevenLabs is busy. Try again in a moment.";
+            if (detail.Contains("invalid_api_key")) return "ElevenLabs rejected the key.";
             Match message = Regex.Match(detail, "\"message\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
             if (message.Success)
             {
                 string text = Regex.Unescape(message.Groups[1].Value).Trim();
-                if (text.Length > 0) return text.Length > 70 ? text.Substring(0, 67) + "..." : text;
+                if (text.Length > 0) return Short(text);
             }
+            if (status == 401) return "ElevenLabs rejected the key.";
+            if (status == 429) return "ElevenLabs is busy. Try again in a moment.";
             return "ElevenLabs error " + status + ".";
+        }
+
+        internal static string Short(string text)
+        {
+            text = (text ?? "").Trim();
+            return text.Length > 72 ? text.Substring(0, 69) + "..." : text;
         }
 
         internal static T Read<T>(byte[] json) { using (MemoryStream stream = new MemoryStream(json)) return (T)new DataContractJsonSerializer(typeof(T)).ReadObject(stream); }
@@ -171,7 +180,7 @@ namespace CapriDesktop
             return Clean(Send(Open("/v1/text-to-speech/" + Uri.EscapeDataString(id) + "?output_format=wav_24000", key, "POST"), Encoding.UTF8.GetBytes(body.ToString())));
         }
 
-        private static string Quote(string value)
+        internal static string Quote(string value)
         {
             StringBuilder quoted = new StringBuilder("\"");
             foreach (char c in value)
@@ -247,6 +256,11 @@ namespace CapriDesktop
         {
             int rate;
             short[] samples = Samples(wav, out rate);
+            return Wave(samples, rate);
+        }
+
+        internal static byte[] Wave(short[] samples, int rate)
+        {
             using (MemoryStream stream = new MemoryStream())
             using (BinaryWriter writer = new BinaryWriter(stream))
             {

@@ -66,6 +66,8 @@ namespace CapriDesktop
         [DataMember] public string VoiceKey;
         [DataMember] public string VoiceId;
         [DataMember] public string VoiceModel;
+        [DataMember] public string AgentId;
+        [DataMember] public int AgentVersion;
     }
 
     [DataContract]
@@ -148,6 +150,8 @@ namespace CapriDesktop
         private Ledge fallTo;
         private double fallSpeed;
         private double fallStep;
+        private double coveredSince = -1;
+        private double seatLost = -1;
         private System.Collections.Generic.List<Rectangle> icons = new System.Collections.Generic.List<Rectangle>();
         private bool iconsBusy;
         private double iconsAt = -10;
@@ -185,6 +189,12 @@ namespace CapriDesktop
         internal Func<string, string> Think;
         internal Func<string, byte[]> Speak;
         private readonly Voice voice = new Voice();
+        private readonly Ears ears = new Ears();
+        private readonly Speaker speaker;
+        private volatile Agent agent;
+        private bool chatting;
+        private bool dropping;
+        private int chatTicket;
         private VoiceListing voices;
         private int[] mouths;
         private double pace = LettersPerSecond;
@@ -198,6 +208,7 @@ namespace CapriDesktop
         internal Companion(string data, EventWaitHandle signal, bool smoke)
         {
             testing = smoke;
+            speaker = new Speaker(smoke);
             restore = signal;
             settingsPath = Path.Combine(data, "settings.json");
             engine = new Engine(data);
@@ -264,13 +275,16 @@ namespace CapriDesktop
             voice.Model = string.IsNullOrEmpty(preferences.VoiceModel) ? null : preferences.VoiceModel;
             ShowVoice();
             pill.Typing += OpenTyper;
-            pill.Voice += VoiceSoon;
+            pill.Voice += ToggleChat;
+            pill.Mute += ToggleMic;
+            ears.Heard += Listen;
+            ears.Level += delegate(double value) { Post(delegate { pill.SetLevel(value); }); };
             box.Dismissed += delegate { if (box.Leaving < 0) box.Leaving = clock.Elapsed.TotalSeconds; };
             typer.Submitted += Hear;
             typer.VisibleChanged += delegate { if (!typer.Visible && replyDone >= 0) replyDone = clock.Elapsed.TotalSeconds; };
             frames = new System.Windows.Forms.Timer();
             frames.Interval = 33;
-            frames.Tick += delegate { if (riding) FollowCursor(); else if (falling) Tumble(clock.Elapsed.TotalSeconds); else if (seat != null) HoldSeat(); RenderFrame(); if (!riding && !dragging && !preferences.Motion && clip == idle && speech == null && talkState == TalkState.Off) frames.Stop(); };
+            frames.Tick += delegate { if (riding) FollowCursor(); else if (falling) Tumble(clock.Elapsed.TotalSeconds); else if (seat != null) HoldSeat(clock.Elapsed.TotalSeconds); RenderFrame(); if (!riding && !dragging && !preferences.Motion && clip == idle && speech == null && talkState == TalkState.Off) frames.Stop(); };
             signals = new System.Windows.Forms.Timer();
             signals.Interval = 250;
             signals.Tick += delegate
@@ -452,7 +466,7 @@ namespace CapriDesktop
         private void CheckIdle(long quiet)
         {
             if (clip == sleep) { if (quiet < 1000) Play(wake); return; }
-            if (quiet >= 120000 && clip == idle && preferences.Motion && !riding && !dragging && !hidden && speech == null && talkState == TalkState.Off && !typer.Visible) Play(sleep);
+            if (quiet >= 120000 && clip == idle && preferences.Motion && !riding && !dragging && !hidden && !chatting && speech == null && talkState == TalkState.Off && !typer.Visible) Play(sleep);
         }
 
         private static Size CanvasSize(int size) { return new Size(size + PaddingSize * 2, size + PaddingSize * 2); }
@@ -640,7 +654,7 @@ namespace CapriDesktop
         private System.Collections.Generic.List<IntPtr> Skip()
         {
             System.Collections.Generic.List<IntPtr> skip = new System.Collections.Generic.List<IntPtr>();
-            foreach (Form own in new Form[] { this, pill, box, typer }) if (own.IsHandleCreated) skip.Add(own.Handle);
+            foreach (Form own in new Form[] { this, pill, box, typer, mainframe }) if (own.IsHandleCreated) skip.Add(own.Handle);
             return skip;
         }
 
@@ -660,6 +674,8 @@ namespace CapriDesktop
         private void Fall()
         {
             seat = null;
+            coveredSince = -1;
+            seatLost = -1;
             falling = true;
             fallTo = null;
             fallSpeed = 0;
@@ -691,6 +707,8 @@ namespace CapriDesktop
                 if (bounds != ledge.Bounds) { ledge.Left = bounds.Left; ledge.Right = bounds.Right; ledge.Y = bounds.Top; ledge.Bounds = bounds; }
             }
             falling = false;
+            coveredSince = -1;
+            seatLost = -1;
             int x = ledge.Icon.IsEmpty ? Math.Max(ledge.Left + 8, Math.Min(Hip().X, ledge.Right - 8)) : ledge.Icon.Left + ledge.Icon.Width / 2;
             seat = ledge;
             leanAngle = 0;
@@ -699,11 +717,17 @@ namespace CapriDesktop
             SavePreferences();
         }
 
-        private void HoldSeat()
+        private void HoldSeat(double now)
         {
             if (seat.Window == IntPtr.Zero) return;
             Rectangle bounds;
-            if (!Ledges.Showing(seat.Window, out bounds) || !Ledges.Seatable(seat.Window, bounds)) { Fall(); return; }
+            if (!Ledges.Showing(seat.Window, out bounds) || !Ledges.Seatable(seat.Window, bounds))
+            {
+                if (seatLost < 0) seatLost = now;
+                if (!Ledges.Alive(seat.Window) || now - seatLost >= 0.3) Fall();
+                return;
+            }
+            seatLost = -1;
             if (bounds == seat.Bounds) return;
             int dx = bounds.Width == seat.Bounds.Width ? bounds.Left - seat.Bounds.Left : 0;
             int x = Math.Max(bounds.Left + 8, Math.Min(Hip().X + dx, bounds.Right - 8));
@@ -718,7 +742,9 @@ namespace CapriDesktop
         {
             if (seat == null || falling || seat.Floor) return;
             if (!seat.Icon.IsEmpty && now - iconsAt > 2) RefreshIcons();
-            if (Ledges.Covered(seat, Hip().X, Skip())) Fall();
+            if (!Ledges.Covered(seat, Hip().X, Skip())) { coveredSince = -1; return; }
+            if (coveredSince < 0) coveredSince = now;
+            if (now - coveredSince >= 0.7) Fall();
         }
 
         private void RefreshIcons()
@@ -761,7 +787,7 @@ namespace CapriDesktop
         {
             hidden = value;
             visibilityItem.Text = value ? "Show Capri" : "Hide Capri";
-            if (value) { StopRide(); seat = null; falling = false; pendingClick = false; clickDelay.Stop(); frames.Stop(); Hide(); pill.Hide(); typer.Hide(); CloseTalk(); }
+            if (value) { StopRide(); seat = null; falling = false; pendingClick = false; clickDelay.Stop(); frames.Stop(); Hide(); pill.Hide(); typer.Hide(); CloseTalk(); StopChat(); }
             else { anchor = KeepOnScreen(anchor); Location = anchor; Play(grin); Show(); RenderFrame(); UpdateAnimation(); }
             mainframe.Sync();
         }
@@ -917,10 +943,13 @@ namespace CapriDesktop
 
         internal void ForgetVoice()
         {
+            StopChat();
             voice.Stop();
             voice.Key = null;
             voices = null;
             preferences.VoiceKey = null;
+            preferences.AgentId = null;
+            preferences.AgentVersion = 0;
             SavePreferences();
             ShowVoice();
         }
@@ -964,7 +993,7 @@ namespace CapriDesktop
                 int status = 0;
                 try { found = Voice.Fetch(key); }
                 catch (VoiceException error) { problem = error.Message; status = error.Status; }
-                catch (Exception) { problem = "Couldn't read your ElevenLabs voices."; }
+                catch (Exception error) { problem = Voice.Short("Couldn't read your ElevenLabs voices: " + error.Message); }
                 Post(delegate
                 {
                     if (connecting && status == 401) { mainframe.VoiceNote(problem, true); return; }
@@ -1004,7 +1033,7 @@ namespace CapriDesktop
             Point cursor = Cursor.Position;
             Point inside = PointToClient(cursor);
             bool near = frame != null && inside.X >= 0 && inside.Y >= 0 && inside.X < Width && inside.Y < Height && Solid(inside);
-            if (allowed && (near || (pill.Visible && pill.Bounds.Contains(cursor)) || typer.Visible || talkState != TalkState.Off)) pillUntil = Math.Max(pillUntil, now + 1.5);
+            if (allowed && (near || (pill.Visible && pill.Bounds.Contains(cursor)) || typer.Visible || chatting || talkState != TalkState.Off)) pillUntil = Math.Max(pillUntil, now + 1.5);
             if (!allowed || now > pillUntil) { if (pill.Visible) pill.Hide(); return; }
             float s = TalkScale();
             Point feet = Feet();
@@ -1024,11 +1053,156 @@ namespace CapriDesktop
             else ThreadPool.QueueUserWorkItem(delegate { brain.Warm(); });
         }
 
-        private void VoiceSoon()
+        private void ToggleChat()
         {
+            if (chatting) { StopChat(); return; }
+            if (voice.Key == null)
+            {
+                heard = "(voice)";
+                box.Prompt = "> you: ";
+                Answer(++asking, "Plug my voice in through the Mainframe first, choom.", TalkState.Talking);
+                mainframe.Restore();
+                return;
+            }
+            chatting = true;
+            ears.Muted = false;
+            pill.SetChat(true, false);
+            pillUntil = clock.Elapsed.TotalSeconds + 1.5;
+            brain.Cancel();
+            CloseTalk();
+            mainframe.VoiceNote("Opening voice chat...", false);
+            int ticket = ++chatTicket;
+            string key = voice.Key;
+            string voiceId = voice.VoiceId;
+            string agentId = preferences.AgentId;
+            bool stale = preferences.AgentVersion < Agent.Version;
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                string url = null;
+                string problem = null;
+                try
+                {
+                    if (agentId == null) agentId = Agent.Create(key, voiceId);
+                    else if (stale)
+                    {
+                        try { Agent.Tune(key, agentId); }
+                        catch (VoiceException error)
+                        {
+                            if (error.Status != 404 && error.Status != 400) throw;
+                            agentId = Agent.Create(key, voiceId);
+                        }
+                    }
+                    try { url = Agent.Address(key, agentId); }
+                    catch (VoiceException error)
+                    {
+                        if (error.Status != 404 && error.Status != 400) throw;
+                        agentId = Agent.Create(key, voiceId);
+                        url = Agent.Address(key, agentId);
+                    }
+                }
+                catch (VoiceException error) { problem = error.Message; }
+                catch (Exception error) { problem = Voice.Short("Voice chat failed: " + error.Message); }
+                Post(delegate
+                {
+                    if (ticket != chatTicket || !chatting) return;
+                    if (problem != null) { ChatFailed(problem); return; }
+                    if (preferences.AgentId != agentId || preferences.AgentVersion != Agent.Version) { preferences.AgentId = agentId; preferences.AgentVersion = Agent.Version; SavePreferences(); }
+                    Connect(url, voiceId);
+                });
+            });
+        }
+
+        private void Connect(string url, string voiceId)
+        {
+            Agent opened = new Agent();
+            opened.Opened += delegate(int rate) { Post(delegate { if (agent == opened) ChatOpened(rate); }); };
+            opened.Heard += delegate(string text) { Post(delegate { if (agent == opened) ChatHeard(text); }); };
+            opened.Replied += delegate(string text) { Post(delegate { if (agent == opened) ChatReplied(text); }); };
+            opened.Audio += delegate(short[] samples) { Post(delegate { if (agent != opened || dropping) return; speaker.Play(samples); if (!frames.Enabled && !hidden) frames.Start(); }); };
+            opened.Interrupted += delegate { Post(delegate { if (agent == opened) speaker.Clear(); }); };
+            opened.Closed += delegate(string problem) { Post(delegate { if (agent != opened) return; if (problem != null) ChatFailed(problem); else StopChat(); }); };
+            agent = opened;
+            opened.Start(url, voiceId);
+        }
+
+        private void ChatOpened(int rate)
+        {
+            try
+            {
+                speaker.Open(rate);
+                if (!testing) ears.Start();
+            }
+            catch (VoiceException error) { ChatFailed(error.Message); return; }
+            mainframe.VoiceNote("Voice chat on. Talk to her.", false);
+        }
+
+        private void ChatFailed(string problem)
+        {
+            StopChat();
+            mainframe.VoiceNote(problem, true);
             heard = "(voice)";
             box.Prompt = "> you: ";
-            Answer(++asking, "My ears are still in the shop, choom. Type to me for now.", TalkState.Talking);
+            Begin(++asking, "Can't open my voice link, choom. Check the Mainframe.", TalkState.Dormant, null);
+        }
+
+        private void ChatHeard(string text)
+        {
+            if (!chatting) return;
+            int ticket = ++asking;
+            heard = text;
+            box.Prompt = "> you: ";
+            string blocked = Safety.Screen(text);
+            dropping = blocked != null;
+            if (dropping) { speaker.Clear(); Begin(ticket, blocked, TalkState.Talking, null); return; }
+            reply = null;
+            replyDone = -1;
+            Say(null);
+            talkState = TalkState.Thinking;
+            box.Leaving = -1;
+            UpdateAnimation();
+        }
+
+        private void ChatReplied(string text)
+        {
+            if (!chatting || dropping) return;
+            string said = Safety.Filter(Voice.Spoken(text));
+            if (said != Voice.Spoken(text)) { dropping = true; speaker.Clear(); }
+            reply = said;
+            replyStart = clock.Elapsed.TotalSeconds;
+            replyDone = -1;
+            talkState = TalkState.Talking;
+            box.Leaving = -1;
+            pace = Agent.Pace;
+            Say(null);
+        }
+
+        private void StopChat()
+        {
+            if (!chatting) return;
+            chatting = false;
+            chatTicket++;
+            Agent closing = agent;
+            agent = null;
+            if (closing != null) closing.Stop();
+            ears.Stop();
+            ears.Muted = false;
+            speaker.Clear();
+            dropping = false;
+            pill.SetChat(false, false);
+            ShowVoice();
+        }
+
+        private void ToggleMic()
+        {
+            if (!chatting) return;
+            ears.Muted = !ears.Muted;
+            pill.SetChat(true, ears.Muted);
+        }
+
+        private void Listen(short[] chunk)
+        {
+            Agent open = agent;
+            if (open != null) open.Send(speaker.Busy ? new short[chunk.Length] : chunk);
         }
 
         internal void Hear(string text) { Hear(text, text, "> you: "); }
@@ -1100,7 +1274,7 @@ namespace CapriDesktop
                 string problem = null;
                 try { wav = speak(words); }
                 catch (VoiceException error) { problem = error.Message; }
-                catch (Exception) { problem = "Voice glitched. Text only for now."; }
+                catch (Exception error) { problem = Voice.Short("Voice glitched: " + error.Message); }
                 Post(delegate
                 {
                     if (problem != null && ticket == asking) mainframe.VoiceNote(problem, true);
@@ -1198,6 +1372,7 @@ namespace CapriDesktop
 
         private int MouthCell(double now, Clip shown)
         {
+            if (chatting && speaker.Busy) return clip == idle && shown != blinkGlitch ? speaker.Shape() : -1;
             if (speech == null) return -1;
             int step = (int)((now - speechStart) * MouthRate);
             if (mouths != null)
@@ -1277,6 +1452,8 @@ namespace CapriDesktop
             frames.Stop();
             signals.Stop();
             brain.Cancel();
+            StopChat();
+            speaker.Close();
             voice.Stop();
             engine.Cancel = true;
             engine.Stop();
@@ -1317,6 +1494,9 @@ namespace CapriDesktop
                 int thoughts = 0;
                 byte[] tone = null;
                 string voiced = null;
+                System.Collections.Generic.List<string> asked = new System.Collections.Generic.List<string>();
+                HttpListener fakeAgent = null;
+                string agentHost = null;
                 Form backdrop = null;
                 System.Collections.Generic.List<string> checks = new System.Collections.Generic.List<string>();
                 test.Tick += delegate
@@ -1393,7 +1573,7 @@ namespace CapriDesktop
                                 if (clip != perch) throw new Exception("Landing did not settle into the seated loop.");
                                 int seatX = Hip().X;
                                 shelf.Location = new Point(shelf.Left + 40, shelf.Top + 25);
-                                HoldSeat();
+                                HoldSeat(clock.Elapsed.TotalSeconds);
                                 if (Hip().X != seatX + 40 || Hip().Y != shelf.Top) throw new Exception("She did not ride along when the window moved.");
                                 if (Ledges.Covered(seat, Hip().X, Skip())) throw new Exception("Top window reported as covered.");
                                 using (Shelf ghost = new Shelf(0x80000 | 0x80))
@@ -1402,6 +1582,30 @@ namespace CapriDesktop
                                     ghost.Show();
                                     if (Ledges.Covered(seat, Hip().X, Skip())) throw new Exception("An invisible overlay knocked her off.");
                                 }
+                                using (Shelf tip = new Shelf())
+                                {
+                                    tip.Bounds = new Rectangle(Hip().X - 60, shelf.Top - 12, 120, 40);
+                                    tip.Show();
+                                    if (Ledges.Covered(seat, Hip().X, Skip())) throw new Exception("A popup like a tooltip or menu knocked her off.");
+                                }
+                                Ledge held = seat;
+                                using (Shelf cover = new Shelf())
+                                {
+                                    cover.FormBorderStyle = FormBorderStyle.FixedSingle;
+                                    cover.Bounds = new Rectangle(Hip().X - 160, shelf.Top - 50, 320, 200);
+                                    cover.Show();
+                                    double over = clock.Elapsed.TotalSeconds;
+                                    CheckSeat(over);
+                                    CheckSeat(over + 0.4);
+                                    if (seat == null || falling) throw new Exception("A window passing over her knocked her off straight away.");
+                                    CheckSeat(over + 0.8);
+                                    if (!falling || seat != null) throw new Exception("A window parked over her seat did not knock her off.");
+                                }
+                                Land(held);
+                                clipStart -= 1;
+                                RenderFrame();
+                                if (seat != held || falling) throw new Exception("She did not get back on the window.");
+                                if (Ledges.Covered(seat, Hip().X, Skip()) || seat.Window != shelf.Handle) throw new Exception("Her own Mainframe or a closed window still covered her.");
                                 int originX = shelf.Left - 80;
                                 int originY = anchor.Y - 20;
                                 using (Bitmap still = new Bitmap(shelf.Width + 160, shelf.Bottom - originY + 20, PixelFormat.Format32bppArgb))
@@ -1415,11 +1619,14 @@ namespace CapriDesktop
                                     still.Save(Path.Combine(output, "sit.png"), ImageFormat.Png);
                                 }
                                 shelf.Hide();
-                                HoldSeat();
+                                double gone = clock.Elapsed.TotalSeconds;
+                                HoldSeat(gone);
+                                if (falling || seat == null) throw new Exception("A window blinking out for a moment knocked her off.");
+                                HoldSeat(gone + 0.4);
                                 if (!falling || seat != null || clip != dangle) throw new Exception("She did not fall when the window went away.");
                                 for (int i = 0; i < 200 && falling; i++) Tumble(fallStep + 0.033);
                                 if (falling || seat == null) throw new Exception("She did not land after falling.");
-                                checks.Add("PASS dropped above a window she fell, sat on its top edge, rode along when it moved and fell to the next ledge when it closed (landed on " + (seat.Floor ? "the taskbar" : seat.Window != IntPtr.Zero ? "a window" : "a desktop icon") + ")");
+                                checks.Add("PASS dropped above a window she fell, sat on its top edge, rode along when it moved, ignored popups and windows passing over, fell when a window parked over her or it closed, and landed on the next ledge (landed on " + (seat.Floor ? "the taskbar" : seat.Window != IntPtr.Zero ? "a window" : "a desktop icon") + ")");
                             }
                             checks.Add("PASS ledge covering math; desktop icons read: " + Ledges.Icons().Count);
                             seat = null;
@@ -1602,6 +1809,62 @@ namespace CapriDesktop
                             int widest = -1;
                             for (int i = 7; i < shapes.Length; i++) widest = Math.Max(widest, shapes[i]);
                             if (shapes.Length != 12 || shapes[0] != -1 || shapes[4] != -1 || widest < 3) throw new Exception("Mouth envelope failed: " + string.Join(",", shapes));
+                            if (Voice.Explain(401, "{\"detail\":{\"status\":\"invalid_api_key\",\"message\":\"Invalid API key\"}}") != "ElevenLabs rejected the key." || Voice.Explain(401, "{\"detail\":{\"status\":\"detected_unusual_activity\",\"message\":\"Unusual activity detected.\"}}") != "Unusual activity detected.") throw new Exception("ElevenLabs messages read wrong.");
+                            System.Net.Sockets.TcpListener fake = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+                            fake.Start();
+                            string[] fakeHeads = { "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json", "HTTP/1.1 200 OK\r\nContent-Type: audio/wav" };
+                            byte[][] fakeBodies = { System.Text.Encoding.UTF8.GetBytes("{\"detail\":{\"status\":\"invalid_api_key\",\"message\":\"Invalid API key\"}}"), tone };
+                            ThreadPool.QueueUserWorkItem(delegate
+                            {
+                                try
+                                {
+                                    for (int i = 0; i < fakeHeads.Length; i++)
+                                        using (System.Net.Sockets.TcpClient client = fake.AcceptTcpClient())
+                                        using (System.Net.Sockets.NetworkStream stream = client.GetStream())
+                                        {
+                                            MemoryStream got = new MemoryStream();
+                                            byte[] buffer = new byte[4096];
+                                            string text = "";
+                                            while (true)
+                                            {
+                                                int read = stream.Read(buffer, 0, buffer.Length);
+                                                if (read <= 0) break;
+                                                got.Write(buffer, 0, read);
+                                                text = System.Text.Encoding.UTF8.GetString(got.ToArray());
+                                                int end = text.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+                                                if (end < 0) continue;
+                                                System.Text.RegularExpressions.Match length = System.Text.RegularExpressions.Regex.Match(text, @"Content-Length:\s*(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                                if (got.Length >= end + 4 + (length.Success ? int.Parse(length.Groups[1].Value) : 0)) break;
+                                            }
+                                            lock (asked) asked.Add(text);
+                                            byte[] head = System.Text.Encoding.ASCII.GetBytes(fakeHeads[i] + "\r\nContent-Length: " + fakeBodies[i].Length + "\r\nConnection: close\r\n\r\n");
+                                            stream.Write(head, 0, head.Length);
+                                            stream.Write(fakeBodies[i], 0, fakeBodies[i].Length);
+                                        }
+                                }
+                                catch (Exception) { }
+                            });
+                            string realHost = Voice.Host;
+                            Voice.Host = "http://127.0.0.1:" + ((IPEndPoint)fake.LocalEndpoint).Port;
+                            byte[] fetched;
+                            try
+                            {
+                                Voice probe = new Voice();
+                                probe.Key = "sk_test_capri_1234";
+                                probe.VoiceId = "abc";
+                                probe.Model = "eleven_v3";
+                                try { probe.Speak("Hi \"choom\"."); throw new Exception("A 401 reply did not throw."); }
+                                catch (VoiceException error) { if (error.Status != 401 || error.Message != "ElevenLabs rejected the key.") throw new Exception("HTTP errors read wrong: " + error.Status + " " + error.Message); }
+                                fetched = probe.Speak("Hi \"choom\".");
+                            }
+                            finally
+                            {
+                                Voice.Host = realHost;
+                                fake.Stop();
+                            }
+                            string sent;
+                            lock (asked) sent = string.Join("\n", asked.ToArray());
+                            if (fetched.Length != tone.Length || sent.IndexOf("POST /v1/text-to-speech/abc?output_format=wav_24000", StringComparison.Ordinal) < 0 || sent.IndexOf("xi-api-key: sk_test_capri_1234", StringComparison.OrdinalIgnoreCase) < 0 || sent.IndexOf("{\"text\":\"Hi \\\"choom\\\".\",\"model_id\":\"eleven_v3\"}", StringComparison.Ordinal) < 0) throw new Exception("ElevenLabs request was wrong: " + sent);
                             VoicePage page = Voice.Read<VoicePage>(System.Text.Encoding.UTF8.GetBytes("{\"voices\":[{\"voice_id\":\"abc\",\"name\":\"Capri 1\",\"category\":\"generated\",\"labels\":{}},{\"voice_id\":\"def\",\"name\":\"Rachel\",\"category\":\"premade\"}],\"has_more\":false,\"total_count\":2,\"next_page_token\":null}"));
                             System.Collections.Generic.List<VoiceModel> listed = Voice.Read<System.Collections.Generic.List<VoiceModel>>(System.Text.Encoding.UTF8.GetBytes("[{\"model_id\":\"eleven_v3\",\"name\":\"Eleven v3\",\"can_do_text_to_speech\":true,\"languages\":[]}]"));
                             if (page.Voices.Count != 2 || page.More || page.Voices[0].Name != "Capri 1" || listed.Count != 1 || !listed[0].Speaks) throw new Exception("ElevenLabs listing did not parse.");
@@ -1619,7 +1882,7 @@ namespace CapriDesktop
                             ForgetVoice();
                             if (voice.Key != null || voices != null || preferences.VoiceKey != null || mainframe.VoiceStatus != "Needs your ElevenLabs API key. | " + Voice.Default + " | Default model | Connect") throw new Exception("Forget did not clear the key: " + mainframe.VoiceStatus);
                             snap("mainframe-voice-empty.png");
-                            checks.Add("PASS voice: key sealed with DPAPI, tags stripped, errors read, WAV cleanup, mouth from the audio, listing parse, voice and model picks, default voice, forget");
+                            checks.Add("PASS voice: key sealed with DPAPI, tags stripped, errors read, real HTTP round trips against a fake ElevenLabs (401 explained, audio fetched), WAV cleanup, mouth from the audio, listing parse, voice and model picks, default voice, forget");
                             mainframe.Close();
                             if (mainframe.IsDisposed || !mainframe.Visible || mainframe.WindowState != FormWindowState.Minimized) throw new Exception("Closing the Mainframe quit instead of minimizing.");
                             checks.Add("PASS Mainframe starts in the taskbar, a second launch opens it, it picks a model, and its close button minimizes it");
@@ -1747,13 +2010,170 @@ namespace CapriDesktop
                             if ((talkState != TalkState.Talking && talkState != TalkState.Online) || reply != "Still here." || mouths != null || pace != LettersPerSecond || mainframe.VoiceStatus.IndexOf("Out of ElevenLabs credits.", StringComparison.Ordinal) != 0) throw new Exception("Voice failure did not fall back to text: " + mainframe.VoiceStatus);
                             checks.Add("PASS voice reply: THINKING while it speaks, tags not read aloud, typing paced to the audio, mouth follows the audio, failure falls back to text and shows in the Mainframe");
                             Speak = null;
+                            CloseTalk();
+                            pill.Press(2);
+                            if (pill.Chatting || chatting || reply != "Plug my voice in through the Mainframe first, choom.") throw new Exception("Wave without a key did not point to the Mainframe.");
+                            mainframe.WindowState = FormWindowState.Minimized;
+                            if (TalkPill.Render(1, 0).Width != TalkPill.Measure(1).Width) throw new Exception("Mic button showed outside voice chat.");
+                            System.Net.Sockets.TcpListener free = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+                            free.Start();
+                            int port = ((IPEndPoint)free.LocalEndpoint).Port;
+                            free.Stop();
+                            fakeAgent = new HttpListener();
+                            fakeAgent.Prefixes.Add("http://localhost:" + port + "/");
+                            fakeAgent.Start();
+                            short[] line = new short[24000];
+                            for (int i = 0; i < line.Length; i++) line[i] = (short)(Math.Sin(i * 0.25) * 9000);
+                            byte[] lineBytes = new byte[line.Length * 2];
+                            Buffer.BlockCopy(line, 0, lineBytes, 0, lineBytes.Length);
+                            string lineAudio = Convert.ToBase64String(lineBytes);
+                            HttpListener server = fakeAgent;
+                            ThreadPool.QueueUserWorkItem(delegate
+                            {
+                                try
+                                {
+                                    Action<HttpListenerContext, string> answer = delegate(HttpListenerContext context, string json)
+                                    {
+                                        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(json);
+                                        context.Response.ContentType = "application/json";
+                                        context.Response.ContentLength64 = bytes.Length;
+                                        context.Response.OutputStream.Write(bytes, 0, bytes.Length);
+                                        context.Response.Close();
+                                    };
+                                    HttpListenerContext talk;
+                                    while (true)
+                                    {
+                                        HttpListenerContext request = server.GetContext();
+                                        if (request.Request.IsWebSocketRequest) { talk = request; break; }
+                                        string body;
+                                        using (StreamReader reader = new StreamReader(request.Request.InputStream)) body = reader.ReadToEnd();
+                                        string path = request.Request.Url.PathAndQuery;
+                                        lock (asked) asked.Add("http " + request.Request.HttpMethod + " " + path + " " + request.Request.Headers["xi-api-key"] + " " + body);
+                                        answer(request, path.IndexOf("get-signed-url", StringComparison.Ordinal) >= 0 ? "{\"signed_url\":\"ws://localhost:" + port + "/talk?token=t\"}" : "{\"agent_id\":\"agent_test\"}");
+                                    }
+                                    System.Net.WebSockets.WebSocket socket = talk.AcceptWebSocketAsync(null).Result.WebSocket;
+                                    Func<string> receive = delegate
+                                    {
+                                        byte[] buffer = new byte[65536];
+                                        using (MemoryStream message = new MemoryStream())
+                                            while (true)
+                                            {
+                                                System.Net.WebSockets.WebSocketReceiveResult got = socket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None).Result;
+                                                if (got.MessageType == System.Net.WebSockets.WebSocketMessageType.Close) return null;
+                                                message.Write(buffer, 0, got.Count);
+                                                if (got.EndOfMessage) return System.Text.Encoding.UTF8.GetString(message.ToArray());
+                                            }
+                                    };
+                                    Action<string> send = delegate(string json) { socket.SendAsync(new ArraySegment<byte>(System.Text.Encoding.UTF8.GetBytes(json)), System.Net.WebSockets.WebSocketMessageType.Text, true, CancellationToken.None).Wait(); };
+                                    Func<string, string> chunk = delegate(string text)
+                                    {
+                                        int at = text.IndexOf("\"user_audio_chunk\":\"", StringComparison.Ordinal);
+                                        if (at < 0) return null;
+                                        at += 20;
+                                        byte[] audio = Convert.FromBase64String(text.Substring(at, text.IndexOf('"', at) - at));
+                                        foreach (byte value in audio) if (value != 0) return "loud";
+                                        return "silent";
+                                    };
+                                    lock (asked) asked.Add("init " + receive());
+                                    send("{\"type\":\"conversation_initiation_metadata\",\"conversation_initiation_metadata_event\":{\"conversation_id\":\"conv_test\",\"agent_output_audio_format\":\"pcm_16000\",\"user_input_audio_format\":\"pcm_16000\"}}");
+                                    send("{\"type\":\"ping\",\"ping_event\":{\"event_id\":7,\"ping_ms\":20}}");
+                                    bool ponged = false;
+                                    int chunks = 0;
+                                    while (!ponged || chunks < 3)
+                                    {
+                                        string text = receive();
+                                        if (text == null) return;
+                                        if (text.IndexOf("\"pong\"", StringComparison.Ordinal) >= 0) { ponged = true; lock (asked) asked.Add("pong " + text); }
+                                        string kind = chunk(text);
+                                        if (kind != null) { chunks++; lock (asked) asked.Add("chunk " + kind); }
+                                    }
+                                    send("{\"type\":\"user_transcript\",\"user_transcription_event\":{\"user_transcript\":\"hi\"}}");
+                                    send("{\"type\":\"agent_response\",\"agent_response_event\":{\"agent_response\":\"[GLITCH] Loud and clear, choom.\"}}");
+                                    send("{\"type\":\"audio\",\"audio_event\":{\"audio_base_64\":\"" + lineAudio + "\",\"event_id\":1,\"alignment\":{\"chars\":[\"L\"],\"char_durations_ms\":[40],\"char_start_times_ms\":[0]}}}");
+                                    while (true)
+                                    {
+                                        string text = receive();
+                                        if (text == null) return;
+                                        string kind = chunk(text);
+                                        if (kind != null) lock (asked) asked.Add("late " + kind);
+                                    }
+                                }
+                                catch (Exception error) { lock (asked) asked.Add("server " + error.GetType().Name); }
+                            });
+                            agentHost = Voice.Host;
+                            Voice.Host = "http://localhost:" + port;
+                            voice.Key = "sk_test_capri_1234";
+                            if (Agent.Create(voice.Key, Voice.Default) != "agent_test") throw new Exception("ElevenLabs agent was not made.");
+                            preferences.AgentId = "agent_old";
+                            preferences.AgentVersion = 1;
+                            CloseTalk();
+                            pill.Press(2);
+                            if (!pill.Chatting || pill.Muted || !chatting || TalkPill.Render(1, 0, true).Width <= TalkPill.Measure(1).Width + 30) throw new Exception("Wave did not start voice chat with the mic button apart on the right.");
+                            Bitmap[] chips = { TalkPill.Render(2, 0, true, false, 2), TalkPill.Render(2, 3, true, false, 6), TalkPill.Render(2, 0, true, true), TalkPill.Render(2, 0) };
+                            using (Bitmap sheet = new Bitmap(chips[0].Width + 40, chips.Length * (chips[0].Height + 16) + 16, PixelFormat.Format32bppArgb))
+                            using (Graphics graphics = Graphics.FromImage(sheet))
+                            {
+                                graphics.Clear(Color.FromArgb(214, 220, 228));
+                                for (int i = 0; i < chips.Length; i++) graphics.DrawImage(chips[i], 20, 16 + i * (chips[0].Height + 16), chips[i].Width, chips[i].Height);
+                                sheet.Save(Path.Combine(output, "pill-mic.png"), ImageFormat.Png);
+                            }
+                            foreach (Bitmap chip in chips) chip.Dispose();
+                        }
+                        else if (step == 5)
+                        {
+                            string log;
+                            lock (asked) log = string.Join(" | ", asked.ToArray());
+                            if (agent == null || !agent.Ready || preferences.AgentId != "agent_old" || preferences.AgentVersion != Agent.Version || mainframe.VoiceStatus.IndexOf("Voice chat on", StringComparison.Ordinal) != 0) throw new Exception("Voice chat did not open the agent link: " + mainframe.VoiceStatus + " / " + log);
+                            short[] loud = new short[Ears.Chunk];
+                            for (int i = 0; i < loud.Length; i++) loud[i] = (short)(Math.Sin(i * 0.3) * 9000);
+                            pill.Press(3);
+                            if (!pill.Muted || !ears.Muted) throw new Exception("Mic button did not mute the mic.");
+                            ears.Feed(loud);
+                            pill.Press(3);
+                            if (pill.Muted || ears.Muted) throw new Exception("Mic button did not unmute the mic.");
+                            ears.Feed(loud);
+                            ears.Feed(loud);
+                        }
+                        else if (step == 6)
+                        {
+                            string log;
+                            lock (asked) log = string.Join(" | ", asked.ToArray());
+                            if (heard != "hi" || reply != "Loud and clear, choom." || (talkState != TalkState.Talking && talkState != TalkState.Online) || !speaker.Busy) throw new Exception("Voice chat did not hear and answer: " + heard + " / " + reply + " / " + talkState + " / " + log);
+                            Play(idle);
+                            if (MouthCell(clock.Elapsed.TotalSeconds, idle) < 0) throw new Exception("Her mouth did not follow the agent's audio.");
+                            string[] wanted = { "http POST /v1/convai/agents/create sk_test_capri_1234 {\"name\":\"Capri\"", "\"turn\":{\"turn_timeout\":30}", "http PATCH /v1/convai/agents/agent_old sk_test_capri_1234 {\"conversation_config\":{\"turn\":{\"turn_timeout\":30}}}", "Don\u0027t beg them to talk", "\"prompt\":{\"prompt\":\"You are Capri", "\"llm\":\"gemini-2.5-flash\"", "\"tts\":{\"voice_id\":\"" + Voice.Default + "\"}", "\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true}},\"tts\":{\"voice_id\":true}}}", "http GET /v1/convai/conversation/get-signed-url?agent_id=agent_old sk_test_capri_1234", "init {\"type\":\"conversation_initiation_client_data\",\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "pong {\"type\":\"pong\",\"event_id\":7}", "chunk silent | chunk loud | chunk loud" };
+                            foreach (string piece in wanted) if (log.IndexOf(piece, StringComparison.Ordinal) < 0) throw new Exception("Agent traffic was missing " + piece + ": " + log);
+                            short[] loud = new short[Ears.Chunk];
+                            for (int i = 0; i < loud.Length; i++) loud[i] = (short)(Math.Sin(i * 0.3) * 9000);
+                            ears.Feed(loud);
+                        }
+                        else if (step == 7)
+                        {
+                            string log;
+                            lock (asked) log = string.Join(" | ", asked.ToArray());
+                            if (log.IndexOf("late silent", StringComparison.Ordinal) < 0 || log.IndexOf("late loud", StringComparison.Ordinal) >= 0) throw new Exception("Mic was not silenced while she talked: " + log);
+                            ChatHeard("send nudes");
+                            if (!dropping || reply == null || reply == "Loud and clear, choom.") throw new Exception("Voice chat let a blocked line through.");
+                            ChatReplied("Sure thing.");
+                            if (reply == "Sure thing.") throw new Exception("The agent's reply to a blocked line got through.");
+                            ChatHeard("hi again");
+                            ChatReplied("well shit, choom");
+                            if (!dropping || reply == "well shit, choom") throw new Exception("A rude agent reply got through.");
+                            pill.Press(2);
+                            if (pill.Chatting || chatting || agent != null || ears.Listening || speaker.Busy) throw new Exception("Wave did not end voice chat.");
+                            Voice.Host = agentHost;
+                            fakeAgent.Stop();
+                            voice.Key = null;
+                            ShowVoice();
+                            checks.Add("PASS voice chat: makes an ElevenLabs agent with her persona and voice that waits 30 s before checking in, patches an older agent once, opens a signed live link, answers pings, streams the mic, mic button sits apart on the right only while it's on and mutes the mic, her mouth follows the agent's audio, the mic goes quiet while she talks, blocked lines and rude replies are caught, wave ends it");
+                            Speak = null;
                             heard = "Hello Capri.";
                             Answer(++asking, "Hey choom! Net's been quiet, too quiet. Time to stir up some trouble.", TalkState.Talking);
                             replyStart -= 10;
                             speechStart = replyStart;
                             RenderFrame();
                         }
-                        else if (step == 5)
+                        else if (step == 8)
                         {
                             using (Bitmap capture = new Bitmap(backdrop.Width, backdrop.Height))
                             using (Graphics graphics = Graphics.FromImage(capture))
