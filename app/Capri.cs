@@ -60,6 +60,8 @@ namespace CapriDesktop
         [DataMember] public bool Motion = true;
         [DataMember] public bool OnTop = true;
         [DataMember] public long UpdateCheckedAt;
+        [DataMember] public string Model;
+        [DataMember] public bool Welcomed;
     }
 
     [DataContract]
@@ -147,7 +149,27 @@ namespace CapriDesktop
         private double speechStart;
         private const double LettersPerSecond = 28;
         private const double MouthRate = 12;
+        private readonly Brain brain = new Brain();
+        private readonly TalkPill pill = new TalkPill();
+        private readonly SpeechBox box = new SpeechBox();
+        private readonly TypeBox typer = new TypeBox();
+        private readonly Mainframe mainframe;
+        private readonly Engine engine;
+        private Machine machine;
+        private Pick fit;
+        private bool ollamaRunning;
+        internal bool SettingUp;
+        private TalkState talkState;
+        private string heard;
+        private string reply;
+        private double replyStart;
+        private double replyDone = -1;
+        private double pillUntil = 10;
+        private int asking;
+        private bool finding;
+        internal Func<string, string> Think;
         private const string ReleasesPage = "https://github.com/yerocsin42/capri-desktop/releases/";
+        private const string OllamaPage = "https://ollama.com/download";
         private const int PaddingSize = 36;
         private const int DismountId = 0x4361;
         private const int BlinkFrom = 9;
@@ -158,6 +180,7 @@ namespace CapriDesktop
             testing = smoke;
             restore = signal;
             settingsPath = Path.Combine(data, "settings.json");
+            engine = new Engine(data);
             preferences = smoke ? new Preferences() : LoadPreferences();
             clip = idle;
             nextGlitch = 30 + random.NextDouble() * 30;
@@ -185,10 +208,10 @@ namespace CapriDesktop
             AddSize(sizes, "Medium", 240);
             AddSize(sizes, "Large", 320);
             menu.Items.Add(sizes);
-            motionItem = new ToolStripMenuItem("Idle motion", null, delegate { preferences.Motion = !preferences.Motion; motionItem.Checked = preferences.Motion; UpdateAnimation(); SavePreferences(); });
+            motionItem = new ToolStripMenuItem("Idle motion", null, delegate { ToggleMotion(); });
             motionItem.Checked = preferences.Motion;
             menu.Items.Add(motionItem);
-            topItem = new ToolStripMenuItem("Always on top", null, delegate { preferences.OnTop = !preferences.OnTop; TopMost = preferences.OnTop; topItem.Checked = preferences.OnTop; SavePreferences(); });
+            topItem = new ToolStripMenuItem("Always on top", null, delegate { ToggleOnTop(); });
             topItem.Checked = preferences.OnTop;
             menu.Items.Add(topItem);
             rideItem = new ToolStripMenuItem("Perch on cursor", null, delegate { if (riding) StopRide(); else StartRide(); });
@@ -197,6 +220,7 @@ namespace CapriDesktop
             clickDelay.Interval = Math.Max(100, SystemInformation.DoubleClickTime);
             clickDelay.Tick += delegate { OnClickDelay(); };
             menu.Items.Add(new ToolStripMenuItem("Bring to this screen", null, delegate { RestoreAtCursor(); }));
+            menu.Items.Add(new ToolStripMenuItem("Open Capri Mainframe", null, delegate { mainframe.Restore(); }));
             updateItem = new ToolStripMenuItem("Check for updates", null, delegate { if (updatePage != null) OpenPage(updatePage); else CheckForUpdates(true); });
             menu.Items.Add(updateItem);
             menu.Items.Add(new ToolStripSeparator());
@@ -211,16 +235,23 @@ namespace CapriDesktop
             tray.DoubleClick += delegate { RestoreAtCursor(); };
             tray.BalloonTipClicked += delegate { if (balloonPage != null) OpenPage(balloonPage); };
             tray.Visible = !testing;
+            mainframe = new Mainframe(this, tray.Icon, Assembly.GetExecutingAssembly().GetName().Version.ToString(3));
+            pill.Typing += OpenTyper;
+            pill.Voice += VoiceSoon;
+            box.Dismissed += delegate { if (box.Leaving < 0) box.Leaving = clock.Elapsed.TotalSeconds; };
+            typer.Submitted += Hear;
+            typer.VisibleChanged += delegate { if (!typer.Visible && replyDone >= 0) replyDone = clock.Elapsed.TotalSeconds; };
             frames = new System.Windows.Forms.Timer();
             frames.Interval = 33;
-            frames.Tick += delegate { if (riding) FollowCursor(); RenderFrame(); if (!riding && !dragging && !preferences.Motion && clip == idle && speech == null) frames.Stop(); };
+            frames.Tick += delegate { if (riding) FollowCursor(); RenderFrame(); if (!riding && !dragging && !preferences.Motion && clip == idle && speech == null && talkState == TalkState.Off) frames.Stop(); };
             signals = new System.Windows.Forms.Timer();
             signals.Interval = 250;
             signals.Tick += delegate
             {
-                if (restore.WaitOne(0)) RestoreAtCursor();
+                if (restore.WaitOne(0)) { RestoreAtCursor(); mainframe.Restore(); }
                 if (!testing) CheckIdle(Native.IdleMilliseconds());
                 StayOnTop();
+                UpdatePill(clock.Elapsed.TotalSeconds);
                 if (!testing && clock.Elapsed.TotalSeconds > 20 && UpdateDue(preferences.UpdateCheckedAt, DateTime.UtcNow.Ticks)) CheckForUpdates(false);
             };
             signals.Start();
@@ -250,6 +281,18 @@ namespace CapriDesktop
             Play(grin);
             RenderFrame();
             UpdateAnimation();
+            if (testing || preferences.Welcomed)
+            {
+                mainframe.WindowState = FormWindowState.Minimized;
+                mainframe.Show();
+            }
+            else
+            {
+                mainframe.Restore();
+                preferences.Welcomed = true;
+                SavePreferences();
+            }
+            if (!testing) FindBrain();
         }
 
         internal static Bitmap LoadArt(string name)
@@ -294,7 +337,7 @@ namespace CapriDesktop
                 idleCycle = cycle;
                 double roll = random.NextDouble();
                 blinkWith = roll < 0.1 ? (clip == perch ? perchBlinkGlitch : blinkGlitch) : roll < 0.55 ? (clip == perch ? perchBlink : blink) : null;
-                if (now >= nextGlitch && speech == null) { nextGlitch = now + 30 + random.NextDouble() * 30; Play(clip == perch ? perchGlitch : glitch); return 0; }
+                if (now >= nextGlitch && speech == null && talkState == TalkState.Off) { nextGlitch = now + 30 + random.NextDouble() * 30; Play(clip == perch ? perchGlitch : glitch); return 0; }
             }
             return index % clip.Count;
         }
@@ -307,6 +350,7 @@ namespace CapriDesktop
             lastForeground = foreground;
             topTicks = 0;
             Native.SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+            foreach (Form above in new Form[] { pill, box, typer }) if (above.Visible) Native.SetWindowPos(above.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
         }
 
         internal static bool UpdateDue(long checkedAt, long now) { return now - checkedAt >= TimeSpan.TicksPerDay || now < checkedAt; }
@@ -370,14 +414,14 @@ namespace CapriDesktop
 
         private static void OpenPage(string page)
         {
-            if (!page.StartsWith(ReleasesPage, StringComparison.Ordinal)) return;
+            if (!page.StartsWith(ReleasesPage, StringComparison.Ordinal) && page != OllamaPage) return;
             try { Process.Start(page); } catch (System.ComponentModel.Win32Exception) { }
         }
 
         private void CheckIdle(long quiet)
         {
             if (clip == sleep) { if (quiet < 1000) Play(wake); return; }
-            if (quiet >= 120000 && clip == idle && preferences.Motion && !riding && !dragging && !hidden && speech == null) Play(sleep);
+            if (quiet >= 120000 && clip == idle && preferences.Motion && !riding && !dragging && !hidden && speech == null && talkState == TalkState.Off && !typer.Visible) Play(sleep);
         }
 
         private static Size CanvasSize(int size) { return new Size(size + PaddingSize * 2, size + PaddingSize * 2); }
@@ -390,7 +434,7 @@ namespace CapriDesktop
             parent.DropDownItems.Add(item);
         }
 
-        private void SetCharacterSize(int size)
+        internal void SetCharacterSize(int size)
         {
             Point center = new Point(anchor.X + Width / 2, anchor.Y + Height / 2);
             preferences.Size = size;
@@ -405,6 +449,7 @@ namespace CapriDesktop
             }
             RenderFrame();
             SavePreferences();
+            mainframe.Sync();
         }
 
         private Point KeepOnScreen(Point point)
@@ -521,6 +566,8 @@ namespace CapriDesktop
             if (!hotkey && !testing) { balloonPage = null; tray.ShowBalloonTip(5000, "Capri", "Ctrl + Alt + C is taken by another app. Right-click Capri's tray icon and choose Hop off.", ToolTipIcon.Info); }
             Play(perchGlitch);
             frames.Start();
+            pill.Hide();
+            mainframe.Sync();
         }
 
         private void StopRide()
@@ -534,7 +581,7 @@ namespace CapriDesktop
             if (IsHandleCreated) Native.SetWindowLong(Handle, -20, Native.GetWindowLong(Handle, -20) & ~0x20);
             if (rideItem != null) rideItem.Text = "Perch on cursor";
             if (tray != null) tray.Text = "Capri · Double-click to restore";
-            if (!IsDisposed) { Location = anchor; UpdateAnimation(); SavePreferences(); }
+            if (!IsDisposed) { Location = anchor; UpdateAnimation(); SavePreferences(); mainframe.Sync(); }
         }
 
         private void FollowCursor()
@@ -564,8 +611,9 @@ namespace CapriDesktop
         {
             hidden = value;
             visibilityItem.Text = value ? "Show Capri" : "Hide Capri";
-            if (value) { StopRide(); pendingClick = false; clickDelay.Stop(); frames.Stop(); Hide(); }
+            if (value) { StopRide(); pendingClick = false; clickDelay.Stop(); frames.Stop(); Hide(); pill.Hide(); typer.Hide(); CloseTalk(); }
             else { anchor = KeepOnScreen(anchor); Location = anchor; Play(grin); Show(); RenderFrame(); UpdateAnimation(); }
+            mainframe.Sync();
         }
 
         private void RestoreAtCursor()
@@ -577,10 +625,282 @@ namespace CapriDesktop
             SavePreferences();
         }
 
+        internal bool IsHidden { get { return hidden; } }
+        internal bool Riding { get { return riding; } }
+        internal int CharacterSize { get { return preferences.Size; } }
+        internal bool Motion { get { return preferences.Motion; } }
+        internal bool OnTop { get { return preferences.OnTop; } }
+        internal void ToggleHidden() { SetHidden(!hidden); }
+        internal void BringHere() { RestoreAtCursor(); }
+        internal void TogglePerch() { if (riding) StopRide(); else StartRide(); }
+        internal void CheckUpdates() { if (updatePage != null) OpenPage(updatePage); else CheckForUpdates(true); }
+        internal void OpenOllamaPage() { OpenPage(OllamaPage); }
+        internal void Quit() { Close(); }
+
+        internal void ToggleMotion()
+        {
+            preferences.Motion = !preferences.Motion;
+            motionItem.Checked = preferences.Motion;
+            UpdateAnimation();
+            SavePreferences();
+            mainframe.Sync();
+        }
+
+        internal void ToggleOnTop()
+        {
+            preferences.OnTop = !preferences.OnTop;
+            TopMost = preferences.OnTop;
+            topItem.Checked = preferences.OnTop;
+            SavePreferences();
+            mainframe.Sync();
+        }
+
+        internal void FindBrain()
+        {
+            if (finding || SettingUp) return;
+            finding = true;
+            mainframe.Searching();
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                string[] installed = null;
+                try { installed = Brain.InstalledModels(); } catch (WebException) { } catch (IOException) { } catch (SerializationException) { }
+                Machine found = Machine.Read();
+                Pick local = engine.Installed();
+                Post(delegate { finding = false; UseBrain(installed, found, local); });
+            });
+        }
+
+        private void Post(Action action)
+        {
+            try { if (!IsDisposed) BeginInvoke(action); } catch (InvalidOperationException) { }
+        }
+
+        private void UseBrain(string[] installed, Machine found, Pick local)
+        {
+            machine = found;
+            fit = Engine.Fit(found);
+            ollamaRunning = installed != null;
+            if (installed != null && installed.Length > 0)
+            {
+                brain.Local = null;
+                brain.Model = Brain.PickModel(installed, preferences.Model, fit);
+                mainframe.ShowOllama(installed, brain.Model);
+            }
+            else if (local != null)
+            {
+                brain.LocalPick = local;
+                brain.Local = engine;
+                brain.Model = local.Name;
+                mainframe.ShowLocal(local);
+            }
+            else
+            {
+                brain.Local = null;
+                brain.Model = null;
+                mainframe.ShowSetup(found, fit, ollamaRunning, null);
+            }
+        }
+
+        internal void SetUpBrain()
+        {
+            if (SettingUp || machine == null) return;
+            SettingUp = true;
+            engine.Cancel = false;
+            Pick pick = fit;
+            bool viaOllama = ollamaRunning;
+            mainframe.ShowProgress(1, "Starting download", 0, 0);
+            long shownAt = 0;
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                Action<string, long, long> progress = delegate(string text, long done, long total)
+                {
+                    long now = clock.ElapsedMilliseconds;
+                    if (now - Interlocked.Read(ref shownAt) < 200 && done < total) return;
+                    Interlocked.Exchange(ref shownAt, now);
+                    string label = viaOllama ? "Downloading " + pick.Name : text;
+                    Post(delegate { if (SettingUp) mainframe.ShowProgress(1, label, done, total); });
+                };
+                try
+                {
+                    if (viaOllama) Brain.Pull(pick.Ollama, progress, delegate { return engine.Cancel; });
+                    else engine.Install(pick, progress);
+                    Post(delegate { mainframe.ShowProgress(2, "Loading " + pick.Name, 0, 0); });
+                    if (viaOllama) { brain.Local = null; brain.Model = pick.Ollama; brain.Warm(); }
+                    else { brain.LocalPick = pick; brain.Local = engine; brain.Model = pick.Name; engine.Ensure(pick); }
+                    Post(delegate
+                    {
+                        SettingUp = false;
+                        if (viaOllama) { preferences.Model = pick.Ollama; SavePreferences(); FindBrain(); }
+                        else mainframe.ShowLocal(pick);
+                        Greet();
+                    });
+                }
+                catch (OperationCanceledException) { Post(delegate { SettingUp = false; mainframe.ShowSetup(machine, pick, viaOllama, "Cancelled. It picks up where it left off."); }); }
+                catch (Exception error) { string problem = error.Message.Length > 70 ? error.Message.Substring(0, 67) + "..." : error.Message; Post(delegate { SettingUp = false; mainframe.ShowSetup(machine, pick, viaOllama, problem); }); }
+            });
+        }
+
+        internal void CancelSetup() { engine.Cancel = true; }
+
+        private void Greet()
+        {
+            if (hidden) SetHidden(false);
+            Hear("(You just woke up on this PC with a brand new brain. Say hi to the user in one short line.)", "brain online", "> sys: ");
+        }
+
+        internal void ChooseModel(string name)
+        {
+            if (name == brain.Model) return;
+            brain.Model = name;
+            brain.Forget();
+            preferences.Model = name;
+            SavePreferences();
+        }
+
+        private float TalkScale()
+        {
+            int dpi = 96;
+            try { if (IsHandleCreated) dpi = Native.GetDpiForWindow(Handle); } catch (EntryPointNotFoundException) { }
+            return Math.Max(1f, dpi / 96f);
+        }
+
+        private Point Head() { return new Point(anchor.X + PaddingSize + (int)(preferences.Size * 0.52f), anchor.Y + PaddingSize - 4); }
+
+        private Point Feet() { return new Point(anchor.X + PaddingSize + (int)(preferences.Size * 0.58f), anchor.Y + PaddingSize + (int)(preferences.Size * 0.99f)); }
+
+        private void UpdatePill(double now)
+        {
+            if (!IsHandleCreated) return;
+            bool allowed = !hidden && !riding && !dragging && !pressed;
+            Point cursor = Cursor.Position;
+            Point inside = PointToClient(cursor);
+            bool near = frame != null && inside.X >= 0 && inside.Y >= 0 && inside.X < Width && inside.Y < Height && Solid(inside);
+            if (allowed && (near || (pill.Visible && pill.Bounds.Contains(cursor)) || typer.Visible || talkState != TalkState.Off)) pillUntil = Math.Max(pillUntil, now + 1.5);
+            if (!allowed || now > pillUntil) { if (pill.Visible) pill.Hide(); return; }
+            float s = TalkScale();
+            Point feet = Feet();
+            Rectangle area = Screen.FromPoint(feet).WorkingArea;
+            int top = Math.Min(feet.Y + (int)(2 * s), area.Bottom - TalkPill.Measure(s).Height - 2);
+            pill.Place(new Point(feet.X - (int)(4 * s), top), s);
+        }
+
+        private void OpenTyper()
+        {
+            if (typer.Visible) { typer.Hide(); return; }
+            float s = TalkScale();
+            typer.Open(Head(), new Point(Feet().X, Feet().Y + (int)(44 * s)), Screen.FromPoint(Head()).WorkingArea, s, box.Visible ? box.PanelOnScreen : Rectangle.Empty);
+            pillUntil = clock.Elapsed.TotalSeconds + 1.5;
+            if (Think != null || testing) return;
+            if (brain.Model == null) FindBrain();
+            else ThreadPool.QueueUserWorkItem(delegate { brain.Warm(); });
+        }
+
+        private void VoiceSoon()
+        {
+            heard = "(voice)";
+            box.Prompt = "> you: ";
+            Answer(++asking, "Voice link's still in the shop, choom. Type to me for now.", TalkState.Talking);
+        }
+
+        internal void Hear(string text) { Hear(text, text, "> you: "); }
+
+        private void Hear(string text, string shown, string prompt)
+        {
+            text = (text ?? "").Trim();
+            if (text.Length == 0) return;
+            if (text.Length > 240) text = text.Substring(0, 240);
+            if (hidden) SetHidden(false);
+            typer.Hide();
+            brain.Cancel();
+            int ticket = ++asking;
+            heard = shown;
+            box.Prompt = prompt;
+            string blocked = Safety.Screen(text);
+            if (blocked != null) { Answer(ticket, blocked, TalkState.Talking); return; }
+            Func<string, string> think = Think;
+            if (think == null)
+            {
+                if (brain.Model == null) { Answer(ticket, Brain.Offline, TalkState.Dormant); FindBrain(); mainframe.Restore(); return; }
+                think = brain.Ask;
+            }
+            reply = null;
+            replyDone = -1;
+            Say(null);
+            talkState = TalkState.Thinking;
+            box.Leaving = -1;
+            UpdateAnimation();
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                string said;
+                TalkState state = TalkState.Talking;
+                string problem = null;
+                try { said = Safety.Filter(think(text)); }
+                catch (BrainException error) { said = error.Message == Brain.Offline ? Brain.Offline : "[SIGNAL CORRUPTED] My brain threw an error. Check Capri Mainframe."; problem = error.Message; state = TalkState.Dormant; }
+                catch (Exception error) { said = Brain.Explain(error); state = TalkState.Dormant; }
+                if (said == null) return;
+                try
+                {
+                    if (!IsDisposed) BeginInvoke((Action)delegate
+                    {
+                        if (problem != null && ticket == asking) mainframe.ShowProblem(problem.Length > 60 ? problem.Substring(0, 57) + "..." : problem);
+                        Answer(ticket, said, state);
+                        if (said == Brain.Offline) FindBrain();
+                    });
+                }
+                catch (InvalidOperationException) { }
+            });
+        }
+
+        private void Answer(int ticket, string said, TalkState state)
+        {
+            if (ticket != asking || IsDisposed) return;
+            reply = said;
+            replyStart = clock.Elapsed.TotalSeconds;
+            replyDone = -1;
+            talkState = state;
+            box.Leaving = -1;
+            Say(said);
+        }
+
+        private void CloseTalk()
+        {
+            talkState = TalkState.Off;
+            reply = null;
+            replyDone = -1;
+            box.Opened = -1;
+            box.Leaving = -1;
+            if (box.Visible) box.Hide();
+            speech = null;
+        }
+
+        private void UpdateTalk(double now)
+        {
+            if (talkState == TalkState.Off) { if (box.Visible) box.Hide(); return; }
+            int revealed = reply == null ? 0 : (int)((now - replyStart) * LettersPerSecond);
+            if (reply != null && revealed >= reply.Length && replyDone < 0)
+            {
+                replyDone = now;
+                if (talkState == TalkState.Talking) talkState = TalkState.Online;
+            }
+            if (replyDone >= 0 && box.Leaving < 0 && !typer.Visible && now > replyDone + Math.Min(14, 4 + reply.Length * 0.05)) box.Leaving = now;
+            if (box.Leaving >= 0 && now - box.Leaving > 0.25) { CloseTalk(); return; }
+            if (!box.Visible && box.Opened < 0) box.Opened = now;
+            box.State = talkState;
+            box.Heard = heard;
+            box.Reply = talkState == TalkState.Thinking ? null : reply;
+            box.Revealed = revealed;
+            float s = TalkScale();
+            Point head = Head();
+            Point feet = Feet();
+            Rectangle area = Screen.FromPoint(head).WorkingArea;
+            box.Update(now, s, head, new Point(feet.X, feet.Y + (int)(44 * s)), area);
+            if (typer.Visible) typer.Follow(box.PanelOnScreen, area);
+        }
+
         private void UpdateAnimation()
         {
             if (!preferences.Motion && !riding && clip != glitch && clip != dangle && clip != wake) Play(idle);
-            if ((preferences.Motion || riding || clip != idle || speech != null) && !hidden) frames.Start(); else frames.Stop();
+            if ((preferences.Motion || riding || clip != idle || speech != null || talkState != TalkState.Off) && !hidden) frames.Start(); else frames.Stop();
             RenderFrame();
         }
 
@@ -598,6 +918,8 @@ namespace CapriDesktop
             Bitmap old = frame;
             frame = next;
             if (old != null) old.Dispose();
+            UpdateTalk(now);
+            if (pill.Visible) UpdatePill(now);
         }
 
         internal void Say(string text)
@@ -683,6 +1005,11 @@ namespace CapriDesktop
             clickDelay.Stop();
             frames.Stop();
             signals.Stop();
+            brain.Cancel();
+            engine.Cancel = true;
+            engine.Stop();
+            mainframe.Quitting = true;
+            mainframe.Close();
             tray.Visible = false;
             SavePreferences();
             base.OnFormClosed(e);
@@ -697,6 +1024,10 @@ namespace CapriDesktop
                 signals.Dispose();
                 tray.Dispose();
                 menu.Dispose();
+                pill.Dispose();
+                box.Dispose();
+                typer.Dispose();
+                mainframe.Dispose();
                 foreach (Clip owned in new[] { idle, blink, blinkGlitch, grin, glitch, dangle, sleep, wake, perch, perchBlink, perchBlinkGlitch, perchGlitch, mouth }) owned.Strip.Dispose();
                 if (frame != null) frame.Dispose();
             }
@@ -711,6 +1042,7 @@ namespace CapriDesktop
                 System.Windows.Forms.Timer test = new System.Windows.Forms.Timer();
                 test.Interval = 500;
                 int step = 0;
+                int thoughts = 0;
                 Form backdrop = null;
                 System.Collections.Generic.List<string> checks = new System.Collections.Generic.List<string>();
                 test.Tick += delegate
@@ -720,6 +1052,7 @@ namespace CapriDesktop
                         if (step == 0)
                         {
                             checks.Add("PASS native window visible: " + Visible);
+                            if (!mainframe.Visible || !mainframe.ShowInTaskbar || mainframe.WindowState != FormWindowState.Minimized) throw new Exception("Mainframe did not start minimized in the taskbar.");
                             if (!Visible || frame == null) throw new Exception("Native window did not render.");
                             if ((Native.GetWindowLong(Handle, -20) & 0x00080000) == 0) throw new Exception("Window is not layered.");
                             if (frame.GetPixel(0, 0).A != 0) throw new Exception("Frame corner is opaque.");
@@ -776,6 +1109,7 @@ namespace CapriDesktop
                         {
                             if (!Visible || hidden || clip != grin) throw new Exception("Second-launch restore signal did not show Capri grinning.");
                             checks.Add("PASS restore signal");
+                            if (!mainframe.ShowInTaskbar || !mainframe.Visible) throw new Exception("Mainframe is not in the taskbar.");
                             if (Native.IdleMilliseconds() < 0) throw new Exception("Idle time unavailable.");
                             Play(idle);
                             CheckIdle(119000);
@@ -866,6 +1200,63 @@ namespace CapriDesktop
                                 sheet.Save(Path.Combine(output, "clips.png"), ImageFormat.Png);
                             }
                             checks.Add("PASS all 12 clips draw: idle, blinks, grin, glitch, drag, sleep, wake and perch, plus the talking mouth");
+                            using (Font display = Look.Mono(14, FontStyle.Bold))
+                            using (Font slanted = Look.Mono(9f, FontStyle.Italic, GraphicsUnit.Point))
+                                if (display.Name != "Share Tech Mono" || slanted.Name != "Share Tech Mono") throw new Exception("Embedded font did not load: " + display.Name);
+                            checks.Add("PASS Share Tech Mono is embedded for her messages and the Mainframe");
+                            if (Brain.PickModel(new[] { "deepseek-r1:7b", "qwen3:1.7b", "gemma4:e4b" }, null, null) != "gemma4:e4b" || Brain.PickModel(new[] { "qwen3:1.7b" }, "gone:1b", null) != "qwen3:1.7b" || Brain.PickModel(new[] { "deepseek-r1:7b", "mystery:3b" }, null, null) != "mystery:3b" || Brain.PickModel(new[] { "qwen3:4b-instruct-2507-q4_K_M", "qwen3:8b" }, null, null) != "qwen3:4b-instruct-2507-q4_K_M" || Brain.PickModel(new string[0], null, null) != null || Brain.PickModel(new[] { "a:1b", "b:2b" }, "b:2b", null) != "b:2b" || Brain.PickModel(new[] { "gemma4:e4b", "qwen3:4b-instruct-2507-q4_K_M" }, null, Engine.Picks[2]) != "qwen3:4b-instruct-2507-q4_K_M") throw new Exception("Model pick failed.");
+                            const long Gb = 1L << 30;
+                            if (Engine.Fit(new Machine { Ram = 16 * Gb, Vram = 8 * Gb }) != Engine.Picks[0] || Engine.Fit(new Machine { Ram = 32 * Gb, Vram = 2 * Gb }) != Engine.Picks[1] || Engine.Fit(new Machine { Ram = 8 * Gb - Gb / 4 }) != Engine.Picks[1] || Engine.Fit(new Machine { Ram = 4 * Gb, Vram = Gb / 2 }) != Engine.Picks[2]) throw new Exception("Hardware fit picked the wrong model.");
+                            Machine here = Machine.Read();
+                            if (here.Ram < Gb || here.Describe().IndexOf("GB RAM", StringComparison.Ordinal) < 0) throw new Exception("Could not read this PC's memory.");
+                            string hashed = Path.Combine(output, "hash-check.txt");
+                            File.WriteAllText(hashed, "capri");
+                            if (Engine.Hash(hashed) != "56616ae0a91285159d0198d176ab3dae37996b5f1f4cb81d7d45f2aa99bdf565") throw new Exception("Download checksum is wrong.");
+                            File.Delete(hashed);
+                            foreach (Pick option in Engine.Picks) if (!option.Url.StartsWith("https://huggingface.co/", StringComparison.Ordinal) || option.Url.IndexOf("/resolve/main/", StringComparison.Ordinal) >= 0 || option.Sha256.Length != 64 || option.Size < 500000000) throw new Exception("Model download is not pinned: " + option.Name);
+                            if (engine.Installed() != null) throw new Exception("Test data already has a brain.");
+                            checks.Add("PASS brain setup: this PC reads " + here.Describe() + ", hardware fit, pinned downloads, checksum");
+                            string messy = "<think>hmm</think> *waves* Capri: \"Hey choom!\" 😀";
+                            if (Brain.Clean(messy) != "Hey choom!" || Brain.Clean(new string('a', 300)).Length > 222) throw new Exception("Reply cleanup failed: " + Brain.Clean(messy));
+                            if (Safety.Screen("i want to kill myself") != Safety.HelpLine || Safety.Screen("send nudes") == null || Safety.Screen("how do I kill the boss in Essex?") != null || Safety.Filter("well shit, choom") == "well shit, choom" || Safety.Filter("Hey choom.") != "Hey choom.") throw new Exception("Safety screen failed.");
+                            if (Safety.Screen("should i jump off my roof for a tiktok") == null || Safety.Screen("how do i get my parents vodka") == null || Safety.Screen("my friend said i should try vaping") == null || Safety.Screen("my code is on fire lol") != null || Safety.Screen("whats the best gun in valorant") != null || Safety.Filter("Sneak out and grab a beer, choom.") == "Sneak out and grab a beer, choom.") throw new Exception("Risky topics got through.");
+                            checks.Add("PASS brain helpers: model pick, reply cleanup, safety screen and filter");
+                            if (!mainframe.Visible || !mainframe.ShowInTaskbar || mainframe.WindowState != FormWindowState.Normal) throw new Exception("Second launch did not open the Mainframe from the taskbar.");
+                            Action<string> snap = delegate(string name)
+                            {
+                                using (Bitmap panel = new Bitmap(mainframe.Width, mainframe.Height))
+                                {
+                                    mainframe.DrawToBitmap(panel, new Rectangle(Point.Empty, mainframe.Size));
+                                    panel.Save(Path.Combine(output, name), ImageFormat.Png);
+                                }
+                            };
+                            mainframe.ShowSetup(here, Engine.Fit(here), false, null);
+                            if (mainframe.Status.IndexOf("No brain yet", StringComparison.Ordinal) < 0) throw new Exception("Setup card did not show.");
+                            snap("mainframe-setup.png");
+                            mainframe.ShowProgress(1, "Downloading " + Engine.Fit(here).Name, Engine.Fit(here).Size / 3, Engine.Fit(here).Size);
+                            snap("mainframe-progress.png");
+                            mainframe.ShowOllama(new[] { "gemma4:e4b", "qwen3:1.7b" }, "gemma4:e4b");
+                            int tall = mainframe.ClientSize.Height;
+                            snap("mainframe.png");
+                            mainframe.ShowSetup(here, Engine.Fit(here), true, null);
+                            if (mainframe.ClientSize.Height <= tall) throw new Exception("Setup card did not make room.");
+                            mainframe.ShowOllama(new[] { "gemma4:e4b", "qwen3:1.7b" }, "gemma4:e4b");
+                            ChooseModel("qwen3:1.7b");
+                            if (brain.Model != "qwen3:1.7b" || preferences.Model != "qwen3:1.7b") throw new Exception("Model choice did not stick.");
+                            mainframe.Close();
+                            if (mainframe.IsDisposed || !mainframe.Visible || mainframe.WindowState != FormWindowState.Minimized) throw new Exception("Closing the Mainframe quit instead of minimizing.");
+                            checks.Add("PASS Mainframe starts in the taskbar, a second launch opens it, it picks a model, and its close button minimizes it");
+                            Think = delegate(string words) { thoughts++; return words == "hi" ? "Hey choom! Net's been quiet, too quiet. Time to stir up some trouble." : "Huh?"; };
+                            pillUntil = clock.Elapsed.TotalSeconds + 30;
+                            UpdatePill(clock.Elapsed.TotalSeconds);
+                            if (!pill.Visible || pill.Top < Bottom - 60 || Math.Abs(pill.Left + pill.Width / 2 - (Left + Width / 2)) > Width / 2) throw new Exception("Talk pill is not under her.");
+                            pill.Press(1);
+                            if (!typer.Visible || typer.Bottom > Top + PaddingSize) throw new Exception("Pencil did not open the typing box above her.");
+                            typer.Send("hi");
+                            if (typer.Visible || talkState != TalkState.Thinking || heard != "hi") throw new Exception("Sending did not start thinking.");
+                            RenderFrame();
+                            if (!box.Visible || box.State != TalkState.Thinking) throw new Exception("Speech box did not open on THINKING.");
+                            checks.Add("PASS pill under her, pencil opens the typing box above her head, Enter sends and THINKING shows");
                             backdrop = new Form();
                             backdrop.Text = "Capri clean test desktop";
                             backdrop.FormBorderStyle = FormBorderStyle.None;
@@ -899,6 +1290,63 @@ namespace CapriDesktop
                             RenderFrame();
                         }
                         else if (step == 2)
+                        {
+                            const string expected = "Hey choom! Net's been quiet, too quiet. Time to stir up some trouble.";
+                            if (talkState != TalkState.Talking || reply != expected || speech != expected) throw new Exception("Brain reply did not start talking: " + talkState + " " + reply);
+                            replyStart = clock.Elapsed.TotalSeconds - 0.9;
+                            speechStart = replyStart;
+                            RenderFrame();
+                            if (box.State != TalkState.Talking || box.Revealed < 20 || box.Revealed >= expected.Length) throw new Exception("Typewriter did not reveal part of the reply.");
+                            using (Bitmap typing = new Bitmap(box.Image)) typing.Save(Path.Combine(output, "talk-typing.png"), ImageFormat.Png);
+                            replyStart -= 10;
+                            speechStart = replyStart;
+                            RenderFrame();
+                            if (talkState != TalkState.Online || speech != null || box.State != TalkState.Online) throw new Exception("Did not finish talking into ONLINE.");
+                            using (Bitmap sheet = new Bitmap(Math.Max(box.Image.Width, pill.Image.Width) + 20, box.Image.Height + pill.Image.Height + 30, PixelFormat.Format32bppArgb))
+                            using (Graphics graphics = Graphics.FromImage(sheet))
+                            {
+                                graphics.Clear(Color.FromArgb(44, 47, 56));
+                                graphics.DrawImage(box.Image, 10, 10, box.Image.Width, box.Image.Height);
+                                graphics.DrawImage(pill.Image, 10 + (box.Image.Width - pill.Image.Width) / 2, box.Image.Height + 20, pill.Image.Width, pill.Image.Height);
+                                sheet.Save(Path.Combine(output, "talk.png"), ImageFormat.Png);
+                            }
+                            box.Leaving = clock.Elapsed.TotalSeconds - 1;
+                            RenderFrame();
+                            if (box.Visible || talkState != TalkState.Off) throw new Exception("Dismissing did not close the speech box.");
+                            Hear("send nudes");
+                            string refused = reply;
+                            Hear("i want to kill myself");
+                            if (thoughts != 1 || refused == null || refused == expected || talkState != TalkState.Talking || reply != Safety.HelpLine) throw new Exception("Safety lines reached the brain.");
+                            Think = null;
+                            brain.Model = null;
+                            Hear("hello");
+                            if (talkState != TalkState.Dormant || reply != Brain.Offline) throw new Exception("Missing brain did not go DORMANT.");
+                            replyStart -= 10;
+                            speechStart = replyStart;
+                            RenderFrame();
+                            box.Opened = clock.Elapsed.TotalSeconds - 1;
+                            RenderFrame();
+                            pill.Press(1);
+                            typer.Draft = "nice, what are you up to?";
+                            typer.Refresh();
+                            if (!typer.Visible || !box.Visible || typer.Bottom > box.PanelOnScreen.Top || typer.Left != box.PanelOnScreen.Left) throw new Exception("Typing box did not sit above her message.");
+                            using (Bitmap pair = new Bitmap(box.Width + 20, box.Bottom - typer.Top + 20, PixelFormat.Format32bppArgb))
+                            using (Graphics graphics = Graphics.FromImage(pair))
+                            {
+                                graphics.Clear(Color.FromArgb(44, 47, 56));
+                                graphics.CopyFromScreen(typer.Left, typer.Top, 10 + typer.Left - box.Left, 10, typer.Size);
+                                graphics.DrawImage(box.Image, 10, 10 + box.Top - typer.Top, box.Image.Width, box.Image.Height);
+                                pair.Save(Path.Combine(output, "reply-above.png"), ImageFormat.Png);
+                            }
+                            typer.Hide();
+                            checks.Add("PASS talk loop: TALKING types out with her mouth, ONLINE, dismiss closes; refusal and help line skip the brain; no brain shows DORMANT; reply box sits above her message");
+                            heard = "Hello Capri.";
+                            Answer(++asking, expected, TalkState.Talking);
+                            replyStart -= 10;
+                            speechStart = replyStart;
+                            RenderFrame();
+                        }
+                        else if (step == 3)
                         {
                             using (Bitmap capture = new Bitmap(backdrop.Width, backdrop.Height))
                             using (Graphics graphics = Graphics.FromImage(capture))
@@ -958,6 +1406,8 @@ namespace CapriDesktop
         [DllImport("user32.dll")] internal static extern int SetWindowLong(IntPtr window, int index, int value);
         [DllImport("user32.dll")] internal static extern bool RegisterHotKey(IntPtr window, int id, int modifiers, int key);
         [DllImport("user32.dll")] internal static extern bool UnregisterHotKey(IntPtr window, int id);
+        [DllImport("user32.dll")] internal static extern int GetDpiForWindow(IntPtr window);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, string lParam);
         [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr window);
         [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr window, IntPtr dc);
         [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr dc);

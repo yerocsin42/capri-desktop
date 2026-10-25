@@ -146,6 +146,8 @@ namespace CapriSetup
                 if (File.Exists(uninstaller)) throw new IOException("The uninstaller is still open. Close it and try removing Capri again.");
                 File.Delete(Path.Combine(destination, "Capri.exe"));
                 File.Delete(Path.Combine(destination, ".capri-install"));
+                string brain = Path.Combine(destination, "brain");
+                if (Directory.Exists(brain)) Directory.Delete(brain, true);
                 DeleteShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Capri.lnk"), destination);
                 DeleteShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Capri.lnk"), destination);
                 Registry.CurrentUser.DeleteSubKeyTree(RegistryPath, false);

@@ -1,0 +1,572 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Drawing.Text;
+using System.IO;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+
+namespace CapriDesktop
+{
+    internal enum TalkState { Off, Thinking, Talking, Online, Dormant }
+
+    internal static class Look
+    {
+        internal static readonly Color Panel = Color.FromArgb(9, 11, 15);
+        internal static readonly Color Cyan = Color.FromArgb(58, 214, 235);
+        internal static readonly Color Red = Color.FromArgb(232, 36, 64);
+        internal static readonly Color Yellow = Color.FromArgb(244, 214, 70);
+        internal static readonly Color Blue = Color.FromArgb(84, 128, 255);
+        internal static readonly Color Ink = Color.FromArgb(232, 236, 240);
+        internal static readonly Color Dim = Color.FromArgb(122, 128, 138);
+
+        private static readonly FontFamily embedded = Embedded("Capri.Font.Mono.ttf");
+
+        [DllImport("gdi32.dll")] private static extern IntPtr AddFontMemResourceEx(IntPtr font, uint length, IntPtr reserved, ref uint count);
+
+        private static FontFamily Embedded(string name)
+        {
+            using (Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(name))
+            {
+                if (stream == null) return null;
+                byte[] data = new byte[stream.Length];
+                stream.Read(data, 0, data.Length);
+                IntPtr memory = Marshal.AllocCoTaskMem(data.Length);
+                Marshal.Copy(data, 0, memory, data.Length);
+                uint count = 0;
+                AddFontMemResourceEx(memory, (uint)data.Length, IntPtr.Zero, ref count);
+                PrivateFontCollection collection = new PrivateFontCollection();
+                collection.AddMemoryFont(memory, data.Length);
+                return collection.Families.Length > 0 ? collection.Families[0] : null;
+            }
+        }
+
+        internal static Font Mono(float size, FontStyle style, GraphicsUnit unit = GraphicsUnit.Pixel)
+        {
+            if (embedded != null) return new Font(embedded, size, embedded.IsStyleAvailable(style) ? style : FontStyle.Regular, unit);
+            foreach (string family in new[] { "Cascadia Mono", "Consolas", "Courier New" })
+            {
+                Font font = new Font(family, size, style, unit);
+                if (font.Name == family) return font;
+                font.Dispose();
+            }
+            return new Font(FontFamily.GenericMonospace, size, style, unit);
+        }
+
+        internal static float CharWidth(Font font)
+        {
+            using (Bitmap scratch = new Bitmap(1, 1))
+            using (Graphics graphics = Graphics.FromImage(scratch))
+                return graphics.MeasureString(new string('M', 20), font, PointF.Empty, StringFormat.GenericTypographic).Width / 20f;
+        }
+
+        internal static GraphicsPath Plate(RectangleF box, float cut, float tipX, float tipY, float tail, bool both = false)
+        {
+            float right = both ? cut : 0;
+            List<PointF> points = new List<PointF>();
+            float near = Math.Max(box.Left + cut + 2, tipX - tail * 0.8f);
+            float far = Math.Min(box.Right - right - 2, tipX + tail * 0.2f);
+            points.Add(new PointF(box.Left + cut, box.Top));
+            if (tipY < box.Top) { points.Add(new PointF(near, box.Top)); points.Add(new PointF(tipX, tipY)); points.Add(new PointF(far, box.Top)); }
+            points.Add(new PointF(box.Right - right, box.Top));
+            if (both) points.Add(new PointF(box.Right, box.Top + cut));
+            if (both) points.Add(new PointF(box.Right, box.Bottom - cut));
+            points.Add(new PointF(box.Right - right, box.Bottom));
+            if (tipY > box.Bottom) { points.Add(new PointF(far, box.Bottom)); points.Add(new PointF(tipX, tipY)); points.Add(new PointF(near, box.Bottom)); }
+            points.Add(new PointF(box.Left + cut, box.Bottom));
+            points.Add(new PointF(box.Left, box.Bottom - cut));
+            points.Add(new PointF(box.Left, box.Top + cut));
+            GraphicsPath path = new GraphicsPath();
+            path.AddPolygon(points.ToArray());
+            return path;
+        }
+
+        internal static GraphicsPath Rounded(RectangleF box, float radius)
+        {
+            GraphicsPath path = new GraphicsPath();
+            float d = radius * 2;
+            path.AddArc(box.Left, box.Top, d, d, 180, 90);
+            path.AddArc(box.Right - d, box.Top, d, d, 270, 90);
+            path.AddArc(box.Right - d, box.Bottom - d, d, d, 0, 90);
+            path.AddArc(box.Left, box.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+
+        internal static List<string> Wrap(string text, int columns)
+        {
+            List<string> lines = new List<string>();
+            string line = "";
+            foreach (string piece in (text ?? "").Split(' '))
+            {
+                string word = piece;
+                while (word.Length > columns)
+                {
+                    if (line.Length > 0) { lines.Add(line); line = ""; }
+                    lines.Add(word.Substring(0, columns));
+                    word = word.Substring(columns);
+                }
+                if (line.Length == 0) line = word;
+                else if (line.Length + 1 + word.Length <= columns) line += " " + word;
+                else { lines.Add(line); line = word; }
+            }
+            if (line.Length > 0 || lines.Count == 0) lines.Add(line);
+            return lines;
+        }
+
+        internal static Color Tag(TalkState state)
+        {
+            switch (state)
+            {
+                case TalkState.Online: return Red;
+                case TalkState.Dormant: return Blue;
+                default: return Yellow;
+            }
+        }
+    }
+
+    internal class Overlay : Form
+    {
+        private Bitmap shown;
+
+        internal Overlay(string name)
+        {
+            Text = name;
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            TopMost = true;
+            AutoScaleMode = AutoScaleMode.None;
+        }
+
+        protected override bool ShowWithoutActivation { get { return true; } }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams value = base.CreateParams;
+                value.ExStyle |= 0x00080000 | 0x00000080 | 0x08000000;
+                return value;
+            }
+        }
+
+        internal Bitmap Image { get { return shown; } }
+
+        internal void Present(Bitmap image, Point at)
+        {
+            Rectangle target = new Rectangle(at, image.Size);
+            if (Bounds != target) Bounds = target;
+            if (!Visible) Show();
+            Native.DrawLayered(Handle, image, at);
+            Bitmap old = shown;
+            shown = image;
+            if (old != null) old.Dispose();
+        }
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == 0x0084 && shown != null)
+            {
+                long value = message.LParam.ToInt64();
+                Point point = PointToClient(new Point((short)(value & 65535), (short)((value >> 16) & 65535)));
+                if (point.X < 0 || point.Y < 0 || point.X >= shown.Width || point.Y >= shown.Height || shown.GetPixel(point.X, point.Y).A < 12)
+                {
+                    message.Result = new IntPtr(-1);
+                    return;
+                }
+            }
+            base.WndProc(ref message);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && shown != null) { shown.Dispose(); shown = null; }
+            base.Dispose(disposing);
+        }
+    }
+
+    internal sealed class TalkPill : Overlay
+    {
+        internal event Action Typing;
+        internal event Action Voice;
+        private int hover;
+        private float scale = 1;
+        private Point centre;
+
+        internal TalkPill() : base("Talk to Capri") { Cursor = Cursors.Hand; }
+
+        internal static Size Measure(float scale) { return new Size((int)Math.Round(100 * scale), (int)Math.Round(40 * scale)); }
+
+        internal void Place(Point topCentre, float value)
+        {
+            if (Visible && topCentre == centre && value == scale) return;
+            centre = topCentre;
+            scale = value;
+            Redraw();
+        }
+
+        private void Redraw()
+        {
+            Bitmap image = Render(scale, hover);
+            Present(image, new Point(centre.X - image.Width / 2, centre.Y));
+        }
+
+        internal static Bitmap Render(float s, int hover)
+        {
+            Size size = Measure(s);
+            Bitmap image = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppPArgb);
+            using (Graphics graphics = Graphics.FromImage(image))
+            {
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                float margin = 3 * s;
+                RectangleF pill = new RectangleF(margin, margin, size.Width - margin * 2, size.Height - margin * 2);
+                using (GraphicsPath path = Look.Rounded(pill, pill.Height / 2))
+                {
+                    using (Brush fill = new SolidBrush(Color.FromArgb(244, 20, 21, 25))) graphics.FillPath(fill, path);
+                    using (Pen edge = new Pen(Color.FromArgb(70, 73, 82), 1.2f * s)) graphics.DrawPath(edge, path);
+                }
+                float middle = pill.X + pill.Width / 2;
+                using (Pen divider = new Pen(Color.FromArgb(70, 73, 82), 1.2f * s)) graphics.DrawLine(divider, middle, pill.Y + pill.Height * 0.27f, middle, pill.Bottom - pill.Height * 0.27f);
+                PointF pencil = new PointF(pill.X + pill.Width * 0.26f, pill.Y + pill.Height / 2);
+                PointF wave = new PointF(pill.X + pill.Width * 0.74f, pill.Y + pill.Height / 2);
+                if (hover != 0)
+                {
+                    PointF lit = hover == 1 ? pencil : wave;
+                    float radius = pill.Height * 0.4f;
+                    using (Brush glow = new SolidBrush(Color.FromArgb(30, 255, 255, 255))) graphics.FillEllipse(glow, lit.X - radius, lit.Y - radius, radius * 2, radius * 2);
+                }
+                DrawPencil(graphics, pencil, s, hover == 1 ? Look.Cyan : Look.Ink);
+                DrawWave(graphics, wave, s, hover == 2 ? Look.Cyan : Look.Ink);
+            }
+            return image;
+        }
+
+        private static void DrawPencil(Graphics graphics, PointF centre, float s, Color colour)
+        {
+            GraphicsState state = graphics.Save();
+            graphics.TranslateTransform(centre.X, centre.Y);
+            graphics.RotateTransform(-45);
+            using (Brush ink = new SolidBrush(colour))
+            using (GraphicsPath body = Look.Rounded(new RectangleF(-8 * s, -2.5f * s, 12 * s, 5 * s), 1.2f * s))
+            {
+                graphics.FillPath(ink, body);
+                graphics.FillPolygon(ink, new[] { new PointF(4.6f * s, -2.5f * s), new PointF(9 * s, 0), new PointF(4.6f * s, 2.5f * s) });
+            }
+            using (Pen gap = new Pen(Color.FromArgb(20, 21, 25), 1.1f * s))
+            {
+                graphics.DrawLine(gap, -4.8f * s, -3 * s, -4.8f * s, 3 * s);
+                graphics.DrawLine(gap, 4f * s, -3 * s, 4f * s, 3 * s);
+            }
+            graphics.Restore(state);
+        }
+
+        private static void DrawWave(Graphics graphics, PointF centre, float s, Color colour)
+        {
+            float[] heights = { 5, 10, 14, 9, 4 };
+            using (Pen bar = new Pen(colour, 2.3f * s))
+            {
+                bar.StartCap = LineCap.Round;
+                bar.EndCap = LineCap.Round;
+                for (int i = 0; i < heights.Length; i++)
+                {
+                    float x = centre.X + (i - 2) * 3.6f * s;
+                    float half = heights[i] * s / 2;
+                    graphics.DrawLine(bar, x, centre.Y - half, x, centre.Y + half);
+                }
+            }
+        }
+
+        private int PartAt(int x) { return x < Width / 2 ? 1 : 2; }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            int part = PartAt(e.X);
+            if (part != hover) { hover = part; Redraw(); }
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            if (hover != 0) { hover = 0; Redraw(); }
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (e.Button != MouseButtons.Left) return;
+            if (PartAt(e.X) == 1) { if (Typing != null) Typing(); }
+            else if (Voice != null) Voice();
+        }
+
+        internal void Press(int part) { if (part == 1) { if (Typing != null) Typing(); } else if (Voice != null) Voice(); }
+    }
+
+    internal sealed class SpeechBox : Overlay
+    {
+        internal event Action Dismissed;
+        internal TalkState State;
+        internal string Heard;
+        internal string Prompt = "> you: ";
+        internal string Reply;
+        internal int Revealed;
+        internal double Opened = -1;
+        internal double Leaving = -1;
+        private readonly Random random = new Random();
+        private Rectangle panelOnScreen;
+        private const int Columns = 34;
+
+        internal SpeechBox() : base("Capri says") { Cursor = Cursors.Hand; }
+
+        internal Rectangle PanelOnScreen { get { return panelOnScreen; } }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (e.Button == MouseButtons.Left && Dismissed != null) Dismissed();
+        }
+
+        internal static float PanelWidth(float s)
+        {
+            using (Font font = Look.Mono(14 * s, FontStyle.Regular)) return 24 * s + Columns * Look.CharWidth(font) + 14 * s;
+        }
+
+        internal void Update(double now, float s, Point head, Point feet, Rectangle area)
+        {
+            float glitch = 0;
+            if (Opened >= 0 && now - Opened < 0.2) glitch = (float)(1 - (now - Opened) / 0.2);
+            if (Leaving >= 0) glitch = (float)Math.Min(1, (now - Leaving) / 0.25 + 0.3);
+            bool cursor = State == TalkState.Thinking || State == TalkState.Talking ? (State == TalkState.Talking || (int)(now * 2.5) % 2 == 0) : (int)(now * 2) % 2 == 0;
+            Point at;
+            Bitmap image = Render(s, head, feet, area, cursor, out at);
+            if (glitch > 0)
+            {
+                Bitmap broken = Glitch(image, glitch, s);
+                image.Dispose();
+                image = broken;
+            }
+            Present(image, at);
+        }
+
+        private Bitmap Render(float s, Point head, Point feet, Rectangle area, bool cursorOn, out Point at)
+        {
+            using (Font text = Look.Mono(14 * s, FontStyle.Regular))
+            using (Font heard = Look.Mono(14 * s, FontStyle.Italic))
+            using (Font bold = Look.Mono(14 * s, FontStyle.Bold))
+            using (Font tag = Look.Mono(11 * s, FontStyle.Bold))
+            {
+                float cw = Look.CharWidth(text);
+                float line = 19 * s;
+                float margin = 12 * s;
+                float top = 10 * s;
+                float tail = 16 * s;
+                List<string> lines = Look.Wrap(Reply ?? "", Columns);
+                float panelWidth = 24 * s + Columns * cw + 14 * s;
+                float panelHeight = 13 * s + line * (2 + lines.Count) + 10 * s;
+                int width = (int)Math.Ceiling(panelWidth + margin * 2);
+                int height = (int)Math.Ceiling(top + panelHeight + tail + 4 * s);
+                bool below = head.Y - height < area.Top;
+                Point tip = below ? feet : head;
+                int left = Math.Max(area.Left, Math.Min(area.Right - width, (int)(tip.X - margin - panelWidth * 0.7f)));
+                int y = below ? tip.Y : tip.Y - height;
+                at = new Point(left, y);
+                RectangleF panel = new RectangleF(margin, below ? tail + 4 * s : top, panelWidth, panelHeight);
+                panelOnScreen = new Rectangle(left + (int)panel.X, y + (int)panel.Y, (int)panel.Width, (int)panel.Height);
+                float tipX = Math.Max(panel.Left + 32 * s, Math.Min(panel.Right - 10 * s, tip.X - left));
+                float tipY = below ? 0 : height - 1;
+                Bitmap image = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
+                using (Graphics graphics = Graphics.FromImage(image))
+                using (GraphicsPath path = Look.Plate(panel, 10 * s, tipX, tipY, 18 * s))
+                {
+                    graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                    using (Pen glow = new Pen(Color.FromArgb(46, Look.Cyan), 7 * s)) graphics.DrawPath(glow, path);
+                    using (Brush fill = new SolidBrush(Color.FromArgb(238, Look.Panel))) graphics.FillPath(fill, path);
+                    graphics.SetClip(path);
+                    using (Pen scan = new Pen(Color.FromArgb(9, 255, 255, 255), Math.Max(1, s)))
+                        for (float row = panel.Top; row < panel.Bottom; row += 3 * s) graphics.DrawLine(scan, panel.Left, row, panel.Right, row);
+                    graphics.ResetClip();
+                    using (Pen edge = new Pen(Look.Cyan, 2 * s)) graphics.DrawPath(edge, path);
+                    using (Brush red = new SolidBrush(Look.Red)) graphics.FillRectangle(red, panel.Left + 10 * s, panel.Top + 13 * s, 3 * s, panel.Height - 26 * s);
+                    float x = panel.Left + 24 * s;
+                    float row2 = panel.Top + 12 * s;
+                    string you = Prompt + (Heard ?? "");
+                    if (you.Length > Columns) you = you.Substring(0, Columns - 3) + "...";
+                    using (Brush dim = new SolidBrush(Look.Dim)) graphics.DrawString(you, heard, dim, x, row2, StringFormat.GenericTypographic);
+                    row2 += line;
+                    using (Brush yellow = new SolidBrush(Look.Yellow)) graphics.DrawString("CAPRI >", bold, yellow, x, row2, StringFormat.GenericTypographic);
+                    row2 += line;
+                    int remaining = State == TalkState.Thinking ? 0 : Math.Max(0, Revealed);
+                    PointF caret = new PointF(x, row2);
+                    using (Brush ink = new SolidBrush(Look.Ink))
+                    {
+                        for (int i = 0; i < lines.Count && remaining > 0; i++)
+                        {
+                            int take = Math.Min(lines[i].Length, remaining);
+                            graphics.DrawString(lines[i].Substring(0, take), text, ink, x, row2 + i * line, StringFormat.GenericTypographic);
+                            caret = new PointF(x + take * cw, row2 + i * line);
+                            remaining -= take + 1;
+                            if (remaining >= 0 && i + 1 < lines.Count) caret = new PointF(x, row2 + (i + 1) * line);
+                        }
+                        if (cursorOn) graphics.FillRectangle(ink, caret.X + s, caret.Y + s, cw * 0.85f, line - 5 * s);
+                    }
+                    if (State != TalkState.Off)
+                    {
+                        string label = "CAPRI // " + State.ToString().ToUpperInvariant();
+                        float tagWidth = label.Length * Look.CharWidth(tag) + 14 * s;
+                        RectangleF box = new RectangleF(panel.Left + 22 * s, panel.Top - 9 * s, tagWidth, 18 * s);
+                        Color colour = Look.Tag(State);
+                        using (Brush back = new SolidBrush(Look.Panel)) graphics.FillRectangle(back, box);
+                        using (Pen border = new Pen(colour, 1.4f * s)) graphics.DrawRectangle(border, box.X, box.Y, box.Width, box.Height);
+                        using (Brush ink = new SolidBrush(colour)) graphics.DrawString(label, tag, ink, box.X + 7 * s, box.Y + 3 * s, StringFormat.GenericTypographic);
+                    }
+                }
+                return image;
+            }
+        }
+
+        private Bitmap Glitch(Bitmap clean, float amount, float s)
+        {
+            Bitmap broken = new Bitmap(clean.Width, clean.Height, PixelFormat.Format32bppPArgb);
+            if (random.NextDouble() < 0.25 * amount) return broken;
+            using (Graphics graphics = Graphics.FromImage(broken))
+            {
+                int y = 0;
+                while (y < clean.Height)
+                {
+                    int band = Math.Min(clean.Height - y, (int)((3 + random.Next(10)) * s));
+                    int shift = (int)((random.NextDouble() * 2 - 1) * 10 * s * amount);
+                    graphics.DrawImage(clean, new Rectangle(shift, y, clean.Width, band), new Rectangle(0, y, clean.Width, band), GraphicsUnit.Pixel);
+                    y += band;
+                }
+                for (int i = 0; i < 2; i++)
+                {
+                    int band = (int)((2 + random.Next(6)) * s);
+                    int row = random.Next(Math.Max(1, clean.Height - band));
+                    int shift = (int)((random.NextDouble() * 2 - 1) * 14 * s * amount);
+                    bool cyan = i == 0;
+                    using (ImageAttributes tint = new ImageAttributes())
+                    {
+                        tint.SetColorMatrix(new ColorMatrix(new[]
+                        {
+                            new float[] { cyan ? 0 : 1, 0, 0, 0, 0 },
+                            new float[] { 0, cyan ? 1 : 0, 0, 0, 0 },
+                            new float[] { 0, 0, cyan ? 1 : 0, 0, 0 },
+                            new float[] { 0, 0, 0, 0.6f * amount, 0 },
+                            new float[] { 0, 0, 0, 0, 1 }
+                        }));
+                        graphics.DrawImage(clean, new Rectangle(shift, row, clean.Width, band), 0, row, clean.Width, band, GraphicsUnit.Pixel, tint);
+                    }
+                }
+            }
+            return broken;
+        }
+    }
+
+    internal sealed class TypeBox : Form
+    {
+        internal event Action<string> Submitted;
+        private readonly TextBox input;
+        private readonly Label prompt;
+        private float scale = 1;
+        private Font typed;
+        private Font italic;
+
+        internal TypeBox()
+        {
+            Text = "Talk to Capri";
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            TopMost = true;
+            AutoScaleMode = AutoScaleMode.None;
+            BackColor = Look.Panel;
+            prompt = new Label();
+            prompt.Text = "> you:";
+            prompt.ForeColor = Look.Dim;
+            prompt.BackColor = Look.Panel;
+            prompt.AutoSize = true;
+            input = new TextBox();
+            input.BorderStyle = BorderStyle.None;
+            input.BackColor = Look.Panel;
+            input.ForeColor = Look.Ink;
+            input.MaxLength = 240;
+            input.KeyDown += delegate(object sender, KeyEventArgs key)
+            {
+                if (key.KeyCode == Keys.Enter) { key.SuppressKeyPress = true; Submit(); }
+                else if (key.KeyCode == Keys.Escape) { key.SuppressKeyPress = true; Hide(); }
+            };
+            Controls.Add(prompt);
+            Controls.Add(input);
+            Deactivate += delegate { Hide(); };
+        }
+
+        internal string Draft { get { return input.Text; } set { input.Text = value; } }
+
+        internal void Open(Point head, Point feet, Rectangle area, float s, Rectangle above)
+        {
+            if (typed == null || scale != s)
+            {
+                scale = s;
+                Font oldTyped = typed;
+                Font oldItalic = italic;
+                typed = Look.Mono(14 * s, FontStyle.Regular);
+                italic = Look.Mono(14 * s, FontStyle.Italic);
+                input.Font = typed;
+                prompt.Font = italic;
+                if (oldTyped != null) { oldTyped.Dispose(); oldItalic.Dispose(); }
+            }
+            int width = (int)SpeechBox.PanelWidth(s);
+            int height = (int)(44 * s);
+            bool below = head.Y - height - 20 * s < area.Top;
+            int left = Math.Max(area.Left, Math.Min(area.Right - width, (int)(head.X - width * 0.7f)));
+            int top = below ? feet.Y + (int)(8 * s) : head.Y - height - (int)(18 * s);
+            Bounds = new Rectangle(left, top, width, height);
+            if (!above.IsEmpty) Follow(above, area);
+            prompt.Location = new Point((int)(24 * s), (height - prompt.PreferredHeight) / 2);
+            input.Location = new Point(prompt.Right + (int)(6 * s), (height - input.PreferredHeight) / 2 + (int)s);
+            input.Width = width - input.Left - (int)(14 * s);
+            using (GraphicsPath shape = Look.Plate(new RectangleF(0, 0, width, height), 10 * s, -1, height / 2f, 0, true)) Region = new Region(shape);
+            Show();
+            Activate();
+            input.Focus();
+            input.SelectionStart = input.Text.Length;
+        }
+
+        internal void Follow(Rectangle above, Rectangle area)
+        {
+            int top = above.Top - Height - (int)(16 * scale);
+            if (top < area.Top) top = above.Bottom + (int)(8 * scale);
+            Point target = new Point(above.Left, top);
+            if (Location != target) Location = target;
+        }
+
+        private void Submit()
+        {
+            string text = input.Text.Trim();
+            if (text.Length == 0) return;
+            input.Text = "";
+            Hide();
+            if (Submitted != null) Submitted(text);
+        }
+
+        internal void Send(string text) { input.Text = text; Submit(); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            float s = scale;
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (GraphicsPath edge = Look.Plate(new RectangleF(s, s, Width - 2 * s - 1, Height - 2 * s - 1), 10 * s, -1, Height / 2f, 0, true))
+            using (Pen cyan = new Pen(Look.Cyan, 2 * s))
+                e.Graphics.DrawPath(cyan, edge);
+            using (Brush red = new SolidBrush(Look.Red)) e.Graphics.FillRectangle(red, 10 * s, 10 * s, 3 * s, Height - 20 * s);
+        }
+    }
+}
