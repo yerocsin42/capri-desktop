@@ -60,10 +60,38 @@ namespace CapriDesktop
         [DataMember] public bool OnTop = true;
     }
 
+    internal sealed class Clip
+    {
+        internal readonly Bitmap Strip;
+        internal readonly int Count;
+        internal readonly double Fps;
+        internal readonly float Height;
+
+        internal Clip(string name, int count, double fps, float height)
+        {
+            Count = count;
+            Fps = fps;
+            Height = height;
+            Strip = Companion.LoadArt("Capri.Sprite." + name + ".png");
+            if (Strip == null) throw new FileNotFoundException("Capri's " + name + " animation is missing. Rebuild with assets/sprites.");
+        }
+    }
+
     internal sealed class Companion : Form
     {
-        private readonly Bitmap character;
-        private readonly Bitmap perched;
+        private readonly Clip idle = new Clip("idle", 16, 8, 1.11f);
+        private readonly Clip blink = new Clip("blink", 4, 8, 1.11f);
+        private readonly Clip blinkGlitch = new Clip("blink_glitch", 4, 8, 1.11f);
+        private readonly Clip grin = new Clip("grin", 16, 8, 1.11f);
+        private readonly Clip glitch = new Clip("glitch", 10, 15, 1.11f);
+        private readonly Clip dangle = new Clip("dangle", 12, 12, 1.11f);
+        private readonly Clip sleep = new Clip("sleep", 16, 6, 1.11f);
+        private readonly Clip wake = new Clip("wake", 13, 15, 1.11f);
+        private readonly Clip perch = new Clip("perch", 16, 8, 1);
+        private readonly Clip perchBlink = new Clip("perch_blink", 4, 8, 1);
+        private readonly Clip perchBlinkGlitch = new Clip("perch_blink_glitch", 4, 8, 1);
+        private readonly Clip perchGlitch = new Clip("perch_glitch", 10, 15, 1);
+        private readonly Random random = new Random();
         private readonly NotifyIcon tray;
         private readonly ContextMenuStrip menu;
         private readonly ToolStripMenuItem visibilityItem;
@@ -83,7 +111,13 @@ namespace CapriDesktop
         private bool pressed;
         private bool dragging;
         private bool hidden;
-        private double reactionStart = -10;
+        private Clip clip;
+        private double clipStart;
+        private int idleCycle;
+        private Clip blinkWith;
+        private IntPtr lastForeground;
+        private int topTicks;
+        private double nextGlitch;
         private int clicks;
         private bool riding;
         private bool pendingClick;
@@ -95,6 +129,7 @@ namespace CapriDesktop
         private readonly ToolStripMenuItem rideItem;
         private const int PaddingSize = 36;
         private const int DismountId = 0x4361;
+        private const int BlinkFrom = 9;
         internal bool TestFailed;
 
         internal Companion(string data, EventWaitHandle signal, bool smoke)
@@ -103,15 +138,8 @@ namespace CapriDesktop
             restore = signal;
             settingsPath = Path.Combine(data, "settings.json");
             preferences = smoke ? new Preferences() : LoadPreferences();
-            using (Stream image = Assembly.GetExecutingAssembly().GetManifestResourceStream("Capri.Character.png"))
-            {
-                if (image == null) throw new FileNotFoundException("The original Capri artwork is missing. Rebuild with assets/capri.png.");
-                using (Bitmap original = new Bitmap(image)) character = new Bitmap(original);
-            }
-            using (Stream image = Assembly.GetExecutingAssembly().GetManifestResourceStream("Capri.Perch.png"))
-            {
-                if (image != null) using (Bitmap original = new Bitmap(image)) perched = new Bitmap(original);
-            }
+            clip = idle;
+            nextGlitch = 30 + random.NextDouble() * 30;
             Text = "Capri";
             AccessibleName = "Capri desktop companion";
             FormBorderStyle = FormBorderStyle.None;
@@ -161,10 +189,10 @@ namespace CapriDesktop
             tray.Visible = !testing;
             frames = new System.Windows.Forms.Timer();
             frames.Interval = 33;
-            frames.Tick += delegate { if (riding) FollowCursor(); RenderFrame(); if (!riding && !preferences.Motion && clock.Elapsed.TotalSeconds - reactionStart > 0.7) frames.Stop(); };
+            frames.Tick += delegate { if (riding) FollowCursor(); RenderFrame(); if (!riding && !dragging && !preferences.Motion && clip == idle) frames.Stop(); };
             signals = new System.Windows.Forms.Timer();
             signals.Interval = 250;
-            signals.Tick += delegate { if (restore.WaitOne(0)) RestoreAtCursor(); };
+            signals.Tick += delegate { if (restore.WaitOne(0)) RestoreAtCursor(); if (!testing) CheckIdle(Native.IdleMilliseconds()); StayOnTop(); };
             signals.Start();
             Size = CanvasSize(preferences.Size);
             Rectangle work = Screen.PrimaryScreen.WorkingArea;
@@ -189,8 +217,72 @@ namespace CapriDesktop
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
+            Play(grin);
             RenderFrame();
             UpdateAnimation();
+        }
+
+        internal static Bitmap LoadArt(string name)
+        {
+            using (Stream image = Assembly.GetExecutingAssembly().GetManifestResourceStream(name))
+            {
+                if (image == null) return null;
+                using (Bitmap original = new Bitmap(image))
+                {
+                    Bitmap copy = new Bitmap(original.Width, original.Height, PixelFormat.Format32bppPArgb);
+                    using (Graphics graphics = Graphics.FromImage(copy))
+                    {
+                        graphics.CompositingMode = CompositingMode.SourceCopy;
+                        graphics.DrawImage(original, new Rectangle(0, 0, copy.Width, copy.Height));
+                    }
+                    return copy;
+                }
+            }
+        }
+
+        private void Play(Clip next)
+        {
+            clip = next;
+            clipStart = clock.Elapsed.TotalSeconds;
+            idleCycle = 0;
+            blinkWith = null;
+        }
+
+        private int Advance(double now)
+        {
+            bool seated = clip == perch || clip == perchGlitch;
+            if (riding && !seated) Play(perch);
+            if ((!riding && seated) || (clip == dangle && !dragging)) Play(idle);
+            int index = (int)((now - clipStart) * clip.Fps);
+            if ((clip == glitch && index >= glitch.Count) || (clip == wake && index >= wake.Count) || (clip == grin && index >= grin.Count * 2)) { Play(idle); index = 0; }
+            if (clip == perchGlitch && index >= perchGlitch.Count) { Play(perch); index = 0; }
+            if (clip != idle && clip != perch) return index % clip.Count;
+            if (!preferences.Motion) return 0;
+            int cycle = index / clip.Count;
+            if (cycle != idleCycle)
+            {
+                idleCycle = cycle;
+                double roll = random.NextDouble();
+                blinkWith = roll < 0.1 ? (clip == perch ? perchBlinkGlitch : blinkGlitch) : roll < 0.55 ? (clip == perch ? perchBlink : blink) : null;
+                if (now >= nextGlitch) { nextGlitch = now + 30 + random.NextDouble() * 30; Play(clip == perch ? perchGlitch : glitch); return 0; }
+            }
+            return index % clip.Count;
+        }
+
+        private void StayOnTop()
+        {
+            if (!preferences.OnTop || hidden || !IsHandleCreated || menu.Visible) return;
+            IntPtr foreground = Native.GetForegroundWindow();
+            if (foreground == lastForeground && ++topTicks < 8) return;
+            lastForeground = foreground;
+            topTicks = 0;
+            Native.SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+        }
+
+        private void CheckIdle(long quiet)
+        {
+            if (clip == sleep) { if (quiet < 1000) Play(wake); return; }
+            if (quiet >= 120000 && clip == idle && preferences.Motion && !riding && !dragging && !hidden) Play(sleep);
         }
 
         private static Size CanvasSize(int size) { return new Size(size + PaddingSize * 2, size + PaddingSize * 2); }
@@ -249,6 +341,7 @@ namespace CapriDesktop
             int dx = position.X - pointerStart.X;
             int dy = position.Y - pointerStart.Y;
             if (!dragging && dx * dx + dy * dy < 25) return;
+            if (!dragging) { Play(dangle); frames.Start(); }
             dragging = true;
             pendingClick = false;
             clickDelay.Stop();
@@ -331,6 +424,7 @@ namespace CapriDesktop
             rideItem.Text = "Hop off";
             tray.Text = hotkey ? "Capri · Ctrl + Alt + C to hop off" : "Capri · Hop off from this menu";
             if (!hotkey && !testing) tray.ShowBalloonTip(5000, "Capri", "Ctrl + Alt + C is taken by another app. Right-click Capri's tray icon and choose Hop off.", ToolTipIcon.Info);
+            Play(perchGlitch);
             frames.Start();
         }
 
@@ -341,6 +435,7 @@ namespace CapriDesktop
             if (!riding) return;
             riding = false;
             leanAngle = 0;
+            Play(grin);
             if (IsHandleCreated) Native.SetWindowLong(Handle, -20, Native.GetWindowLong(Handle, -20) & ~0x20);
             if (rideItem != null) rideItem.Text = "Perch on cursor";
             if (tray != null) tray.Text = "Capri · Double-click to restore";
@@ -351,9 +446,8 @@ namespace CapriDesktop
         {
             Point cursor = Cursor.Position;
             Rectangle area = Screen.FromPoint(cursor).WorkingArea;
-            float seatedHeight = perched == null ? preferences.Size : preferences.Size * perched.Height / (float)perched.Width;
-            int seatX = perched == null ? Width / 2 - 24 : PaddingSize + (int)(preferences.Size * 0.267f) - 12;
-            int seatY = perched == null ? Height - PaddingSize : PaddingSize + (int)((preferences.Size - seatedHeight) / 2 + seatedHeight * 0.73f) + 12;
+            int seatX = PaddingSize + (int)(preferences.Size * 0.267f) - 12;
+            int seatY = PaddingSize + (int)(preferences.Size * 0.73f) + 12;
             int tx = Math.Max(area.Left, Math.Min(cursor.X - seatX, area.Right - Width));
             int ty = Math.Max(area.Top, Math.Min(cursor.Y - seatY, area.Bottom - Height));
             int nx = anchor.X + (int)Math.Round((tx - anchor.X) * 0.25);
@@ -366,7 +460,7 @@ namespace CapriDesktop
         private void React()
         {
             clicks++;
-            reactionStart = clock.Elapsed.TotalSeconds;
+            Play(glitch);
             if (!hidden) frames.Start();
             RenderFrame();
         }
@@ -376,7 +470,7 @@ namespace CapriDesktop
             hidden = value;
             visibilityItem.Text = value ? "Show Capri" : "Hide Capri";
             if (value) { StopRide(); pendingClick = false; clickDelay.Stop(); frames.Stop(); Hide(); }
-            else { anchor = KeepOnScreen(anchor); Location = anchor; Show(); RenderFrame(); UpdateAnimation(); }
+            else { anchor = KeepOnScreen(anchor); Location = anchor; Play(grin); Show(); RenderFrame(); UpdateAnimation(); }
         }
 
         private void RestoreAtCursor()
@@ -388,34 +482,44 @@ namespace CapriDesktop
             SavePreferences();
         }
 
-        private void UpdateAnimation() { if ((preferences.Motion || riding) && !hidden) frames.Start(); else frames.Stop(); RenderFrame(); }
+        private void UpdateAnimation()
+        {
+            if (!preferences.Motion && !riding && clip != glitch && clip != dangle && clip != wake) Play(idle);
+            if ((preferences.Motion || riding || clip != idle) && !hidden) frames.Start(); else frames.Stop();
+            RenderFrame();
+        }
 
         private void RenderFrame()
         {
             if (!IsHandleCreated || hidden || IsDisposed) return;
+            int cell = Advance(clock.Elapsed.TotalSeconds);
+            Clip shown = clip;
+            if ((clip == idle || clip == perch) && blinkWith != null && cell >= BlinkFrom && cell < BlinkFrom + blinkWith.Count) { shown = blinkWith; cell -= BlinkFrom; }
             Bitmap next = new Bitmap(Width, Height, PixelFormat.Format32bppPArgb);
-            using (Graphics graphics = Graphics.FromImage(next))
-            {
-                graphics.CompositingMode = CompositingMode.SourceOver;
-                graphics.CompositingQuality = CompositingQuality.HighQuality;
-                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                graphics.SmoothingMode = SmoothingMode.HighQuality;
-                double now = clock.Elapsed.TotalSeconds;
-                double age = now - reactionStart;
-                float bounce = age >= 0 && age < 0.65 ? (float)(Math.Sin(age / 0.65 * Math.PI) * 15) : 0;
-                float breathe = preferences.Motion && !dragging ? (float)Math.Sin(now * 1.75) * 2.2f : 0;
-                float tilt = preferences.Motion && !dragging ? (float)Math.Sin(now * 0.95) * 0.65f : 0;
-                graphics.TranslateTransform(Width / 2f, Height / 2f - bounce + breathe);
-                graphics.RotateTransform(tilt + (float)leanAngle);
-                Bitmap artwork = riding && perched != null ? perched : character;
-                float height = preferences.Size * artwork.Height / (float)artwork.Width;
-                graphics.DrawImage(artwork, new RectangleF(-preferences.Size / 2f, -height / 2f, preferences.Size, height));
-            }
+            using (Graphics graphics = Graphics.FromImage(next)) Draw(graphics, shown, cell);
             Native.DrawLayered(Handle, next, anchor);
             Bitmap old = frame;
             frame = next;
             if (old != null) old.Dispose();
+        }
+
+        private void Draw(Graphics graphics, Clip shown, int cell)
+        {
+            graphics.CompositingMode = CompositingMode.SourceOver;
+            graphics.CompositingQuality = CompositingQuality.HighQuality;
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            graphics.SmoothingMode = SmoothingMode.HighQuality;
+            double now = clock.Elapsed.TotalSeconds;
+            bool settled = preferences.Motion && !dragging && clip != dangle && clip != sleep;
+            float breathe = settled ? (float)Math.Sin(now * 1.75) * 2.2f : 0;
+            float tilt = settled ? (float)Math.Sin(now * 0.95) * 0.65f : 0;
+            graphics.TranslateTransform(Width / 2f, Height / 2f + breathe);
+            graphics.RotateTransform(tilt + (float)leanAngle);
+            int width = shown.Strip.Width / shown.Count;
+            float tall = preferences.Size * shown.Height;
+            float wide = tall * width / shown.Strip.Height;
+            graphics.DrawImage(shown.Strip, new RectangleF(-wide / 2f, -tall / 2f, wide, tall), new RectangleF(cell * width, 0, width, shown.Strip.Height), GraphicsUnit.Pixel);
         }
 
         private Preferences LoadPreferences()
@@ -469,8 +573,7 @@ namespace CapriDesktop
                 signals.Dispose();
                 tray.Dispose();
                 menu.Dispose();
-                character.Dispose();
-                if (perched != null) perched.Dispose();
+                foreach (Clip owned in new[] { idle, blink, blinkGlitch, grin, glitch, dangle, sleep, wake, perch, perchBlink, perchBlinkGlitch, perchGlitch }) owned.Strip.Dispose();
                 if (frame != null) frame.Dispose();
             }
             base.Dispose(disposing);
@@ -501,28 +604,39 @@ namespace CapriDesktop
                             OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
                             Point moved = new Point(pointerStart.X - 80, pointerStart.Y - 35);
                             MovePointer(moved);
+                            if (clip != dangle || !frames.Enabled) throw new Exception("Drag did not play the dangle clip.");
                             OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
                             if (anchor == before || pendingClick || riding) throw new Exception("Drag did not change position or did not cancel click.");
-                            checks.Add("PASS drag handler changed position");
+                            RenderFrame();
+                            if (clip != idle) throw new Exception("Drop did not return to idle.");
+                            checks.Add("PASS drag handler changed position, dangled and settled");
                             int previous = clicks;
                             OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
                             OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
                             if (!pendingClick || clicks != previous) throw new Exception("Single click was not delayed.");
                             OnClickDelay();
-                            if (clicks != previous + 1 || !frames.Enabled) throw new Exception("Click reaction did not start.");
-                            checks.Add("PASS delayed single click started reaction");
+                            if (clicks != previous + 1 || !frames.Enabled || clip != glitch) throw new Exception("Click reaction did not start.");
+                            clipStart -= 1;
+                            RenderFrame();
+                            if (clip != idle) throw new Exception("Glitch did not return to idle.");
+                            checks.Add("PASS delayed single click glitched once and returned to idle");
                             OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
                             OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
                             OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
                             OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, Width / 2, Height / 2, 0));
                             if (!riding || (Native.GetWindowLong(Handle, -20) & 0x20) == 0) throw new Exception("Double click did not perch with click-through.");
-                            checks.Add("PASS double click perched with click-through");
+                            if (clip != perchGlitch) throw new Exception("Perching did not glitch on.");
+                            clipStart -= 1;
+                            RenderFrame();
+                            if (clip != perch) throw new Exception("Perch glitch did not settle into the seated loop.");
+                            checks.Add("PASS double click perched with click-through, glitched on and settled into the seated loop");
                             checks.Add(hotkey ? "PASS Ctrl+Alt+C registered while perched" : "LIMIT Ctrl+Alt+C taken; tray Hop off fallback");
                             if (IsDoubleClick(Point.Empty, new Point(200, 200), 10)) throw new Exception("Double click predicate failed.");
                             Message key = Message.Create(Handle, 0x0312, new IntPtr(DismountId), IntPtr.Zero);
                             WndProc(ref key);
                             if (riding || hotkey || (Native.GetWindowLong(Handle, -20) & 0x20) != 0) throw new Exception("Hotkey did not hop off.");
-                            checks.Add("PASS Ctrl+Alt+C message hopped off and released the hotkey");
+                            if (clip != grin) throw new Exception("Hop off did not grin.");
+                            checks.Add("PASS Ctrl+Alt+C message hopped off, grinned and released the hotkey");
                             rideItem.PerformClick();
                             if (!riding || rideItem.Text != "Hop off") throw new Exception("Menu perch failed.");
                             rideItem.PerformClick();
@@ -531,14 +645,26 @@ namespace CapriDesktop
                             rideItem.PerformClick();
                             visibilityItem.PerformClick();
                             if (Visible || !hidden || riding || hotkey) throw new Exception("Hide menu did not hide window or clean up perch.");
-                            checks.Add(perched == null ? "LIMIT seated artwork unavailable" : "PASS seated artwork loaded");
                             checks.Add("PASS hide menu");
                             restore.Set();
                         }
                         else if (step == 1)
                         {
-                            if (!Visible || hidden) throw new Exception("Second-launch restore signal did not show Capri.");
+                            if (!Visible || hidden || clip != grin) throw new Exception("Second-launch restore signal did not show Capri grinning.");
                             checks.Add("PASS restore signal");
+                            if (Native.IdleMilliseconds() < 0) throw new Exception("Idle time unavailable.");
+                            Play(idle);
+                            CheckIdle(119000);
+                            if (clip != idle) throw new Exception("Slept too early.");
+                            CheckIdle(130000);
+                            if (clip != sleep) throw new Exception("Did not sleep after two quiet minutes.");
+                            CheckIdle(0);
+                            if (clip != wake) throw new Exception("Did not wake with the boot glitch.");
+                            clipStart -= 1;
+                            RenderFrame();
+                            if (clip != idle) throw new Exception("Boot glitch did not settle into idle.");
+                            Play(idle);
+                            checks.Add("PASS sleeps after two quiet minutes, boots awake and settles into idle");
                             Point bounded = KeepOnScreen(new Point(int.MaxValue / 4, int.MaxValue / 4));
                             if (!Screen.FromPoint(new Point(bounded.X + Width / 2, bounded.Y + Height / 2)).WorkingArea.Contains(new Rectangle(bounded, Size))) throw new Exception("Screen bounds failed.");
                             checks.Add("PASS screen bounds");
@@ -552,6 +678,23 @@ namespace CapriDesktop
                             SavePreferences();
                             if (LoadPreferences().Size != 240) throw new Exception("Settings did not round-trip.");
                             checks.Add("PASS settings round-trip in isolated test directory");
+                            Clip[] strips = { idle, blink, blinkGlitch, grin, glitch, dangle, sleep, wake, perch, perchBlink, perchBlinkGlitch, perchGlitch };
+                            int[] cells = { 0, 1, 1, 0, 1, 3, 0, 4, 8, 1, 1, 1 };
+                            using (Bitmap sheet = new Bitmap(Width * strips.Length, Height, PixelFormat.Format32bppArgb))
+                            {
+                                for (int i = 0; i < strips.Length; i++)
+                                    using (Bitmap still = new Bitmap(Width, Height, PixelFormat.Format32bppPArgb))
+                                    {
+                                        if (strips[i].Strip.Width % strips[i].Count != 0) throw new Exception("Clip " + i + " has uneven cells.");
+                                        using (Graphics graphics = Graphics.FromImage(still)) Draw(graphics, strips[i], cells[i]);
+                                        int solid = 0;
+                                        for (int x = 0; x < Width; x += 4) for (int y = 0; y < Height; y += 4) if (still.GetPixel(x, y).A > 128) solid++;
+                                        if (solid < 200) throw new Exception("Clip " + i + " drew nothing.");
+                                        using (Graphics graphics = Graphics.FromImage(sheet)) graphics.DrawImage(still, i * Width, 0);
+                                    }
+                                sheet.Save(Path.Combine(output, "clips.png"), ImageFormat.Png);
+                            }
+                            checks.Add("PASS all 12 clips draw: idle, blinks, grin, glitch, drag, sleep, wake and perch");
                             backdrop = new Form();
                             backdrop.Text = "Capri clean test desktop";
                             backdrop.FormBorderStyle = FormBorderStyle.None;
@@ -576,8 +719,12 @@ namespace CapriDesktop
                             backdrop.Show();
                             anchor = new Point(backdrop.Left + backdrop.Width / 2 - Width / 2 + 150, backdrop.Top + backdrop.Height / 2 - Height / 2 + 20);
                             Location = anchor;
-                            TopMost = false;
-                            TopMost = true;
+                            lastForeground = new IntPtr(-1);
+                            StayOnTop();
+                            bool above = false;
+                            for (IntPtr below = Native.GetWindow(Handle, 2); below != IntPtr.Zero; below = Native.GetWindow(below, 2)) if (below == backdrop.Handle) { above = true; break; }
+                            if (!above) throw new Exception("Did not rise above a newer topmost window.");
+                            checks.Add("PASS rises back above a newer always-on-top window");
                             RenderFrame();
                         }
                         else if (step == 2)
@@ -629,6 +776,11 @@ namespace CapriDesktop
         [StructLayout(LayoutKind.Sequential)] internal struct Point { internal int X, Y; internal Point(int x, int y) { X = x; Y = y; } }
         [StructLayout(LayoutKind.Sequential)] internal struct Size { internal int Width, Height; internal Size(int width, int height) { Width = width; Height = height; } }
         [StructLayout(LayoutKind.Sequential, Pack = 1)] internal struct Blend { internal byte Operation, Flags, Alpha, Format; }
+        [StructLayout(LayoutKind.Sequential)] private struct InputInfo { internal int Size; internal uint Time; }
+        [DllImport("user32.dll")] private static extern bool GetLastInputInfo(ref InputInfo info);
+        [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] internal static extern IntPtr GetWindow(IntPtr window, int command);
+        [DllImport("user32.dll")] internal static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, int flags);
         [DllImport("user32.dll")] internal static extern bool SetProcessDPIAware();
         [DllImport("user32.dll")] internal static extern bool SetProcessDpiAwarenessContext(IntPtr context);
         [DllImport("user32.dll")] internal static extern int GetWindowLong(IntPtr window, int index);
@@ -642,6 +794,12 @@ namespace CapriDesktop
         [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr dc, IntPtr value);
         [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr value);
         [DllImport("user32.dll", SetLastError = true)] private static extern bool UpdateLayeredWindow(IntPtr window, IntPtr screen, ref Point destination, ref Size size, IntPtr source, ref Point origin, int colorKey, ref Blend blend, int flags);
+
+        internal static long IdleMilliseconds()
+        {
+            InputInfo info = new InputInfo { Size = Marshal.SizeOf(typeof(InputInfo)) };
+            return GetLastInputInfo(ref info) ? unchecked((uint)Environment.TickCount - info.Time) : 0;
+        }
 
         internal static void DrawLayered(IntPtr window, Bitmap bitmap, System.Drawing.Point location)
         {
