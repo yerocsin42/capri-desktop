@@ -78,11 +78,14 @@ jobs:
         run: |
           dotnet publish cross/Capri.Cross.csproj -c Release -r linux-x64 --self-contained -o out/Capri -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none
           chmod +x out/Capri/Capri
+      - name: Install a test desktop
+        timeout-minutes: 15
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends xvfb xauth openbox xcompmgr libice6 libsm6 libfontconfig1
       - name: Smoke test
         timeout-minutes: 5
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q xvfb openbox xcompmgr libice6 libsm6 libfontconfig1
           xvfb-run -a -s "-screen 0 1920x1080x24" bash -c 'openbox & sleep 2; xcompmgr & sleep 1; out/Capri/Capri --smoke "$PWD/smoke/linux"' || true
           cat smoke/linux/smoke-test.txt
           ! grep -q '^FAIL' smoke/linux/smoke-test.txt
