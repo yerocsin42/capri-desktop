@@ -1,10 +1,36 @@
 (() => {
   const repo = 'yerocsin42/capri-desktop';
   const install = document.querySelector('#install');
+  const systems = document.querySelectorAll('.systems a[data-os]');
+  const files = { windows: 'Capri-Setup.exe', mac: 'Capri-mac-apple-silicon.zip', intel: 'Capri-mac-intel.zip', linux: 'Capri-linux-x64.tar.gz' };
+  const agent = navigator.userAgent;
+  const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || agent;
+  let system = /Android|iPhone|iPad|CrOS/.test(agent) ? 'windows' : /Mac/.test(platform) && navigator.maxTouchPoints < 2 ? 'mac' : /Linux|X11/.test(platform) ? 'linux' : 'windows';
+  const urls = {};
+  systems.forEach(link => { urls[link.dataset.os] = link.href; });
+  const point = () => {
+    install.href = urls[system] || urls.windows;
+    systems.forEach(link => {
+      link.hidden = !urls[link.dataset.os];
+      if (urls[link.dataset.os]) link.href = urls[link.dataset.os];
+    });
+  };
+  point();
+  if (system === 'mac' && navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+    navigator.userAgentData.getHighEntropyValues(['architecture']).then(values => {
+      if (values.architecture === 'x86') { system = 'intel'; point(); }
+    }).catch(() => {});
+  }
   const enableDownload = (release) => {
-    const asset = release && !release.draft && !release.prerelease && Array.isArray(release.assets) && release.assets.find(item => item.name === 'Capri-Setup.exe' && item.size > 1024 && typeof item.browser_download_url === 'string' && item.browser_download_url.startsWith('https://github.com/' + repo + '/releases/download/'));
-    if (!asset) throw new Error('Installer unavailable');
-    install.href = asset.browser_download_url;
+    if (!release || release.draft || release.prerelease || !Array.isArray(release.assets)) throw new Error('Release unavailable');
+    const found = {};
+    Object.keys(files).forEach(os => {
+      const asset = release.assets.find(item => item.name === files[os] && item.size > 1024 && typeof item.browser_download_url === 'string' && item.browser_download_url.startsWith('https://github.com/' + repo + '/releases/download/'));
+      if (asset) found[os] = asset.browser_download_url;
+    });
+    if (!found.windows) throw new Error('Installer unavailable');
+    Object.keys(files).forEach(os => { urls[os] = found[os]; });
+    point();
   };
   const readRelease = async (url) => {
     const response = await fetch(url, { signal: AbortSignal.timeout(6000) });
@@ -13,7 +39,14 @@
   };
   readRelease('https://api.github.com/repos/' + repo + '/releases/latest').catch(() => readRelease('release.json')).catch(() => {});
   const headsUp = document.querySelector('#heads-up');
-  install.addEventListener('click', () => { if (headsUp.showModal && !headsUp.open) headsUp.showModal(); });
+  const notes = headsUp.querySelectorAll('p[data-os]');
+  const warn = (os) => {
+    const shown = os === 'intel' ? 'mac' : os;
+    notes.forEach(note => { note.hidden = note.dataset.os !== shown; });
+    if (headsUp.showModal && !headsUp.open) headsUp.showModal();
+  };
+  install.addEventListener('click', () => warn(urls[system] ? system : 'windows'));
+  systems.forEach(link => link.addEventListener('click', () => warn(link.dataset.os)));
   headsUp.addEventListener('click', event => { if (event.target === headsUp) headsUp.close(); });
 
   const stage = document.querySelector('#demo');
@@ -377,7 +410,7 @@
     downloadCount.textContent = compact.format(downloads);
   };
   readDownloads().catch(() => {});
-  install.addEventListener('click', () => { readDownloads({ method: 'POST', keepalive: true }).catch(() => {}); });
+  [install, ...systems].forEach(link => link.addEventListener('click', () => { readDownloads({ method: 'POST', keepalive: true }).catch(() => {}); }));
 
   const changelog = document.querySelector('#changelog');
   const track = changelog.querySelector('.changelog-track');

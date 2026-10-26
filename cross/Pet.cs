@@ -182,7 +182,7 @@ namespace CapriDesktop
                     double points = Desk.Points;
                     if (points > 0 && Screens.Primary != null) Desk.Scale = Screens.Primary.Bounds.Width / points;
                 }
-                catch (Exception) { Desk = new BareDesk(); }
+                catch (Exception error) { Lose(error); }
                 Place();
                 frames.Start();
                 FindBrain();
@@ -346,22 +346,30 @@ namespace CapriDesktop
             return skip;
         }
 
+        internal string DeskTrouble;
+
+        private void Lose(Exception error)
+        {
+            DeskTrouble = error.GetType().Name + ": " + error.Message;
+            Desk = new BareDesk();
+        }
+
         internal List<Spot> Windows()
         {
             try { return Desk.Windows(Ours()); }
-            catch (Exception) { Desk = new BareDesk(); return new List<Spot>(); }
+            catch (Exception error) { Lose(error); return new List<Spot>(); }
         }
 
         private Spot Find(long window)
         {
             try { return Desk.Find(window); }
-            catch (Exception) { Desk = new BareDesk(); return null; }
+            catch (Exception error) { Lose(error); return null; }
         }
 
         private bool Alive(long window)
         {
             try { return Desk.Alive(window); }
-            catch (Exception) { Desk = new BareDesk(); return false; }
+            catch (Exception error) { Lose(error); return false; }
         }
 
         internal List<Ledge> Ledges()

@@ -45,7 +45,7 @@ namespace CapriDesktop
             if (started < 0) started = now;
             if (stepStart < 0) stepStart = now;
             if (now - started > 90) { Finish("Timed out at step " + step + "."); return; }
-            if (now - stepStart > 15) { Finish("Step " + step + " took longer than 15 seconds."); return; }
+            if (now - stepStart > 15) { checks.Add("INFO " + Seen()); Finish("Step " + step + " took longer than 15 seconds."); return; }
             try
             {
                 if (Step(now))
@@ -232,6 +232,13 @@ namespace CapriDesktop
         private static void Send(Process process, string line)
         {
             if (process != null && !process.HasExited) process.StandardInput.WriteLine(line);
+        }
+
+        private string Seen()
+        {
+            List<string> parts = new List<string>();
+            foreach (Spot spot in pet.Windows()) parts.Add(spot.Window + " " + spot.Bounds + (spot.Seat ? " seat" : ""));
+            return "window list " + pet.Desk.Name + (pet.DeskTrouble == null ? "" : " after " + pet.DeskTrouble) + ", scale " + pet.Desk.Scale.ToString("0.###") + ", shelf asked " + shelfAsked + " " + (shelf == null ? "not started" : shelf.HasExited ? "exited " + shelf.ExitCode : "running") + ", saw " + (parts.Count == 0 ? "no windows" : string.Join("; ", parts));
         }
 
         private Spot Near(PixelRect asked, bool seat)
