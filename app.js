@@ -5,7 +5,7 @@
   const files = { windows: 'Capri-Setup.exe', mac: 'Capri-mac-apple-silicon.zip', intel: 'Capri-mac-intel.zip', linux: 'Capri-linux-x64.tar.gz' };
   const agent = navigator.userAgent;
   const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || agent;
-  let system = /Android|iPhone|iPad|CrOS/.test(agent) ? 'windows' : /Mac/.test(platform) && navigator.maxTouchPoints < 2 ? 'mac' : /Linux|X11/.test(platform) ? 'linux' : 'windows';
+  let system = /Android|iPhone|iPad|CrOS/.test(agent) ? 'windows' : /mac/i.test(platform) && navigator.maxTouchPoints < 2 ? 'mac' : /linux|x11/i.test(platform) ? 'linux' : 'windows';
   const urls = {};
   systems.forEach(link => { urls[link.dataset.os] = link.href; });
   const point = () => {
@@ -16,11 +16,19 @@
     });
   };
   point();
+  const intelGraphics = () => {
+    try {
+      const gl = document.createElement('canvas').getContext('webgl');
+      const info = gl && gl.getExtension('WEBGL_debug_renderer_info');
+      const name = gl ? String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER)) : '';
+      return /Intel|AMD|Radeon|NVIDIA|GeForce/i.test(name) && !/Apple (M\d|GPU)/i.test(name);
+    } catch (error) { return false; }
+  };
   if (system === 'mac' && navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
     navigator.userAgentData.getHighEntropyValues(['architecture']).then(values => {
       if (values.architecture === 'x86') { system = 'intel'; point(); }
     }).catch(() => {});
-  }
+  } else if (system === 'mac' && intelGraphics()) { system = 'intel'; point(); }
   const enableDownload = (release) => {
     if (!release || release.draft || release.prerelease || !Array.isArray(release.assets)) throw new Error('Release unavailable');
     const found = {};
