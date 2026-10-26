@@ -171,6 +171,8 @@ namespace CapriDesktop
         private double walkCarry;
         private bool dropAfter;
         private bool quitting;
+        private bool away;
+        private bool opened;
         private bool dancing;
         private Action outro;
         private double outroAt;
@@ -237,6 +239,8 @@ namespace CapriDesktop
             frames.Tick += delegate { Tick(); };
             Opened += delegate
             {
+                if (opened) return;
+                opened = true;
                 try
                 {
                     double points = Desk.Points;
@@ -337,11 +341,35 @@ namespace CapriDesktop
             Screen screen = Screens.Primary ?? ScreenHere();
             if (screen == null || quitting) return;
             Halt();
+            away = false;
+            if (!IsVisible) Show();
             walking = false;
             seat = null;
             falling = false;
             PixelRect area = screen.WorkingArea;
             Move(new PixelPoint(area.X + area.Width / 2 - Px(body.Size / 2), area.Y));
+            Arrive();
+        }
+
+        internal bool Away { get { return away; } }
+
+        internal void HideAway()
+        {
+            if (away || quitting) return;
+            away = true;
+            Talk.Dismiss();
+            GlitchOut(delegate { seat = null; walking = false; Hide(); });
+        }
+
+        internal void ComeBack()
+        {
+            if (!away || quitting) return;
+            Halt();
+            away = false;
+            if (!IsVisible) Show();
+            walking = false;
+            seat = null;
+            falling = false;
             Arrive();
         }
 
@@ -359,13 +387,14 @@ namespace CapriDesktop
         {
             double now = Now;
             if (outro != null && now >= outroAt) { Action next = outro; outro = null; next(); }
+            if (away && !IsVisible) { if (smoke != null) smoke.Tick(now); return; }
             if (!dragging)
             {
                 if (falling) Tumble(now);
                 else if (seat != null) HoldSeat(now);
             }
             if (walking) Walk(now);
-            if (now >= nextCheck)
+            if (now >= nextCheck && !away)
             {
                 nextCheck = now + 0.25;
                 CheckSeat(now);

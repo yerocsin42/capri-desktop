@@ -32,7 +32,7 @@ namespace CapriDesktop
         private PixelPoint hipBefore;
         private int dx;
         private int dy;
-        private bool glitchedOut;
+        private int arrivalsBefore;
         private double outFrom = -1;
 
         internal Smoke(Pet pet, string folder)
@@ -404,15 +404,26 @@ namespace CapriDesktop
                 checks.Add("PASS dancing: she dances in her seat while music plays");
                 outFrom = now;
                 Sfx.Out = sounds.Add;
-                pet.GlitchOut(delegate { glitchedOut = true; });
+                pet.HideAway();
                 return true;
             }
             if (step == 16)
             {
-                if (!glitchedOut) return false;
+                if (pet.IsVisible) return false;
                 if (now - outFrom < 0.6) throw new Exception("Her glitch-out ended after " + (now - outFrom).ToString("0.00") + " s.");
-                if (sounds.Count != 1 || sounds[0].Length != Sfx.Make(Cue.Leave, 60).Length) throw new Exception("Her glitch-out didn't play its sound once: " + sounds.Count);
-                checks.Add("PASS glitch out: quitting plays her glitch-out and its sound for " + (now - outFrom).ToString("0.0") + " s before she goes");
+                if (!pet.Away || sounds.Count != 1 || sounds[0].Length != Sfx.Make(Cue.Leave, 60).Length) throw new Exception("Her glitch-out didn't play its sound once: " + sounds.Count);
+                checks.Add("PASS glitch out: Hide her plays her glitch-out and its sound for " + (now - outFrom).ToString("0.0") + " s, then her window goes");
+                arrivalsBefore = pet.Arrivals;
+                pet.ComeBack();
+                if (!pet.IsVisible || pet.Away || !pet.Arriving || pet.Arrivals != arrivalsBefore + 1) throw new Exception("Show her didn't glitch her back in.");
+                return true;
+            }
+            if (step == 17)
+            {
+                if (pet.Arriving || pet.Falling) return false;
+                if (!Sitting()) throw new Exception("After Show her she didn't sit down again.");
+                if (sounds.Count != 2 || sounds[1].Length != Sfx.Make(Cue.Arrive, 60).Length) throw new Exception("Show her didn't play the arrive sound: " + sounds.Count);
+                checks.Add("PASS show: Show her glitches her back in with its sound and she drops onto a seat");
                 Send(shelf, "quit");
                 Finish(null);
                 return true;
