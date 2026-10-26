@@ -607,14 +607,14 @@ namespace CapriDesktop
             base.WndProc(ref message);
         }
 
-        private bool Solid(Point point)
+        private bool Solid(Point point, bool uncovered = false)
         {
             for (int dx = -4; dx <= 4; dx += 4)
                 for (int dy = -4; dy <= 4; dy += 4)
                 {
                     int x = point.X + dx;
                     int y = point.Y + dy;
-                    if (x >= 0 && y >= 0 && x < frame.Width && y < frame.Height && frame.GetPixel(x, y).A >= 12) return true;
+                    if (x >= 0 && y >= 0 && x < frame.Width && y < frame.Height && frame.GetPixel(x, y).A >= 12 && (!uncovered || Uncovered(PointToScreen(new Point(x, y))))) return true;
                 }
             return false;
         }
@@ -1090,13 +1090,15 @@ namespace CapriDesktop
 
         private Point Feet() { return new Point(anchor.X + PaddingSize + (int)(preferences.Size * 0.58f), anchor.Y + PaddingSize + (int)(preferences.Size * 0.99f)); }
 
+        private bool Uncovered(Point screen) { return Native.GetAncestor(Native.WindowFromPoint(new Native.Point(screen.X, screen.Y)), 2) == Handle; }
+
         private void UpdatePill(double now)
         {
             if (!IsHandleCreated) return;
             bool allowed = !hidden && !riding && !dragging && !pressed && !falling;
             Point cursor = Cursor.Position;
             Point inside = PointToClient(cursor);
-            bool near = frame != null && inside.X >= 0 && inside.Y >= 0 && inside.X < Width && inside.Y < Height && Solid(inside);
+            bool near = frame != null && inside.X >= 0 && inside.Y >= 0 && inside.X < Width && inside.Y < Height && Solid(inside, true);
             if (allowed && (near || (pill.Visible && pill.Bounds.Contains(cursor)) || typer.Visible || chatting || talkState != TalkState.Off)) pillUntil = Math.Max(pillUntil, now + 1.5);
             if (!allowed || now > pillUntil) { if (pill.Visible) pill.Hide(); return; }
             float s = TalkScale();
@@ -2069,6 +2071,22 @@ namespace CapriDesktop
                             if (mainframe.IsDisposed || !mainframe.Visible || mainframe.WindowState != FormWindowState.Minimized) throw new Exception("Closing the Mainframe quit instead of minimizing.");
                             checks.Add("PASS Mainframe starts in the taskbar, a second launch opens it, it picks a model, and its close button minimizes it");
                             Think = delegate(string words) { thoughts++; return words == "hi" ? "Hey choom! Net's been quiet, too quiet. Time to stir up some trouble." : "Huh?"; };
+                            Point body = Point.Empty;
+                            for (int y = 0; y < frame.Height && body.IsEmpty; y += 4) for (int x = 0; x < frame.Width; x += 4) if (frame.GetPixel(x, y).A == 255) { body = new Point(x, y); break; }
+                            if (body.IsEmpty) throw new Exception("No solid pixel on her body.");
+                            if (!Solid(body, true)) throw new Exception("Her window is not what's under her body at " + PointToScreen(body) + ".");
+                            using (Form cover = new Form())
+                            {
+                                Point spot = PointToScreen(body);
+                                cover.FormBorderStyle = FormBorderStyle.None;
+                                cover.ShowInTaskbar = false;
+                                cover.StartPosition = FormStartPosition.Manual;
+                                cover.TopMost = true;
+                                cover.Bounds = new Rectangle(spot.X - 20, spot.Y - 20, 40, 40);
+                                cover.Show();
+                                if (Solid(body, true)) throw new Exception("A window over her still counted as her for the pill.");
+                            }
+                            checks.Add("PASS the pill only wakes for her body when no window covers her");
                             pillUntil = clock.Elapsed.TotalSeconds + 30;
                             UpdatePill(clock.Elapsed.TotalSeconds);
                             if (!pill.Visible || pill.Top < Bottom - 60 || Math.Abs(pill.Left + pill.Width / 2 - (Left + Width / 2)) > Width / 2) throw new Exception("Talk pill is not under her.");
@@ -2501,6 +2519,8 @@ namespace CapriDesktop
         [DllImport("user32.dll")] internal static extern int SetWindowLong(IntPtr window, int index, int value);
         [DllImport("user32.dll")] internal static extern bool RegisterHotKey(IntPtr window, int id, int modifiers, int key);
         [DllImport("user32.dll")] internal static extern bool UnregisterHotKey(IntPtr window, int id);
+        [DllImport("user32.dll")] internal static extern IntPtr WindowFromPoint(Point point);
+        [DllImport("user32.dll")] internal static extern IntPtr GetAncestor(IntPtr window, int flags);
         [DllImport("user32.dll")] internal static extern int GetDpiForWindow(IntPtr window);
         [DllImport("user32.dll")] internal static extern bool AllowSetForegroundWindow(int process);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, string lParam);
