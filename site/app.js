@@ -368,11 +368,12 @@
   });
 
   const downloadCount = install.querySelector('.download-count');
+  const beforeCounter = 839;
   let downloads = null;
   const readDownloads = async (options) => {
     const response = await fetch(install.dataset.api, { ...options, signal: AbortSignal.timeout(6000) });
     if (!response.ok) throw new Error('Downloads unavailable');
-    downloads = Math.max((await response.json()).count, downloads || 0);
+    downloads = Math.max((await response.json()).count + beforeCounter, downloads || 0);
     downloadCount.textContent = compact.format(downloads);
   };
   readDownloads().catch(() => {});
