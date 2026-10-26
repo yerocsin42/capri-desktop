@@ -3,25 +3,86 @@
   <img src="assets/capri.png" alt="Capri" width="40%" align="middle">
 </p>
 
-Bring Capri (back lol) to life as a desktop companion! Inspired by jpartnma_'s tiktok video.
+<p align="center">
+  Bring Capri (back lol) to life as a desktop companion! Inspired by jpartnma_'s tiktok video.
+</p>
+
+<p align="center">
+  <a href="https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-Setup.exe"><b>Download for Windows</b></a>
+</p>
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="assets/readme/idle.webp" alt="Capri idling and blinking" width="150"><br><sub>Hanging out</sub></td>
+    <td align="center"><img src="assets/readme/talk.webp" alt="Capri talking" width="150"><br><sub>Talking</sub></td>
+    <td align="center"><img src="assets/readme/tossed.webp" alt="Capri flailing while dragged" width="150"><br><sub>Getting tossed</sub></td>
+    <td align="center"><img src="assets/readme/glitch.webp" alt="Capri glitching" width="150"><br><sub>Glitching</sub></td>
+    <td align="center"><img src="assets/readme/sleep.webp" alt="Capri asleep, then booting back up" width="150"><br><sub>Napping</sub></td>
+  </tr>
+</table>
 
 Beware that Capri may try to take over your human CPU. We take no responsibility for her actions.
 
-To download it just click on the release in the right hand corner and click capri-setup.exe!
+## What she does
+
+- **Talks back.** Type to her and she answers in her own words.
+- **Talks out loud.** Add an ElevenLabs key and she speaks, or voice chat with her.
+- **Does things for you.** Ask her to open apps, play music or close a tab.
+- **Watches you play.** Turn it on and she comments on your games.
+- **Sits on your stuff.** Drop her on a window, an icon or the bottom of your screen.
+
+<p align="center">
+  <img src="assets/readme/bubble.png" alt="Capri's speech box with the pencil and wave buttons" width="31%">
+  <img src="assets/readme/sit.png" alt="Capri sitting on a window" width="31%">
+  <img src="assets/readme/mainframe.png" alt="The Capri Mainframe" width="22%">
+</p>
+
+## Getting started
+
+1. Download **Capri-Setup.exe** and run it
+2. In the Capri Mainframe, press **Set up her brain**, or press **Free key** to use a free NVIDIA key
+3. Optional: paste an ElevenLabs key so she can talk
+
+Windows or your antivirus may warn you because it's a new app. All the code is here.
+
+## How to use her
+
+- **Pencil:** type to her
+- **Wave:** voice chat
+- **Drag her:** sit her on a window
+- **Right-click her** or the tray icon: menu and settings
+
+Just ask her for things, like "open Spotify", "play Blinding Lights", "pause", "what's playing?" or "close Discord".
+
+<details>
+<summary>All controls</summary>
+
+| Control | What it does |
+| --- | --- |
+| Shift + drop | sit her right where you drop her |
+| Ctrl + drop | she hangs on; click her to let go |
+| Mic button | mute your mic in voice chat |
+| Ctrl + Alt + V | start or stop voice chat |
+| Ctrl + Alt + N | mute your mic |
+| Ctrl + Alt + C | get her off your cursor |
+| Right-click, Move | she hops between your open windows |
+| Watch my screen | in the Mainframe: she comments as you play |
+| Speak replies | in the Mainframe: turn off to save ElevenLabs credits |
+| Free voice chat | in the Mainframe: talk without ElevenLabs and she types back |
+
+</details>
+
+## Coming up
+
+- Working with your files: open, read and edit the ones you pick
+- Updates that install themselves
+- A free voice that runs on your PC
+- Remembering things about you
+- Looking things up and telling you the answer
+- Head pats (smh)
+- Mischief mode: screen glitches, stealing your cursor, "you've been hacked" notes
+- Mac and Linux
 
 Have fun and more updates to come!
 
-Features I'd like to add:
-
-- Tray application
-- Voice lines (with mute)
-- Text bubbles?
-- Possibility to connect local LLM for conversations
-- More animations, images &amp; quirks
-- Head pats (smh)
-- Mischief mode (screen glitches, stealing your cursor, "you've been hacked" notes)
-- Sitting on top of your windows
-- Peeking from the edge of the screen when you're idle
-- Start with Windows
-- Hiding while you're in fullscreen games or videos
-- Alarms &amp; a study timer
+<sub>Setup guide based on Dancer's guide in the Discord. Font: Share Tech Mono (OFL).</sub>
