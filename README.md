@@ -96,6 +96,10 @@ Just ask her for things, like "open Spotify", "play Blinding Lights", "pause", "
 - Mischief mode: screen glitches, stealing your cursor, "you've been hacked" notes
 - Mac and Linux
 
+## Licence
+
+Free for anything non-commercial: use her, share her, change her. No selling her or putting her in paid products. Full terms in [LICENSE.md](LICENSE.md) (PolyForm Noncommercial 1.0.0).
+
 Have fun and more updates to come!
 
 <sub>Setup guide based on Dancer's guide in the Discord. Font: Share Tech Mono (OFL).</sub>
