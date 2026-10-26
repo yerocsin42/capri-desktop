@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
-using System.IO.Compression;
 using System.Runtime.InteropServices;
+using System.Speech.AudioFormat;
+using System.Speech.Recognition;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -341,132 +343,76 @@ namespace CapriDesktop
         public void Dispose() { Close(); }
     }
 
-    internal sealed class Whisper
+    internal static class Hearing
     {
-        internal const string Build = "b5454";
-        private const string ZipUrl = "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-x64.zip";
-        private const string ZipSha = "6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb";
-        private const long ZipSize = 8928640;
-        internal static readonly bool English = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "en";
-        private static readonly string ModelFile = English ? "ggml-base.en-q5_1.bin" : "ggml-base-q5_1.bin";
-        private static readonly string OtherModel = English ? "ggml-base-q5_1.bin" : "ggml-base.en-q5_1.bin";
-        private static readonly string ModelUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/" + ModelFile;
-        private static readonly string ModelSha = English ? "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f" : "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898";
-        internal static readonly long ModelSize = English ? 59721011 : 59707625;
-        private static readonly Regex Phantom = new Regex(@"^(?:(?:thank you(?: (?:so|very) much)?(?: for watching)?|thanks for watching|you|bye|please subscribe|subscribe|merci(?: beaucoup)?(?: d['\u2019]avoir regard\u00e9)?|sous-titrage (?:st['\u2019]? ?[0-9]+|soci\u00e9t\u00e9 radio-canada)|(?:subtitles by|sous-titres (?:r\u00e9alis\u00e9s )?par) (?:la communaut\u00e9 )?(?:d['\u2019])?amara\.org)[.!? ]*)+$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        internal static Func<string, string, string, string> Run = Cli;
-        private readonly string root;
-        internal volatile bool Cancel;
+        internal const string NoRecognizer = "Windows has no offline speech recognizer for your language. Turn on Online speech recognition in Settings > Privacy & security > Speech.";
+        internal static Func<short[], string> Run = Recognize;
+        private static readonly object gate = new object();
+        private static SpeechRecognitionEngine engine;
 
-        internal Whisper(string data) { root = Path.Combine(data, "ears"); }
-
-        internal string Download { get { return Engine.Amount((HasExe ? 0 : ZipSize) + (HasModel ? 0 : ModelSize)); } }
-
-        private string Folder { get { return Path.Combine(root, "whisper-" + Build); } }
-        internal string Exe { get { return Path.Combine(Path.Combine(Folder, "Release"), "whisper-cli.exe"); } }
-        internal string Model { get { return Path.Combine(root, ModelFile); } }
-
-        private bool HasExe { get { return File.Exists(Exe) && new FileInfo(Exe).Length > 0; } }
-        private bool HasModel { get { return File.Exists(Model) && new FileInfo(Model).Length == ModelSize; } }
-        internal bool Ready { get { return HasExe && HasModel; } }
-
-        internal void Install(Action<string, long, long> progress)
-        {
-            if (Cancel) throw new OperationCanceledException();
-            if (Ready) return;
-            Directory.CreateDirectory(root);
-            long needed = (HasExe ? 0 : ZipSize * 4) + (HasModel ? 0 : ModelSize) + (64L << 20);
-            string drive = Path.GetPathRoot(root);
-            if (new DriveInfo(drive).AvailableFreeSpace < needed) throw new IOException("Her ears need " + Engine.Amount(needed) + " free on " + drive.TrimEnd('\\') + ".");
-            if (!HasExe)
-            {
-                string zip = Path.Combine(root, "whisper-" + Build + ".zip");
-                progress("Downloading her ears", 0, ZipSize);
-                Engine.Fetch(ZipUrl, zip, ZipSize, ZipSha, "her ears", progress, delegate { return Cancel; });
-                if (Cancel) throw new OperationCanceledException();
-                progress("Unpacking her ears", 0, 1);
-                string staging = Folder + ".new";
-                if (Directory.Exists(staging)) Directory.Delete(staging, true);
-                ZipFile.ExtractToDirectory(zip, staging);
-                if (!File.Exists(Path.Combine(Path.Combine(staging, "Release"), "whisper-cli.exe"))) throw new IOException("The ears download is missing whisper-cli.exe.");
-                if (Directory.Exists(Folder)) Directory.Delete(Folder, true);
-                Directory.Move(staging, Folder);
-                File.Delete(zip);
-            }
-            if (Cancel) throw new OperationCanceledException();
-            if (!HasModel)
-            {
-                progress("Downloading her ears' model", 0, ModelSize);
-                Engine.Fetch(ModelUrl, Model, ModelSize, ModelSha, "her ears' model", progress, delegate { return Cancel; });
-            }
-            try { File.Delete(Path.Combine(root, OtherModel)); } catch (IOException) { } catch (UnauthorizedAccessException) { }
-        }
-
-        internal string Text(short[] samples)
-        {
-            Directory.CreateDirectory(root);
-            string wav = Path.Combine(root, "heard-" + Guid.NewGuid().ToString("N") + ".wav");
-            try
-            {
-                using (FileStream file = new FileStream(wav, FileMode.Create, FileAccess.Write)) Wave(file, samples);
-                return Clean(Run(Exe, Model, wav));
-            }
-            finally { try { File.Delete(wav); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
-        }
+        internal static string Text(short[] samples) { return Clean(Run(samples)); }
 
         internal static string Clean(string text)
         {
-            string plain = Regex.Replace(text ?? "", @"\[[^\]]*\]|\([^)]*\)|\*[^*]*\*|[\u266a\u266b]", " ");
-            plain = Regex.Replace(plain, @"\s+", " ").Trim();
-            return Regex.IsMatch(plain, @"[\p{L}\p{N}]") && !Phantom.IsMatch(plain) ? plain : "";
+            string plain = Regex.Replace(text ?? "", @"\s+", " ").Trim();
+            return Regex.IsMatch(plain, @"[\p{L}\p{N}]") ? plain : "";
         }
 
-        internal static void Wave(Stream stream, short[] samples)
+        internal static string Pick(IList<string> cultures, string wanted)
         {
-            BinaryWriter writer = new BinaryWriter(stream);
-            writer.Write(Encoding.ASCII.GetBytes("RIFF"));
-            writer.Write(36 + samples.Length * 2);
-            writer.Write(Encoding.ASCII.GetBytes("WAVEfmt "));
-            writer.Write(16);
-            writer.Write((short)1);
-            writer.Write((short)1);
-            writer.Write(Ears.Rate);
-            writer.Write(Ears.Rate * 2);
-            writer.Write((short)2);
-            writer.Write((short)16);
-            writer.Write(Encoding.ASCII.GetBytes("data"));
-            writer.Write(samples.Length * 2);
-            foreach (short sample in samples) writer.Write(sample);
-            writer.Flush();
+            string language = wanted.Split('-')[0];
+            foreach (string culture in cultures) if (string.Equals(culture, wanted, StringComparison.OrdinalIgnoreCase)) return culture;
+            foreach (string culture in cultures) if (string.Equals(culture.Split('-')[0], language, StringComparison.OrdinalIgnoreCase)) return culture;
+            foreach (string culture in cultures) if (string.Equals(culture, "en-US", StringComparison.OrdinalIgnoreCase)) return culture;
+            return cultures.Count > 0 ? cultures[0] : null;
         }
 
-        internal static string Arguments(string model, string wav)
+        private static SpeechRecognitionEngine Open()
         {
-            return "-m \"" + model + "\" -f \"" + wav + "\" -l " + (English ? "en" : "auto") + " -nt -np -sns -nf -t " + Math.Max(1, Math.Min(4, Environment.ProcessorCount));
+            List<RecognizerInfo> installed = new List<RecognizerInfo>(SpeechRecognitionEngine.InstalledRecognizers());
+            List<string> cultures = installed.ConvertAll(delegate(RecognizerInfo info) { return info.Culture.Name; });
+            string chosen = Pick(cultures, CultureInfo.CurrentUICulture.Name);
+            if (chosen == null) throw new IOException(NoRecognizer);
+            SpeechRecognitionEngine made = new SpeechRecognitionEngine(installed[cultures.IndexOf(chosen)]);
+            made.LoadGrammar(new DictationGrammar());
+            return made;
         }
 
-        private static string Cli(string exe, string model, string wav)
+        private static string Recognize(short[] samples)
         {
-            ProcessStartInfo info = new ProcessStartInfo(exe, Arguments(model, wav));
-            info.UseShellExecute = false;
-            info.CreateNoWindow = true;
-            info.RedirectStandardOutput = true;
-            info.StandardOutputEncoding = Encoding.UTF8;
-            info.WorkingDirectory = Path.GetDirectoryName(exe);
-            StringBuilder output = new StringBuilder();
-            using (Process process = Process.Start(info))
+            lock (gate)
             {
-                process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e) { if (e.Data != null) lock (output) output.Append(e.Data).Append(' '); };
-                process.BeginOutputReadLine();
-                if (!process.WaitForExit(30000))
+                if (engine == null) engine = Open();
+                byte[] bytes = new byte[samples.Length * 2];
+                Buffer.BlockCopy(samples, 0, bytes, 0, bytes.Length);
+                StringBuilder words = new StringBuilder();
+                ManualResetEvent done = new ManualResetEvent(false);
+                EventHandler<SpeechRecognizedEventArgs> recognized = delegate(object sender, SpeechRecognizedEventArgs e) { lock (words) words.Append(e.Result.Text).Append(' '); };
+                EventHandler<RecognizeCompletedEventArgs> completed = delegate { done.Set(); };
+                engine.SpeechRecognized += recognized;
+                engine.RecognizeCompleted += completed;
+                try
                 {
-                    try { process.Kill(); } catch (InvalidOperationException) { } catch (System.ComponentModel.Win32Exception) { }
-                    throw new IOException("Hearing that took too long. Try a shorter line.");
+                    using (MemoryStream stream = new MemoryStream(bytes))
+                    {
+                        engine.SetInputToAudioStream(stream, new SpeechAudioFormatInfo(Ears.Rate, AudioBitsPerSample.Sixteen, AudioChannel.Mono));
+                        engine.RecognizeAsync(RecognizeMode.Multiple);
+                        if (!done.WaitOne(20000))
+                        {
+                            engine.RecognizeAsyncCancel();
+                            done.WaitOne(3000);
+                            throw new IOException("Hearing that took too long. Try a shorter line.");
+                        }
+                    }
                 }
-                process.WaitForExit();
-                if (process.ExitCode != 0) throw new IOException("Her ears glitched. Try again, or reinstall Capri.");
+                finally
+                {
+                    engine.SpeechRecognized -= recognized;
+                    engine.RecognizeCompleted -= completed;
+                    engine.SetInputToNull();
+                }
+                lock (words) return words.ToString();
             }
-            lock (output) return output.ToString();
         }
     }
 }

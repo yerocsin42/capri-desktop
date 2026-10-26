@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+#if !CROSS
 using System.Media;
+#endif
 using System.Net;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
@@ -55,10 +57,20 @@ namespace CapriDesktop
         internal volatile string Key;
         internal volatile string VoiceId;
         internal volatile string Model;
+#if CROSS
+        internal static Action<byte[]> Playback;
+        internal static Action Silence;
+#else
         private SoundPlayer player;
+#endif
 
         internal bool Ready { get { return Key != null && VoiceId != null; } }
 
+#if CROSS
+        internal static string Protect(string key) { throw new PlatformNotSupportedException("Saving keys isn't ready on this system yet."); }
+
+        internal static string Unprotect(string saved) { return null; }
+#else
         internal static string Protect(string key) { return Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(key), Entropy, DataProtectionScope.CurrentUser)); }
 
         internal static string Unprotect(string saved)
@@ -68,10 +80,15 @@ namespace CapriDesktop
             catch (CryptographicException) { return null; }
             catch (FormatException) { return null; }
         }
+#endif
 
         internal static string Tail(string key) { return key == null || key.Length < 4 ? "" : key.Substring(key.Length - 4); }
 
-        internal static string Spoken(string said) { return Regex.Replace(Regex.Replace(said ?? "", @"\[[^\]]*\]", " ").Replace("*", ""), @"\s+", " ").Trim(); }
+        internal static string Spoken(string said)
+        {
+            string words = Regex.Replace(Regex.Replace(said ?? "", @"\[[^\]]*\]", " ").Replace("*", ""), @"\s+", " ").Trim();
+            return Regex.IsMatch(words, @"[\p{L}\p{Nd}]") ? words : "";
+        }
 
         private static readonly string[,] Respelled = { { "chooms", "chewms" }, { "choom", "chewm" }, { "preem", "preme" }, { "yezzirrr", "yessirrr" } };
 
@@ -139,23 +156,30 @@ namespace CapriDesktop
             catch (IOException) { throw new VoiceException("Can't reach ElevenLabs. Check your internet."); }
         }
 
+        internal const string Rejected = "ElevenLabs rejected the key. Press Forget, paste a new one.";
+        internal const string RejectedNew = "ElevenLabs rejected that key. Copy it again from ElevenLabs and paste it.";
+
+        internal static string Unsaved(string problem) { return problem == Rejected ? RejectedNew : problem; }
+
         internal static string Explain(int status, string detail)
         {
             detail = detail ?? "";
             if (detail.Contains("quota_exceeded")) return "Out of ElevenLabs credits. Untick Speak replies to type.";
-            if (detail.Contains("missing_permissions")) return "Key needs Text to Speech, Voices, Models and Agents access. Edit it on ElevenLabs.";
+            if (detail.Contains("missing_permissions")) return "Key is missing permissions. Make a new ElevenLabs key with Restrict key turned off.";
             if (detail.Contains("voice_not_found")) return "Voice not found. Add it to your ElevenLabs voices.";
-            if (detail.Contains("invalid_api_key")) return "ElevenLabs rejected the key. Press Forget, paste a new one.";
+            if (detail.Contains("invalid_api_key")) return Rejected;
             Match message = Regex.Match(detail, "\"message\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
-            if (message.Success)
-            {
-                string text = Regex.Unescape(message.Groups[1].Value).Trim();
-                if (text.Length > 0) return Short(text);
-            }
-            if (status == 401) return "ElevenLabs rejected the key. Press Forget, paste a new one.";
+            string text = message.Success ? Regex.Unescape(message.Groups[1].Value).Trim() : "";
+            if (Regex.IsMatch(text, @"empty text|non-empty", RegexOptions.IgnoreCase)) return Silent;
+            if (status == 403 || Regex.IsMatch(text, @"permission|not allowed|forbidden|unauthori[sz]ed|access", RegexOptions.IgnoreCase)) return "Key can't do that. Make a new ElevenLabs key with Restrict key turned off.";
+            if (text.Length > 0) return Short(text) + (status == 401 || status == 429 || Regex.IsMatch(text, "unusual activity", RegexOptions.IgnoreCase) ? "" : RestrictHint);
+            if (status == 401) return Rejected;
             if (status == 429) return "ElevenLabs is busy. Try again in a moment.";
-            return "ElevenLabs error " + status + ".";
+            return "ElevenLabs error " + status + "." + RestrictHint;
         }
+
+        internal const string Silent = "That reply had nothing to say out loud.";
+        internal const string RestrictHint = " Still failing? Make a new key with Restrict key turned off.";
 
         internal static string Short(string text)
         {
@@ -320,17 +344,25 @@ namespace CapriDesktop
 
         internal void Play(byte[] wav)
         {
+#if CROSS
+            if (Playback != null) Playback(wav);
+#else
             Stop();
             player = new SoundPlayer(new MemoryStream(wav));
             player.Play();
+#endif
         }
 
         internal void Stop()
         {
+#if CROSS
+            if (Silence != null) Silence();
+#else
             if (player == null) return;
             player.Stop();
             player.Dispose();
             player = null;
+#endif
         }
     }
 }

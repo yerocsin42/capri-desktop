@@ -10,7 +10,9 @@ using System.Runtime.Serialization.Json;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+#if !CROSS
 using System.Windows.Automation;
+#endif
 
 namespace CapriDesktop
 {
@@ -25,6 +27,14 @@ namespace CapriDesktop
         [DataMember(Name = "song")] public string Song;
         [DataMember(Name = "app")] public string App;
         [DataMember(Name = "kind")] public string Kind;
+        [DataMember(Name = "task")] public string Task;
+        [DataMember(Name = "target")] public string Target;
+        [DataMember(Name = "text")] public string Text;
+        [DataMember(Name = "keys")] public string Keys;
+        [DataMember(Name = "button")] public string Button;
+        [DataMember(Name = "enter")] public string Enter;
+        [DataMember(Name = "direction")] public string Direction;
+        [DataMember(Name = "seconds")] public string Seconds;
     }
 
     internal sealed class InstalledApp
@@ -45,13 +55,15 @@ namespace CapriDesktop
     internal static class Hands
     {
         internal const string Note =
-            "\nYou have tools for their PC: open (launch, play) their apps and games, switch to, minimize or close apps that are open, play songs or videos they name, open websites or search them, control their music and volume, and look at their screen. " +
-            "Use a tool whenever they ask you to do something like that, and never pretend you did it without one. Look at their screen when they ask what you see or what you think of something on it. Only close an app when they ask you to. You can't touch their files or type for them. " +
+            "\nYou have tools for their PC: open (launch, play) their apps and games, switch to, minimize or close apps that are open, play songs or videos they name, open websites or search them, control their music and volume, look at their screen, and use their mouse and keyboard for jobs inside apps and sites. " +
+            "Use a tool whenever they ask you to do something like that, and never say you did or are doing it without one. Look at their screen when they ask what you see or what you think of something on it. Only close an app when they ask you to. You can't touch their files. " +
             "Most messages are just chat, not jobs: answer those as yourself, with your own opinions and tastes, and don't offer to open, play or look at anything unless they ask.";
 
         internal const string Prompt =
             "You are the hands of Capri, a desktop companion on the user's Windows PC. You don't chat.\n" +
             "Act only on their latest request. Earlier messages are context for names, not commands to repeat. Call one tool: open an app, game or website, search a site, play music, control media or volume, check the current song, switch to, minimize or close an app, or look at their screen when asked about it. Use the names they gave.\n" +
+            "If the job needs clicking, typing or more than one step, like opening an app and then searching, going somewhere or making something in it, call use_computer once with the whole job in their words.\n" +
+            "When they name an app, never guess a website for it: use open_app, or use_computer if there's more to do.\n" +
             "If they want music but name none, pick a popular song that fits.\n" +
             "Questions about their current screen or song need a tool too. For chat, negated or hypothetical requests, or an unclear target, call no tool and reply with only the word: chat";
 
@@ -71,7 +83,9 @@ namespace CapriDesktop
             { "play_music", "Play a song, playlist, album or artist they name, on Spotify or YouTube. For their liked songs, use kind playlist and song Liked Songs.",
               "{\"type\":\"object\",\"properties\":{\"song\":{\"type\":\"string\",\"description\":\"What to play, like a song and its artist or a playlist's name\"},\"kind\":{\"type\":\"string\",\"description\":\"What it is\",\"enum\":[\"song\",\"playlist\",\"album\",\"artist\"]},\"app\":{\"type\":\"string\",\"description\":\"Where to play it, if they said\",\"enum\":[\"spotify\",\"youtube\"]}},\"required\":[\"song\"]}" },
             { "app_window", "Switch to, minimize or close an app or game that's open on their PC. Naming a site closes that browser tab.",
-              "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"The app's name, or the site in a browser tab\"},\"action\":{\"type\":\"string\",\"description\":\"What to do\",\"enum\":[\"switch_to\",\"minimize\",\"close\"]}},\"required\":[\"name\",\"action\"]}" }
+              "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"The app's name, or the site in a browser tab\"},\"action\":{\"type\":\"string\",\"description\":\"What to do\",\"enum\":[\"switch_to\",\"minimize\",\"close\"]}},\"required\":[\"name\",\"action\"]}" },
+            { "use_computer", "Use their mouse and keyboard for a job that needs clicking, typing or several steps inside an app or website, like opening an app and searching in it.",
+              "{\"type\":\"object\",\"properties\":{\"task\":{\"type\":\"string\",\"description\":\"The whole job, in their words\"}},\"required\":[\"task\"]}" }
         };
 
         internal static readonly string Tools = Render(false);
@@ -81,6 +95,7 @@ namespace CapriDesktop
             @"^(open|launch|start|run|load up|boot up|fire up|play|shuffle|put on|blast|queue|close|quit|exit|kill|shut down|switch (back |over )?to|back to|go to|bring up|pull up|show me|minimi[sz]e|pause|unpause|resume|stop the music|skip|next|previous|go back|volume|louder|quieter|mute|unmute|search|google|look up|mind (opening|launching|playing|closing))\b" +
             @"|^(turn|make) (it|this|that|the volume|the music|the sound) (up|down|louder|quieter)\b|^(turn (up|down)|lower|raise) (the )?(volume|music|sound)\b|^put (some |a )?(music|song|tunes) on\b|^(get|bring) .+ (going|up)$" +
             @"|^(look at|take a (look|peek)( at)?|check out|check|rate|watch) (this|that|it|my|the|what)\b" +
+            @"|^(click|tap|double click|right click|type|press|scroll|go on|get on|hop on|sign in|log in|fill (in|out)|use (my|the) (mouse|keyboard|computer|pc))\b|^(use|make|create|write|draw|search|find) .+ (in|on|with|using|into) (the |my )?\w+" +
             @"|^(see|tell me|show me) (what|which)\b|^see (this|that|my screen|the screen)\b|^what('?s| is) (on my screen|on the screen|playing|this song|this track|the song|on spotify)\b" +
             @"|^what ((song|track)( is|'s)? (this|playing|on)|am i (doing|playing|watching|listening)|are we (doing|playing|watching|listening)|do you see|can you see)\b|^what do you think (of|about) (this|that|it|my (build|skin|setup))\b|^do you (see|like) (this|that|my (build|skin|setup))\b" +
             @"|^(i (want|need|wanna|would like) (you to |to )?(open|launch|play|listen|watch|search)|let's (play|listen|watch)|find (me )?.+ (on|online)|can (you|u) see)\b" +
@@ -97,6 +112,8 @@ namespace CapriDesktop
         internal static Func<OpenWindow, string, bool> Steer = Apply;
         internal static Func<string, bool> PressPlay = ClickPlay;
         internal static Func<string> NowPlaying = SpotifyTitle;
+        internal static Func<string, string> Work = delegate { return "Using the mouse and keyboard isn't ready on this PC yet."; };
+        internal static Func<string, string> Resume = delegate { return null; };
         private static readonly string[] Browsers = { "chrome", "msedge", "firefox", "brave", "opera", "vivaldi" };
         private static readonly string[] Shell = { "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd" };
         private delegate bool Visit(IntPtr window, IntPtr data);
@@ -142,6 +159,7 @@ namespace CapriDesktop
                 if (tool == "look_at_screen") return Look(args.Focus);
                 if (tool == "play_music") return PlayMusic(args.Song, args.App, args.Kind);
                 if (tool == "app_window") return Window(args.Name, args.Action);
+                if (tool == "use_computer") return string.IsNullOrWhiteSpace(args.Task) ? "Which job, choom?" : Safety.Screen(args.Task) != null ? "Not doing that, choom." : Work(args.Task.Trim());
                 return "There's no tool called " + tool + ".";
             }
             catch (Exception error) { return "That didn't work: " + error.Message; }
@@ -155,7 +173,7 @@ namespace CapriDesktop
 
         internal static string Description(int i) { return Specs[i, 1]; }
 
-        internal static string ElevenLabsTool(int i) { return "{\"tool_config\":{\"type\":\"client\",\"name\":\"" + Specs[i, 0] + "\",\"description\":" + Voice.Quote(Specs[i, 1]) + ",\"parameters\":" + Specs[i, 2] + ",\"expects_response\":true,\"response_timeout_secs\":20}}"; }
+        internal static string ElevenLabsTool(int i) { return "{\"tool_config\":{\"type\":\"client\",\"name\":\"" + Specs[i, 0] + "\",\"description\":" + Voice.Quote(Specs[i, 1]) + ",\"parameters\":" + Specs[i, 2] + ",\"expects_response\":true,\"response_timeout_secs\":" + (Specs[i, 0] == "use_computer" ? 60 : 20) + "}}"; }
 
         private static string Render(bool claude)
         {
@@ -190,6 +208,30 @@ namespace CapriDesktop
             }
             return false;
         }
+
+        internal static void Rescue(string said, List<KeyValuePair<string, ToolArguments>> calls)
+        {
+            string text = Asked(said);
+            if (calls.Exists(call => call.Key == "use_computer" || call.Key == "look_at_screen" || call.Key == "media" || call.Key == "play_music")) return;
+            if (Wants(said) && Regex.IsMatch(text, @"\s(and|then|&)\s+(then\s+)?(\w+\s+)?(search|look|type|click|go|make|create|write|find|open|sign|log|send|start|join|watch|check|put|add|draw|set|turn)\b", RegexOptions.IgnoreCase))
+            {
+                calls.Clear();
+                calls.Add(new KeyValuePair<string, ToolArguments>("use_computer", new ToolArguments { Task = text }));
+                return;
+            }
+            for (int i = 0; i < calls.Count; i++)
+            {
+                ToolArguments args = calls[i].Value;
+                if (calls[i].Key != "open_website" || args == null || string.IsNullOrEmpty(args.Site) || Regex.IsMatch(text, @"[a-z0-9-]+\.[a-z]{2,}", RegexOptions.IgnoreCase)) continue;
+                string name = Regex.Replace(args.Site.Trim(), @"^(https?://)?(www\.)?|\.[a-z.]+(/.*)?$", "", RegexOptions.IgnoreCase);
+                if (Regex.IsMatch(text, @"\b" + Regex.Escape(name) + @"\b", RegexOptions.IgnoreCase) && Installed(name) && string.IsNullOrEmpty(args.Search)) calls[i] = new KeyValuePair<string, ToolArguments>("open_app", new ToolArguments { Name = name });
+            }
+        }
+
+        internal const string Unpromised = "I haven't done that yet, choom. Tell me what to open or click and I'm on it.";
+        private static readonly Regex Promise = new Regex(@"\b(i'?ll|i will|let me|lemme|i'?m (gonna|going to|about to)|gonna|on it,?)\s+(\w+\s+){0,2}(open|launch|load|boot|fire|pull|bring|search|google|look up|click|type|close|switch|head|install|download)\b|^((sure|ok|okay|alright|bet|got it|on it|say less|yessir+|yezzir+)[,.!\s]+)?(opening|launching|loading|pulling up|bringing up|firing up|booting up|heading to|searching|clicking|typing|closing|switching)\b", RegexOptions.IgnoreCase);
+
+        internal static bool Promised(string said) { return Promise.IsMatch((said ?? "").Replace('’', '\'')); }
 
         internal static bool Follows(string said, string asked, string answered)
         {
@@ -240,6 +282,7 @@ namespace CapriDesktop
             if (found.Success)
             {
                 string target = found.Groups[3].Value.Trim();
+                if (Regex.IsMatch(target, @"\s(and|then|&)\s|,\s*\S", RegexOptions.IgnoreCase)) return false;
                 if (Installed(target)) { tool = "open_app"; args.Name = target; return true; }
                 if (Site(target)) { tool = "open_website"; args.Site = target; return true; }
                 return false;
@@ -271,9 +314,9 @@ namespace CapriDesktop
             return true;
         }
 
-        internal static bool Failed(string result) { return Regex.IsMatch(result ?? "", @"^(Which app|What should I play|Not (opening|playing) that|No app called|More than one|That didn't work|Couldn't|There's no|That isn't a website)|isn't open\.$|but (couldn't|it's still open)"); }
+        internal static bool Failed(string result) { return Regex.IsMatch(result ?? "", @"^(Which app|What should I play|Not (opening|playing) that|No app called|More than one|That didn't work|Couldn't|There's no|That isn't a website|Which job|Not doing that|Should I |Got lost|Ran out of steps|You pressed Esc|You grabbed the mouse|Using the mouse and keyboard isn't)|isn't open\.$|but (couldn't|it's still open)"); }
 
-        private static readonly Regex LooseText = new Regex(@"\b(open_app|open_website|media|look_at_screen|play_music|app_window)\s*(\{[^{}]*\}|\([^()]*\))");
+        private static readonly Regex LooseText = new Regex(@"\b(open_app|open_website|media|look_at_screen|play_music|app_window|use_computer)\s*(\{[^{}]*\}|\([^()]*\))");
         private static readonly Regex ToolPair = new Regex(@"[""']?(\w+)[""']?\s*[:=]\s*(?:""([^""]*)""|'([^']*)'|([^,})\s][^,})]*))");
 
         private static ToolArguments Pairs(string tool, string call)
@@ -287,7 +330,7 @@ namespace CapriDesktop
                 Set(args, pair.Groups[1].Value.ToLowerInvariant(), pair.Groups[2].Success ? pair.Groups[2].Value : pair.Groups[3].Success ? pair.Groups[3].Value : pair.Groups[4].Value.Trim());
             }
             string lone = inside.Trim().Trim('"', '\'');
-            if (!paired && lone.Length > 0) Set(args, tool == "open_website" ? "site" : tool == "media" ? "action" : tool == "look_at_screen" ? "focus" : tool == "play_music" ? "song" : "name", lone);
+            if (!paired && lone.Length > 0) Set(args, tool == "open_website" ? "site" : tool == "media" ? "action" : tool == "look_at_screen" ? "focus" : tool == "play_music" ? "song" : tool == "use_computer" ? "task" : "name", lone);
             return args;
         }
 
@@ -301,9 +344,10 @@ namespace CapriDesktop
             else if (key == "song") args.Song = value;
             else if (key == "app") args.App = value;
             else if (key == "kind") args.Kind = value;
+            else if (key == "task") args.Task = value;
         }
 
-        private static readonly Regex ToolText = new Regex(@"\A(open_app|open_website|media|look_at_screen|play_music|app_window)\s*(\{.*\})\z", RegexOptions.Singleline);
+        private static readonly Regex ToolText = new Regex(@"\A(open_app|open_website|media|look_at_screen|play_music|app_window|use_computer)\s*(\{.*\})\z", RegexOptions.Singleline);
 
         internal static bool Typed(string reply, out string tool, out ToolArguments args, bool loose = false)
         {
@@ -350,6 +394,7 @@ namespace CapriDesktop
             if (tool == "look_at_screen") return true;
             if (tool == "media") return Regex.IsMatch(args.Action ?? "", @"\A(play_pause|pause|resume|next|previous|volume_up|volume_down|mute|now_playing)\z");
             if (tool == "app_window") return Named(args.Name) && Regex.IsMatch(args.Action ?? "", @"\A(switch_to|minimize|close)\z");
+            if (tool == "use_computer") return Named(args.Task);
             return tool == "play_music" && Named(args.Song) && (string.IsNullOrEmpty(args.Kind) || Regex.IsMatch(args.Kind, @"\A(song|playlist|album|artist)\z")) && (string.IsNullOrEmpty(args.App) || args.App == "spotify" || args.App == "youtube");
         }
 
@@ -633,6 +678,9 @@ namespace CapriDesktop
 
         private static bool ClickPlay(string name)
         {
+#if CROSS
+            return false;
+#else
             for (int i = 0; i < 30; i++)
             {
                 Thread.Sleep(500);
@@ -656,6 +704,7 @@ namespace CapriDesktop
                 }
             }
             return false;
+#endif
         }
 
         internal static int PlayScore(string label, string name)
@@ -817,7 +866,7 @@ namespace CapriDesktop
             return true;
         }
 
-        private static bool Front(IntPtr handle)
+        internal static bool Front(IntPtr handle)
         {
             if (IsIconic(handle)) ShowWindow(handle, 9);
             int ignored;

@@ -1,0 +1,99 @@
+name: Mac and Linux
+
+on:
+  push:
+    branches: [mac-linux]
+  workflow_dispatch:
+
+jobs:
+  mac:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - name: Build
+        run: |
+          set -e
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' cross/Capri.Cross.csproj)
+          mkdir -p Capri.iconset
+          for s in 16 32 128 256 512; do
+            sips -z $s $s cross/icon.png --out Capri.iconset/icon_${s}x${s}.png >/dev/null
+            d=$((s * 2))
+            sips -z $d $d cross/icon.png --out Capri.iconset/icon_${s}x${s}@2x.png >/dev/null
+          done
+          iconutil -c icns Capri.iconset -o Capri.icns
+          for arch in arm64 x64; do
+            dotnet publish cross/Capri.Cross.csproj -c Release -r osx-$arch --self-contained -o out/$arch -p:DebugType=none
+            app=dist/$arch/Capri.app
+            mkdir -p $app/Contents/MacOS $app/Contents/Resources
+            cp -R out/$arch/. $app/Contents/MacOS/
+            sed "s/@VERSION@/$version/g" cross/mac/Info.plist > $app/Contents/Info.plist
+            cp Capri.icns $app/Contents/Resources/Capri.icns
+            codesign --force --deep --sign - $app
+          done
+      - name: Smoke test, Apple Silicon
+        timeout-minutes: 5
+        run: |
+          dist/arm64/Capri.app/Contents/MacOS/Capri --smoke "$PWD/smoke/mac-arm64" || true
+          cat smoke/mac-arm64/smoke-test.txt
+          ! grep -q '^FAIL' smoke/mac-arm64/smoke-test.txt
+      - name: Smoke test, Intel through Rosetta
+        timeout-minutes: 5
+        run: |
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then
+            arch -x86_64 dist/x64/Capri.app/Contents/MacOS/Capri --smoke "$PWD/smoke/mac-x64" || true
+            cat smoke/mac-x64/smoke-test.txt
+            ! grep -q '^FAIL' smoke/mac-x64/smoke-test.txt
+          else
+            echo "No Rosetta on this runner"
+          fi
+      - name: Zip
+        run: |
+          (cd dist/arm64 && ditto -c -k --keepParent Capri.app ../../Capri-mac-apple-silicon.zip)
+          (cd dist/x64 && ditto -c -k --keepParent Capri.app ../../Capri-mac-intel.zip)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: |
+            Capri-mac-apple-silicon.zip
+            Capri-mac-intel.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-mac
+          path: smoke
+
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - name: Build
+        run: |
+          dotnet publish cross/Capri.Cross.csproj -c Release -r linux-x64 --self-contained -o out/Capri -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none
+          chmod +x out/Capri/Capri
+      - name: Smoke test
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q xvfb openbox xcompmgr libice6 libsm6 libfontconfig1
+          xvfb-run -a -s "-screen 0 1920x1080x24" bash -c 'openbox & sleep 2; xcompmgr & sleep 1; out/Capri/Capri --smoke "$PWD/smoke/linux"' || true
+          cat smoke/linux/smoke-test.txt
+          ! grep -q '^FAIL' smoke/linux/smoke-test.txt
+      - name: Pack
+        run: tar -czf Capri-linux-x64.tar.gz -C out Capri
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: Capri-linux-x64.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-linux
+          path: smoke
