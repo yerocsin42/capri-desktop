@@ -46,6 +46,7 @@ namespace CapriDesktop
         [DataMember(Name = "num_predict")] public int Limit = 90;
         [DataMember(Name = "temperature")] public double Temperature = 0.85;
         [DataMember(Name = "num_ctx")] public int Context = 4096;
+        [DataMember(Name = "num_gpu", EmitDefaultValue = false)] public int? Gpu;
     }
 
     [DataContract]
@@ -268,6 +269,7 @@ namespace CapriDesktop
         internal Func<string, ToolArguments, string> Act;
         private volatile string toolless;
         private volatile string thinker;
+        private volatile string ollamaCpu;
         internal volatile Cloud Remote;
         internal volatile string Unsighted;
         internal int CloudWait = 45000;
@@ -759,7 +761,7 @@ namespace CapriDesktop
                 return Complete(local.Address, model, messages, tools, calls, parts, limit, ticket, routing, openAiTools);
             }
             string thinking = Ollama + "|" + model;
-            ChatRequest asking = new ChatRequest { Model = model, Messages = messages.ToArray(), Think = false, Options = new ChatOptions { Limit = thinker == thinking ? limit + 2048 : limit, Context = Window } };
+            ChatRequest asking = new ChatRequest { Model = model, Messages = messages.ToArray(), Think = false, Options = new ChatOptions { Limit = thinker == thinking ? limit + 2048 : limit, Context = Window, Gpu = ollamaCpu == model ? (int?)0 : null } };
             ChatReply chat = Send<ChatReply>(Ollama + "/api/chat", asking, 180000, listed, null, null, ticket);
             if (chat.Error != null) throw new BrainException(chat.Error);
             if (thinker != thinking && chat.Stopped == "length" && chat.Message != null && (!string.IsNullOrEmpty(chat.Message.Thinking) || (chat.Message.Content ?? "").IndexOf("<think>", StringComparison.OrdinalIgnoreCase) >= 0))
@@ -768,6 +770,16 @@ namespace CapriDesktop
                 asking.Options.Limit = limit + 2048;
                 chat = Send<ChatReply>(Ollama + "/api/chat", asking, 180000, listed, null, null, ticket);
                 if (chat.Error != null) throw new BrainException(chat.Error);
+            }
+            if (chat.Message != null && chat.Message.Calls == null && Garbled(chat.Message.Content))
+            {
+                if (asking.Options.Gpu != null) throw new BrainException(Gibberish, true);
+                Log(Ollama, -1, "Ollama's graphics card garbled the brain's reply, asking again on the CPU");
+                ollamaCpu = model;
+                asking.Options.Gpu = 0;
+                chat = Send<ChatReply>(Ollama + "/api/chat", asking, 180000, listed, null, null, ticket);
+                if (chat.Error != null) throw new BrainException(chat.Error);
+                if (chat.Message != null && chat.Message.Calls == null && Garbled(chat.Message.Content)) throw new BrainException(Gibberish, true);
             }
             if (routing && chat.Stopped == "length") throw new BrainException("Couldn't finish that request. Try again.");
             if (chat.Message == null) return null;

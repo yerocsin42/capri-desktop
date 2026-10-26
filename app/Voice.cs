@@ -188,12 +188,21 @@ namespace CapriDesktop
         internal const string Rejected = "ElevenLabs rejected the key. Press Forget, paste a new one.";
         internal const string RejectedNew = "ElevenLabs rejected that key. Copy it again from ElevenLabs and paste it.";
 
+        internal const string Restricted = "ElevenLabs has restricted your account, so her voice can't connect. Sign in at elevenlabs.io to see why, or untick Speak replies to type.";
+
         internal static string Unsaved(string problem) { return problem == Rejected ? RejectedNew : problem; }
+
+        internal static string Closed(string reason)
+        {
+            if (Regex.IsMatch(reason ?? "", "account_restricted|workspace is restricted", RegexOptions.IgnoreCase)) return Restricted;
+            return Short("Voice link closed: " + reason);
+        }
 
         internal static string Explain(int status, string detail)
         {
             detail = detail ?? "";
             if (detail.Contains("quota_exceeded")) return "Out of ElevenLabs credits. Untick Speak replies to type.";
+            if (detail.Contains("account_restricted")) return Restricted;
             if (detail.Contains("missing_permissions")) return "Key is missing permissions. Make a new ElevenLabs key with Restrict key turned off.";
             if (detail.Contains("voice_not_found")) return "Voice not found. Add it to your ElevenLabs voices.";
             if (detail.Contains("invalid_api_key")) return Rejected;

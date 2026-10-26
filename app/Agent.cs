@@ -219,7 +219,7 @@ namespace CapriDesktop
                         if (got.MessageType == WebSocketMessageType.Close)
                         {
                             string reason = socket.CloseStatusDescription;
-                            if (!string.IsNullOrEmpty(reason) && socket.CloseStatus != WebSocketCloseStatus.NormalClosure) problem = Voice.Short("Voice link closed: " + reason);
+                            if (!string.IsNullOrEmpty(reason) && socket.CloseStatus != WebSocketCloseStatus.NormalClosure) problem = Voice.Closed(reason);
                             break;
                         }
                         message.Write(buffer, 0, got.Count);

@@ -89,8 +89,8 @@ Just ask her for things, like "open Spotify", "play Blinding Lights", "pause", "
 | Shift + drop | sit her right where you drop her |
 | Ctrl + drop | she hangs on; click her to let go |
 | Mic button | mute your mic in voice chat |
-| Ctrl + Alt + V | start or stop voice chat |
-| Ctrl + Alt + N | mute your mic |
+| Ctrl + Alt + V | start or stop voice chat (click its hint in the Mainframe to change it) |
+| Ctrl + Alt + N | mute your mic (click its hint in the Mainframe to change it) |
 | Ctrl + Alt + C | get her off your cursor |
 | Right-click, Move | she hops between your open windows |
 | Watch my screen | in the Mainframe: she comments as you play |

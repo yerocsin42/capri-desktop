@@ -88,6 +88,11 @@ namespace CapriDesktop
         [DataMember] public int Sounds = 60;
         [DataMember] public int SleepAfter = 120;
         [DataMember] public bool NoIntro;
+        [DataMember] public int BubbleTime = 1;
+        [DataMember] public int TalkMods = 3;
+        [DataMember] public int TalkVk = 0x56;
+        [DataMember] public int MuteMods = 3;
+        [DataMember] public int MuteVk = 0x4E;
         [DataMember] public int WanderPace = 1;
         [DataMember] public string AgentPolyglot;
 
@@ -101,6 +106,11 @@ namespace CapriDesktop
             Volume = 100;
             Sounds = 60;
             SleepAfter = 120;
+            BubbleTime = 1;
+            TalkMods = 3;
+            TalkVk = 0x56;
+            MuteMods = 3;
+            MuteVk = 0x4E;
             WanderPace = 1;
         }
     }
@@ -771,8 +781,9 @@ namespace CapriDesktop
             }
             if (!testing) FindBrain();
             if (!testing && voice.Key != null) ListVoices(voice.Key, false);
-            if (!testing) talkKey = Native.RegisterHotKey(Handle, TalkKeyId, 0x0001 | 0x0002 | 0x4000, 0x56);
-            bool muteFree = !testing && Native.RegisterHotKey(Handle, MuteKeyId, 0x0001 | 0x0002 | 0x4000, 0x4E) && Native.UnregisterHotKey(Handle, MuteKeyId);
+            if (!testing) talkKey = Native.RegisterHotKey(Handle, TalkKeyId, preferences.TalkMods | 0x4000, preferences.TalkVk);
+            bool muteFree = !testing && Native.RegisterHotKey(Handle, MuteKeyId, preferences.MuteMods | 0x4000, preferences.MuteVk) && Native.UnregisterHotKey(Handle, MuteKeyId);
+            mainframe.Hotkeys(TalkKeyName, MuteKeyName);
             mainframe.ShowShortcut(talkKey, muteFree);
             RefreshIcons();
             if (!testing && !hidden) DropSoon();
@@ -1485,6 +1496,69 @@ namespace CapriDesktop
         internal int SoundLevel { get { return Sfx.Level; } }
 
         internal int SleepAfter { get { return preferences.SleepAfter; } }
+
+        internal string TalkKeyName { get { return KeyName(preferences.TalkMods, preferences.TalkVk); } }
+
+        internal string MuteKeyName { get { return KeyName(preferences.MuteMods, preferences.MuteVk); } }
+
+        internal static bool Bindable(int mods, int vk) { return (mods & 3) != 0 && (mods & ~7) == 0 && ((vk >= 0x41 && vk <= 0x5A) || (vk >= 0x30 && vk <= 0x39) || (vk >= 0x70 && vk <= 0x7B)); }
+
+        internal static string KeyName(int mods, int vk)
+        {
+            string name = ((mods & 2) != 0 ? "Ctrl + " : "") + ((mods & 1) != 0 ? "Alt + " : "") + ((mods & 4) != 0 ? "Shift + " : "");
+            return name + (vk >= 0x70 && vk <= 0x7B ? "F" + (vk - 0x6F) : ((char)vk).ToString());
+        }
+
+        internal string SetHotkey(bool mute, Keys keys)
+        {
+            int mods = ((keys & Keys.Alt) != 0 ? 1 : 0) | ((keys & Keys.Control) != 0 ? 2 : 0) | ((keys & Keys.Shift) != 0 ? 4 : 0);
+            int vk = (int)(keys & Keys.KeyCode);
+            if ((mods & 3) == 0) return "Hold Ctrl or Alt with a letter, number or F-key.";
+            if (!Bindable(mods, vk)) return "Pick a letter, number or F-key.";
+            string name = KeyName(mods, vk);
+            if (mute ? (mods == preferences.TalkMods && vk == preferences.TalkVk) : (mods == preferences.MuteMods && vk == preferences.MuteVk)) return name + " is already her " + (mute ? "talk" : "mute") + " key.";
+            if (!testing && IsHandleCreated)
+            {
+                if (!mute)
+                {
+                    if (talkKey) Native.UnregisterHotKey(Handle, TalkKeyId);
+                    talkKey = Native.RegisterHotKey(Handle, TalkKeyId, mods | 0x4000, vk);
+                    if (!talkKey)
+                    {
+                        talkKey = Native.RegisterHotKey(Handle, TalkKeyId, preferences.TalkMods | 0x4000, preferences.TalkVk);
+                        return name + " is taken by another app. Try another.";
+                    }
+                }
+                else
+                {
+                    bool live = muteKey;
+                    if (live) Native.UnregisterHotKey(Handle, MuteKeyId);
+                    bool free = Native.RegisterHotKey(Handle, MuteKeyId, mods | 0x4000, vk);
+                    if (free && !live) Native.UnregisterHotKey(Handle, MuteKeyId);
+                    if (!free)
+                    {
+                        if (live) muteKey = Native.RegisterHotKey(Handle, MuteKeyId, preferences.MuteMods | 0x4000, preferences.MuteVk);
+                        return name + " is taken by another app. Try another.";
+                    }
+                }
+            }
+            if (mute) { preferences.MuteMods = mods; preferences.MuteVk = vk; }
+            else { preferences.TalkMods = mods; preferences.TalkVk = vk; }
+            SavePreferences();
+            if (!testing) mainframe.ShowShortcut(talkKey, true);
+            mainframe.Hotkeys(TalkKeyName, MuteKeyName);
+            return null;
+        }
+
+        internal int BubbleTime { get { return Math.Max(0, Math.Min(2, preferences.BubbleTime)); } }
+
+        internal void SetBubbleTime(int level)
+        {
+            preferences.BubbleTime = Math.Max(0, Math.Min(2, level));
+            SavePreferences();
+        }
+
+        private double BubbleHold(int length) { return Math.Min(14, 4 + length * 0.05) * new[] { 0.5, 1, 2 }[BubbleTime]; }
 
         internal void SetSleepAfter(int seconds)
         {
@@ -2610,7 +2684,7 @@ namespace CapriDesktop
             }
             chatting = true;
             ears.Muted = false;
-            if (!testing && !muteKey) muteKey = Native.RegisterHotKey(Handle, MuteKeyId, 0x0001 | 0x0002 | 0x4000, 0x4E);
+            if (!testing && !muteKey) muteKey = Native.RegisterHotKey(Handle, MuteKeyId, preferences.MuteMods | 0x4000, preferences.MuteVk);
             pill.SetChat(true, false);
             pillUntil = clock.Elapsed.TotalSeconds + 1.5;
             brain.Cancel();
@@ -2628,7 +2702,7 @@ namespace CapriDesktop
             earsLead = credits ? "Out of ElevenLabs credits. " : "";
             earsWarned = -10;
             ears.Muted = false;
-            if (!testing && !muteKey) muteKey = Native.RegisterHotKey(Handle, MuteKeyId, 0x0001 | 0x0002 | 0x4000, 0x4E);
+            if (!testing && !muteKey) muteKey = Native.RegisterHotKey(Handle, MuteKeyId, preferences.MuteMods | 0x4000, preferences.MuteVk);
             pill.SetChat(true, false);
             pillUntil = clock.Elapsed.TotalSeconds + 1.5;
             brain.Cancel();
@@ -2926,7 +3000,7 @@ namespace CapriDesktop
                 if (backlog != null) foreach (short[] held in backlog) agent.Send(held);
                 backlog = null;
             }
-            mainframe.VoiceNote(muteKey ? "Voice chat on. Ctrl + Alt + N mutes your mic." : "Voice chat on. Talk to her.", false);
+            mainframe.VoiceNote(muteKey ? "Voice chat on. " + MuteKeyName + " mutes your mic." : "Voice chat on. Talk to her.", false);
         }
 
         private void ChatFailed(string problem)
@@ -3281,7 +3355,7 @@ namespace CapriDesktop
                 replyDone = now;
                 if (talkState == TalkState.Talking) talkState = TalkState.Online;
             }
-            if (replyDone >= 0 && box.Leaving < 0 && !typer.Visible && !(local && !earsReady && asking == earsNotice) && now > voiceUntil && now > replyDone + Math.Min(14, 4 + reply.Length * 0.05)) box.Leaving = now;
+            if (replyDone >= 0 && box.Leaving < 0 && !typer.Visible && !(local && !earsReady && asking == earsNotice) && now > voiceUntil && now > replyDone + BubbleHold(reply.Length)) box.Leaving = now;
             if (box.Leaving >= 0 && now - box.Leaving > 0.25) { CloseTalk(); return; }
             if (!box.Visible && box.Opened < 0) box.Opened = now;
             box.State = talkState;
@@ -3383,6 +3457,8 @@ namespace CapriDesktop
                 {
                     Preferences value = (Preferences)new DataContractJsonSerializer(typeof(Preferences)).ReadObject(stream);
                     if (value.Size < MinSize || value.Size > MaxSize) value.Size = 240;
+                    if (!Bindable(value.TalkMods, value.TalkVk)) { value.TalkMods = 3; value.TalkVk = 0x56; }
+                    if (!Bindable(value.MuteMods, value.MuteVk) || (value.MuteMods == value.TalkMods && value.MuteVk == value.TalkVk)) { value.MuteMods = 3; value.MuteVk = 0x4E; }
                     return value;
                 }
             }
@@ -4582,6 +4658,29 @@ namespace CapriDesktop
                                     thinkFake.Stop();
                                     Brain.Ollama = brainUrl;
                                 }
+                                System.Collections.Generic.List<string> junkAsked = new System.Collections.Generic.List<string>();
+                                System.Net.Sockets.TcpListener junkFake;
+                                Brain.Ollama = FakeServer(new string[]
+                                {
+                                    "{\"message\":{\"role\":\"assistant\",\"content\":\"<unused49><unused49><unused49><unused49>\"},\"done_reason\":\"stop\"}",
+                                    "{\"message\":{\"role\":\"assistant\",\"content\":\"Hey choom.\"},\"done_reason\":\"stop\"}",
+                                    "{\"message\":{\"role\":\"assistant\",\"content\":\"Still here.\"},\"done_reason\":\"stop\"}"
+                                }, junkAsked, out junkFake);
+                                try
+                                {
+                                    Brain garbled = new Brain();
+                                    garbled.Model = "gemma4:e4b";
+                                    string junkFirst = garbled.Ask("what's up?");
+                                    string junkSecond = garbled.Ask("and now?");
+                                    string[] junkSent;
+                                    lock (junkAsked) junkSent = junkAsked.ToArray();
+                                    if (junkFirst != "Hey choom." || junkSecond != "Still here." || junkSent.Length != 3 || junkSent[0].IndexOf("num_gpu", StringComparison.Ordinal) >= 0 || junkSent[1].IndexOf("\"num_gpu\":0", StringComparison.Ordinal) < 0 || junkSent[2].IndexOf("\"num_gpu\":0", StringComparison.Ordinal) < 0) throw new Exception("Ollama gibberish didn't move to the CPU: " + junkFirst + " / " + junkSecond + " / " + junkSent.Length);
+                                }
+                                finally
+                                {
+                                    junkFake.Stop();
+                                    Brain.Ollama = brainUrl;
+                                }
                                 Func<string, string> realFetch = Hands.Fetch;
                                 Func<System.Collections.Generic.List<OpenWindow>> realWindows = Hands.Windows;
                                 Func<OpenWindow, string, bool> realSteer = Hands.Steer;
@@ -5638,7 +5737,7 @@ namespace CapriDesktop
                             if (overlap != null) throw new Exception("Mainframe controls overlap: " + overlap);
                             int mainTall = mainframe.ClientSize.Height;
                             mainframe.ShowSettings(true);
-                            if (!mainframe.SettingsShown || mainframe.ClientSize.Height >= mainTall || mainframe.SettingsStatus != "English | 100% | 60% | Off | 2 min | dance | intro | Short | Short") throw new Exception("The settings page did not open right: " + mainframe.SettingsStatus);
+                            if (!mainframe.SettingsShown || mainframe.ClientSize.Height >= mainTall || mainframe.SettingsStatus != "English | 100% | 60% | Off | 2 min | dance | intro | Short | Short | Normal") throw new Exception("The settings page did not open right: " + mainframe.SettingsStatus);
                             snap("mainframe-settings.png");
                             string pageTabs = mainframe.TabWalk();
                             if (pageTabs != null) throw new Exception("Settings page keyboard: " + pageTabs);
@@ -5648,6 +5747,7 @@ namespace CapriDesktop
                             SetSoundLevel(30);
                             SetSleepAfter(600);
                             ToggleIntro();
+                            SetBubbleTime(0);
                             SetWanderLevel(3);
                             SetWordiness(1);
                             SetRecall(16);
@@ -5660,7 +5760,7 @@ namespace CapriDesktop
                             if (preferences.Volume != 50 || loudTest[0] != 500 || loudTest[2] != 15000 || loudWave.Length != 3 || loudWave[1] != -500 || loudRate != 24000) throw new Exception("Her volume did not scale her voice.");
                             if (!preferences.Wander || preferences.WanderPace != 2 || WanderLevel != 3 || Brain.Wordiness != 1 || Brain.Budget != 180 || Brain.Recall != 16 || Brain.Window != 8192 || preferences.Language != "French" || Brain.LanguageCode(Language) != "fr") throw new Exception("Settings were not saved.");
                             if (Brain.Character.IndexOf("Always reply in French", StringComparison.Ordinal) < 0 || Brain.Character.IndexOf("up to four sentences", StringComparison.Ordinal) < 0 || Brain.Clean(new string('a', 300)).Length != 300) throw new Exception("Language or reply length did not reach her prompt.");
-                            if (mainframe.SettingsStatus != "Fran\u00e7ais | 50% | 30% | Often | 10 min | dance | - | Medium | Medium" || !preferences.NoIntro || preferences.Sounds != 30 || Sfx.Level != 30 || SleepDue(599000) || !SleepDue(600000)) throw new Exception("The settings page showed the wrong values: " + mainframe.SettingsStatus);
+                            if (mainframe.SettingsStatus != "Fran\u00e7ais | 50% | 30% | Often | 10 min | dance | - | Medium | Medium | Quick" || BubbleHold(100) != 4.5 || !preferences.NoIntro || preferences.Sounds != 30 || Sfx.Level != 30 || SleepDue(599000) || !SleepDue(600000)) throw new Exception("The settings page showed the wrong values: " + mainframe.SettingsStatus);
                             SetVolume(150);
                             if (Voice.Louder(new short[] { 30000 })[0] != 32767) throw new Exception("A loud voice was not clipped.");
                             SetVolume(100);
@@ -5669,6 +5769,9 @@ namespace CapriDesktop
                             if (SleepDue(long.MaxValue / 2)) throw new Exception("Sleep set to Never still put her to sleep.");
                             SetSleepAfter(120);
                             ToggleIntro();
+                            SetBubbleTime(2);
+                            if (BubbleHold(100) != 18 || BubbleHold(1000) != 28) throw new Exception("Long bubbles didn't stay up longer.");
+                            SetBubbleTime(1);
                             SetWanderLevel(0);
                             SetWordiness(0);
                             SetRecall(8);
@@ -5744,7 +5847,7 @@ namespace CapriDesktop
                             SetCharacterSize(sizeBefore);
                             if (sizeShown != "Huge+" || canvasAt500 != 500 + PaddingSize * 2 || sizeCapped != MaxSize || sizeFloored != MinSize || mainframe.SizeStatus != "Medium") throw new Exception("The size slider went wrong: " + sizeShown + " / " + canvasAt500 + " / " + sizeCapped + " / " + sizeFloored + " / " + mainframe.SizeStatus);
                             checks.Add("PASS size slider: ten steps from Tiny (140) to Giant (560), in-between sizes save and show, and sizes stay inside that range");
-                            checks.Add("PASS settings page: language, notes, volume, sounds, wander, sleep delay, startup glitch-in, dancing, reply length and chat memory save, reach her prompt and voice, and nothing overlaps");
+                            checks.Add("PASS settings page: language, notes, volume, sounds, bubble time, wander, sleep delay, startup glitch-in, dancing, reply length and chat memory save, reach her prompt and voice, and nothing overlaps");
                             preferences.Watch = false;
                             mainframe.Sync();
                             mainframe.ShowTextKey(null);
@@ -5794,6 +5897,7 @@ namespace CapriDesktop
                             for (int i = 7; i < shapes.Length; i++) widest = Math.Max(widest, shapes[i]);
                             if (shapes.Length != 12 || shapes[0] != -1 || shapes[4] != -1 || widest < 3) throw new Exception("Mouth envelope failed: " + string.Join(",", shapes));
                             if (Voice.Explain(401, "{\"detail\":{\"status\":\"invalid_api_key\",\"message\":\"Invalid API key\"}}") != "ElevenLabs rejected the key. Press Forget, paste a new one." || Voice.Explain(401, "{\"detail\":{\"status\":\"detected_unusual_activity\",\"message\":\"Unusual activity detected.\"}}") != "Unusual activity detected.") throw new Exception("ElevenLabs messages read wrong.");
+                            if (Voice.Explain(403, "{\"detail\":{\"status\":\"account_restricted\",\"message\":\"This workspace is restricted\"}}") != Voice.Restricted || Voice.Closed("[account_restricted] This workspace is restricted") != Voice.Restricted || Voice.Closed("server went away") != "Voice link closed: server went away") throw new Exception("A restricted ElevenLabs account wasn't explained.");
                             if (Voice.Explain(401, "{\"detail\":{\"status\":\"missing_permissions\"}}").IndexOf("Restrict key turned off", StringComparison.Ordinal) < 0 || Voice.Unsaved(Voice.Explain(401, "{\"detail\":{\"status\":\"invalid_api_key\"}}")) != Voice.RejectedNew || Voice.RejectedNew.IndexOf("Forget", StringComparison.Ordinal) >= 0 || Voice.Unsaved("Can't reach ElevenLabs. Check your internet.") != "Can't reach ElevenLabs. Check your internet.") throw new Exception("A pasted key ElevenLabs rejected said to press Forget, but it was never saved.");
                             System.Net.Sockets.TcpListener fake = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
                             fake.Start();
@@ -5869,6 +5973,27 @@ namespace CapriDesktop
                             if (preferences.VoiceId != "abc" || preferences.VoiceModel != "eleven_v3" || mainframe.VoiceStatus != "ElevenLabs · Capri 1 | abc | v3 | Forget") throw new Exception("Voice picks did not show: " + mainframe.VoiceStatus);
                             mainframe.ShowShortcut(true, true);
                             if (!mainframe.MicStatus.EndsWith("| - | keys | mute", StringComparison.Ordinal)) throw new Exception("The Ctrl + Alt + V and N hints did not show with a key: " + mainframe.MicStatus);
+                            mainframe.PickKeys(false);
+                            bool talkWaiting = mainframe.KeyStatus.StartsWith("Press new keys", StringComparison.Ordinal);
+                            mainframe.TakeKeys(Keys.Control | Keys.Alt | Keys.K);
+                            string talkPicked = mainframe.KeyStatus;
+                            mainframe.PickKeys(true);
+                            mainframe.TakeKeys(Keys.ControlKey | Keys.Control);
+                            bool muteStillWaiting = mainframe.KeyStatus.EndsWith("Press new keys, Esc cancels", StringComparison.Ordinal);
+                            mainframe.TakeKeys(Keys.K);
+                            string loneKey = mainframe.VoiceNoteText;
+                            mainframe.PickKeys(true);
+                            mainframe.TakeKeys(Keys.Control | Keys.Alt | Keys.K);
+                            string clash = mainframe.VoiceNoteText;
+                            mainframe.PickKeys(true);
+                            mainframe.TakeKeys(Keys.Control | Keys.Shift | Keys.F9);
+                            string mutePicked = mainframe.KeyStatus;
+                            string keySavedNote = mainframe.VoiceNoteText;
+                            mainframe.PickKeys(false);
+                            mainframe.TakeKeys(Keys.Escape);
+                            if (!talkWaiting || talkPicked != "Ctrl + Alt + K to talk | Ctrl + Alt + N mutes mic" || !muteStillWaiting || loneKey != "Hold Ctrl or Alt with a letter, number or F-key." || clash != "Ctrl + Alt + K is already her talk key." || mutePicked != "Ctrl + Alt + K to talk | Ctrl + Shift + F9 mutes mic" || mainframe.KeyStatus != mutePicked || keySavedNote != "Saved. Ctrl + Shift + F9 mutes your mic." || preferences.TalkVk != 0x4B || preferences.MuteMods != 6 || preferences.MuteVk != 0x78) throw new Exception("Picking her keys went wrong: " + talkPicked + " / " + loneKey + " / " + clash + " / " + mutePicked + " / " + mainframe.KeyStatus);
+                            if (SetHotkey(false, Keys.Control | Keys.Alt | Keys.V) != null || SetHotkey(true, Keys.Control | Keys.Alt | Keys.N) != null || mainframe.KeyStatus != "Ctrl + Alt + V to talk | Ctrl + Alt + N mutes mic" || !Bindable(3, 0x56) || Bindable(4, 0x56) || Bindable(3, 0x1B)) throw new Exception("Her keys didn't go back: " + mainframe.KeyStatus);
+                            checks.Add("PASS her keys: click the talk or mute hint, press a new Ctrl or Alt combo and it saves; lone keys, clashes and Esc are refused");
                             snap("mainframe-voice.png");
                             string crowded = mainframe.Overlap();
                             if (crowded != null) throw new Exception("Mainframe voice controls overlap: " + crowded);
@@ -5885,7 +6010,7 @@ namespace CapriDesktop
                             snap("mainframe-voice-empty.png");
                             if (!mainframe.MicStatus.EndsWith("| help | - | mute", StringComparison.Ordinal)) throw new Exception("Without a key the Mainframe should offer Get a key, not the shortcut: " + mainframe.MicStatus);
                             mainframe.ShowShortcut(false, false);
-                            if (!mainframe.MicStatus.EndsWith("| help | - | -", StringComparison.Ordinal)) throw new Exception("The Ctrl + Alt + N hint showed while the key was taken: " + mainframe.MicStatus);
+                            if (!mainframe.MicStatus.EndsWith("| help | - | taken", StringComparison.Ordinal) || mainframe.KeyStatus != "Ctrl + Alt + V is taken | Ctrl + Alt + N is taken") throw new Exception("A taken Ctrl + Alt + N didn't say so: " + mainframe.MicStatus + " / " + mainframe.KeyStatus);
                             if (!FreeChatOn)
                             {
                                 if (mainframe.FreeVoiceOffered) throw new Exception("Free voice chat is offered in the Mainframe while it's switched off.");
