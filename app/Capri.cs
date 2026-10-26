@@ -443,6 +443,14 @@ namespace CapriDesktop
         private int clicks;
         private bool riding;
         private bool jobRide;
+        private static readonly string[] PetLines = { "Heh. Okay, I'll allow it.", "Pets logged. Morale up twelve percent.", "Careful, choom. I bite viruses." };
+        private readonly System.Collections.Generic.List<long> petTurns = new System.Collections.Generic.List<long>();
+        private int petX;
+        private int petWay;
+        private long petAt = -60000;
+        private int petLine;
+        private int petTicket;
+        private const int PetPause = 1300;
         private Job job;
         private string working;
         private bool pendingClick;
@@ -1107,7 +1115,43 @@ namespace CapriDesktop
             Location = anchor;
         }
 
-        protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); MovePointer(Cursor.Position); }
+        protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); MovePointer(Cursor.Position); Stroke(e.Location); }
+
+        private void Stroke(Point inside)
+        {
+            if (pressed || dragging || riding || hidden || chatting || frame == null || !Solid(inside)) { petTurns.Clear(); petWay = 0; return; }
+            int dx = inside.X - petX;
+            if (Math.Abs(dx) < 6) return;
+            long now = clock.ElapsedMilliseconds;
+            int way = Math.Sign(dx);
+            petX = inside.X;
+            if (petWay != 0 && way != petWay) petTurns.Add(now);
+            petWay = way;
+            petTurns.RemoveAll(delegate(long at) { return now - at > 1500; });
+            if (petTurns.Count < 4 || now - petAt < 20000) return;
+            petTurns.Clear();
+            petAt = now;
+            Petted();
+        }
+
+        private void Petted()
+        {
+            EndWalk();
+            if (seat != null) { Play(perch); blinkWith = perchBlink; }
+            else Play(grin);
+            frames.Start();
+            RenderFrame();
+            int ticket = ++petTicket;
+            ThreadPool.QueueUserWorkItem(delegate { Thread.Sleep(PetPause); Post(delegate { PetLine(ticket); }); });
+        }
+
+        private void PetLine(int ticket)
+        {
+            if (ticket != petTicket || hidden || chatting || speech != null || talkState != TalkState.Off || typer.Visible) return;
+            heard = "pets you";
+            box.Prompt = "> sys: ";
+            Answer(++asking, PetLines[petLine++ % PetLines.Length], TalkState.Talking, true);
+        }
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
@@ -3638,6 +3682,31 @@ namespace CapriDesktop
                             Location = anchor;
                             Play(seat != null ? perch : idle);
                             checks.Add("PASS job ride: she hops on the cursor while she works and off after, and leaves a ride they started alone");
+                            CloseTalk();
+                            Point petSpot = Point.Empty;
+                            for (int py = frame.Height / 4; py < frame.Height * 3 / 4 && petSpot.IsEmpty; py += 3)
+                                for (int px = 30; px < frame.Width - 30 && petSpot.IsEmpty; px += 3)
+                                    if (Solid(new Point(px - 20, py)) && Solid(new Point(px + 20, py))) petSpot = new Point(px, py);
+                            if (petSpot.IsEmpty) throw new Exception("Couldn't find her body to pet.");
+                            int askedBeforePets = asking;
+                            int petsBefore = petTicket;
+                            Stroke(new Point(petSpot.X - 20, petSpot.Y));
+                            Stroke(new Point(petSpot.X + 20, petSpot.Y));
+                            Stroke(new Point(petSpot.X - 20, petSpot.Y));
+                            bool earlyPet = petTicket != petsBefore;
+                            for (int i = 0; i < 4; i++) Stroke(new Point(petSpot.X + (i % 2 == 0 ? 20 : -20), petSpot.Y));
+                            bool smiled = petTicket == petsBefore + 1 && (seat != null ? clip == perch && blinkWith == perchBlink : clip == grin) && asking == askedBeforePets;
+                            PetLine(petTicket);
+                            string petReply = reply;
+                            bool spoke = asking == askedBeforePets + 1 && Array.IndexOf(PetLines, petReply) >= 0;
+                            for (int i = 0; i < 8; i++) Stroke(new Point(petSpot.X + (i % 2 == 0 ? 20 : -20), petSpot.Y));
+                            bool cooled = petTicket == petsBefore + 1;
+                            CloseTalk();
+                            petTicket++;
+                            petAt = -60000;
+                            Play(seat != null ? perch : idle);
+                            if (earlyPet || !smiled || !spoke || !cooled) throw new Exception("Petting her went wrong: early " + earlyPet + ", smiled " + smiled + ", spoke " + spoke + ", cooled " + cooled + " (" + petReply + ")");
+                            checks.Add("PASS petting: rubbing the cursor back and forth over her makes her smile and say a short line, not too easily and not again for 20 s");
                             System.Collections.Generic.List<int[]> spans = Ledges.Open(0, 100, 10, new[] { new Rectangle(20, 0, 30, 50), new Rectangle(90, 5, 40, 40), new Rectangle(0, 11, 100, 40) });
                             if (spans.Count != 2 || spans[0][0] != 0 || spans[0][1] != 20 || spans[1][0] != 50 || spans[1][1] != 90) throw new Exception("Ledge covering math failed.");
                             Point home = anchor;
