@@ -4876,8 +4876,15 @@ namespace CapriDesktop
                                     Hands.Windows = delegate { return new System.Collections.Generic.List<OpenWindow> { new OpenWindow(new IntPtr(9), "(3) Consume - Chase Atlantic - YouTube - Google Chrome", "chrome") }; };
                                     nowPlaying += " | " + Hands.Do("media", new ToolArguments { Action = "now_playing" });
                                     Hands.Windows = listedWindows;
+                                    Func<int, int> rollBefore = Hands.Roll;
+                                    Hands.Roll = delegate { return 5; };
+                                    Func<string> titleBefore = Hands.NowPlaying;
+                                    int titleTicks = 0;
+                                    Hands.NowPlaying = delegate { titleTicks++; return "Rezodrone - Track " + titleTicks; };
                                     nowPlaying += " | " + Hands.Do("play_music", new ToolArguments { Song = "play me some music" });
-                                    if (nowPlaying != "Spotify is playing Consume (feat. Goon Des Garcons) by Chase Atlantic. | Spotify is playing Consume (feat. Goon Des Garcons) by Chase Atlantic. | Spotify is open but paused. | Nothing's playing that I can see. | Their YouTube tab is on Consume - Chase Atlantic. | What should I play?") throw new Exception("What's playing came back wrong: " + nowPlaying);
+                                    Hands.NowPlaying = titleBefore;
+                                    Hands.Roll = rollBefore;
+                                    if (nowPlaying != "Spotify is playing Consume (feat. Goon Des Garcons) by Chase Atlantic. | Spotify is playing Consume (feat. Goon Des Garcons) by Chase Atlantic. | Spotify is open but paused. | Nothing's playing that I can see. | Their YouTube tab is on Consume - Chase Atlantic. | Playing Resist and Disorder on Spotify.") throw new Exception("What's playing came back wrong: " + nowPlaying);
                                     Hands.PressPlay = realPressPlay;
                                     Hands.NowPlaying = realNowPlaying;
                                     Hands.Catalog = delegate { return new System.Collections.Generic.List<InstalledApp>(); };
@@ -4894,7 +4901,7 @@ namespace CapriDesktop
                                     for (int i = 0; i < handledWanted.Length; i++) if (handled[i] != handledWanted[i]) throw new Exception("Hands answered '" + handled[i] + "', expected '" + handledWanted[i] + "'.");
                                     if (noSpotify != "Spotify isn't installed, so playing Blinding Lights on YouTube.") throw new Exception("Without Spotify the song did not go to YouTube: " + noSpotify);
                                     string played = string.Join(" | ", ran.GetRange(ranBefore, ran.Count - ranBefore).ToArray());
-                                    if (played != "spotify:track:0VjIjW4GlUZAMYd2vXMi3b | https://www.youtube.com/watch?v=4NRXx6U8ABQ | spotify:search:nothing%20at%20all | spotify:playlist:37i9dQZF1DWWQRwui0ExPn | spotify:collection:tracks | https://www.youtube.com/watch?v=qboQlr7lAAk&list=RDCLAK5uy_kb7EBi6y3GrtJri4_ZH56Ms786DFEimbM | https://www.youtube.com/watch?v=4NRXx6U8ABQ" || string.Join(",", playPresses.ToArray()) != "nothing at all,lofi beats,Liked Songs") throw new Exception("Songs were played wrong: " + played);
+                                    if (played != "spotify:track:0VjIjW4GlUZAMYd2vXMi3b | https://www.youtube.com/watch?v=4NRXx6U8ABQ | spotify:search:nothing%20at%20all | spotify:playlist:37i9dQZF1DWWQRwui0ExPn | spotify:collection:tracks | https://www.youtube.com/watch?v=qboQlr7lAAk&list=RDCLAK5uy_kb7EBi6y3GrtJri4_ZH56Ms786DFEimbM | spotify:track:4onvDep8OyHKT85RBO3b4V | https://www.youtube.com/watch?v=4NRXx6U8ABQ" || string.Join(",", playPresses.ToArray()) != "nothing at all,lofi beats,Liked Songs") throw new Exception("Songs were played wrong: " + played);
                                     if (lookups.Count != 6 || lookups[0] != "https://html.duckduckgo.com/html/?q=site%3Aopen.spotify.com%2Ftrack%20Blinding%20Lights%20by%20The%20Weeknd" || lookups[1] != "https://www.youtube.com/results?search_query=lofi%20beats") throw new Exception("Songs were looked up wrong: " + string.Join(" | ", lookups.ToArray()));
                                     if (string.Join(" | ", steered.ToArray()) != "close 1 | close_tab 2 | close 3 | switch_to 4 | minimize 6") throw new Exception("Windows were steered wrong: " + string.Join(" | ", steered.ToArray()));
                                     string spotifyPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Spotify\Spotify.exe");
@@ -4940,12 +4947,20 @@ namespace CapriDesktop
                                     Func<string> nowWas = Hands.NowPlaying;
                                     Func<string, bool> pressWas = Hands.PressPlay;
                                     int nowAsked = 0;
-                                    Hands.NowPlaying = delegate { nowAsked++; return "Track " + nowAsked; };
+                                    Hands.NowPlaying = delegate { nowAsked++; return "Artist - Track " + nowAsked; };
                                     Hands.PressPlay = delegate { return true; };
                                     string stay = Hands.Do("play_music", new ToolArguments { Song = "I Really Want to Stay at Your House by Rosa Walton" });
                                     string stayRun = ran[ran.Count - 1];
                                     string stayShort = Hands.Do("play_music", new ToolArguments { Song = "irwtsayh" });
                                     string stayShortRun = ran[ran.Count - 1];
+                                    Func<int, int> rollWas = Hands.Roll;
+                                    Hands.Roll = delegate { return 1; };
+                                    string picked = Hands.Do("play_music", new ToolArguments { Song = "some music" });
+                                    string pickedRun = ran[ran.Count - 1];
+                                    Hands.Roll = rollWas;
+                                    string dog = Hands.Do("play_music", new ToolArguments { Song = "Black Dog by SAMURAI" });
+                                    string dogRun = ran[ran.Count - 1];
+                                    if (picked != "Playing Never Fade Away on Spotify." || pickedRun != "spotify:track:6pV1lc8lIc8ARNB6KsZukt" || dog != "Playing Black Dog on Spotify." || dogRun != "spotify:track:5Ln8eNkYC9to99zsPEZbS2") throw new Exception("Her own pick didn't come from the Cyberpunk soundtracks: " + picked + " / " + dog);
                                     Hands.NowPlaying = nowWas;
                                     Hands.PressPlay = pressWas;
                                     Hands.Fetch = fetchWas;
@@ -5028,13 +5043,14 @@ namespace CapriDesktop
                                     Hands.PressPlay = realPressPlay;
                                     Hands.Catalog = fakeCatalog;
                                     Hands.Forget();
+                                    Hands.Roll = delegate { return 0; };
                                     string[,] routes =
                                     {
                                         { "hey capri, can you open spotify for me?", "open_app|spotify||" }, { "Play Roblox", "open_app|Roblox||" }, { "open youtube", "open_website|youtube||" },
                                         { "launch google.com please", "open_website|google.com||" }, { "play Blinding Lights by The Weeknd on YouTube.", "play_music|Blinding Lights by The Weeknd|song|youtube" },
                                         { "play my lofi beats playlist", "play_music|lofi beats|playlist|" }, { "play something by Drake", "play_music|Drake|artist|" }, { "play my liked songs", "play_music|Liked Songs|playlist|" },
                                         { "skip this song", "media||next|" }, { "turn it up", "media||volume_up|" }, { "close discord", "app_window|discord|close|" }, { "minimise word", "app_window|word|minimize|" },
-                                        { "switch to roblox", "app_window|roblox|switch_to|" }, { "play with me", "" }, { "play something", "" }, { "play a song", "" }, { "open my downloads folder", "" },
+                                        { "switch to roblox", "app_window|roblox|switch_to|" }, { "play with me", "" }, { "play something", "play_music|Chippin' In|song|" }, { "play a song", "play_music|Chippin' In|song|" }, { "open my downloads folder", "" },
                                         { "close it", "" }, { "close fortnite", "" }, { "what's on my screen?", "" }, { "open zorblax", "" },
                                         { "open spotify and shuffle my liked songs", "play_music|Liked Songs|playlist|spotify" }, { "play your liked songs playlist", "play_music|Liked Songs|playlist|" },
                                         { "play the album Blonde by Frank Ocean", "play_music|Blonde by Frank Ocean|album|" }, { "shuffle my lofi beats playlist", "play_music|lofi beats|playlist|" },
@@ -5121,7 +5137,7 @@ namespace CapriDesktop
                                         { "qu'est-ce que je fais ?", "", "true" },
                                         { "open spotify and shuffle my liked songs", "play_music|Liked Songs|playlist|spotify", "true" },
                                         { "play After Hours on YouTube", "play_music|After Hours|song|youtube", "true" },
-                                        { "play something", "", "true" },
+                                        { "play something", "play_music|Chippin' In|song|", "true" },
                                         { "open Spotify if I win", "", "true" },
                                         { "YouTube please", "", "true" },
                                         { "the second one", "", "false" },

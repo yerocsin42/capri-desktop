@@ -95,7 +95,7 @@ namespace CapriDesktop
     internal sealed class Agent : IDisposable
     {
         internal const double Pace = 15;
-        internal const int Version = 8;
+        internal const int Version = 9;
         private const string Patience = "\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45}";
         internal event Action<int> Opened;
         internal event Action<string> Heard;

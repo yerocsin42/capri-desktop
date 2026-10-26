@@ -89,7 +89,7 @@ namespace CapriDesktop
               "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"description\":\"What to do\",\"enum\":[\"play_pause\",\"next\",\"previous\",\"volume_up\",\"volume_down\",\"mute\",\"now_playing\"]}},\"required\":[\"action\"]}" },
             { "look_at_screen", "Look at their screen right now to see what they're doing, playing or showing you.",
               "{\"type\":\"object\",\"properties\":{\"focus\":{\"type\":\"string\",\"description\":\"What to look at, if they said\"}}}" },
-            { "play_music", "Play a song, playlist, album or artist they name, on Spotify or YouTube. For their liked songs, use kind playlist and song Liked Songs.",
+            { "play_music", "Play a song, playlist, album or artist they name, on Spotify or YouTube. For their liked songs, use kind playlist and song Liked Songs. If they leave the pick to you, pick a track from the Cyberpunk 2077 or Edgerunners soundtrack.",
               "{\"type\":\"object\",\"properties\":{\"song\":{\"type\":\"string\",\"description\":\"What to play, like a song and its artist or a playlist's name\"},\"kind\":{\"type\":\"string\",\"description\":\"What it is\",\"enum\":[\"song\",\"playlist\",\"album\",\"artist\"]},\"app\":{\"type\":\"string\",\"description\":\"Where to play it, if they said\",\"enum\":[\"spotify\",\"youtube\"]}},\"required\":[\"song\"]}" },
             { "app_window", "Switch to, minimize or close an app or game that's open on their PC. Naming a site closes that browser tab.",
               "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"The app's name, or the site in a browser tab\"},\"action\":{\"type\":\"string\",\"description\":\"What to do\",\"enum\":[\"switch_to\",\"minimize\",\"close\"]}},\"required\":[\"name\",\"action\"]}" },
@@ -364,8 +364,9 @@ namespace CapriDesktop
             {
                 string target = found.Groups[1].Value.Trim();
                 if (!found.Groups[3].Success && Installed(target)) { tool = "open_app"; args.Name = target; return true; }
-                if (Regex.IsMatch(target, @"^(with|along|around|a game|games?\b|dead|nice|fair|it\b|me\b|us\b|together|music$|some music$|((a|any|some|random) )?(song|track|music|playlist)s?$|(something|anything)\b(?!\s+by\s))", RegexOptions.IgnoreCase)) return false;
+                if (Regex.IsMatch(target, @"^(with|along|around|a game|games?\b|dead|nice|fair|it\b|me\b|us\b|together|((a|any|some|random) )?playlists?$)", RegexOptions.IgnoreCase)) return false;
                 if (found.Groups[3].Success) args.App = found.Groups[3].Value.ToLowerInvariant();
+                if (Regex.IsMatch(target, @"^(music$|some music$|((a|any|some|random) )?(song|track|tune|music)s?$|(something|anything)\b(?!\s+by\s))", RegexOptions.IgnoreCase)) { tool = "play_music"; args.Kind = "song"; args.Song = Pick(); return true; }
                 Match kind = Regex.Match(target, @"^(?:(?:the|my|your)\s+)?(.+?)\s+(playlist|album)$", RegexOptions.IgnoreCase);
                 Match first = Regex.Match(target, @"^(?:the\s+)?(playlist|album)\s+(.+)$", RegexOptions.IgnoreCase);
                 Match by = Regex.Match(target, @"^(?:some(?:thing)?|anything|(?:(?:some|a|any)\s+)?(?:songs?|music|tracks?))\s+by\s+(.+)$", RegexOptions.IgnoreCase);
@@ -788,8 +789,19 @@ namespace CapriDesktop
         private static readonly string[,] KnownSongs =
         {
             { @"^in love with myself(\s+(by|from)\s+(petite meller|kalman chodakiewitz|eli shiffman|(cyberpunk:?\s+)?edgerunners)\b.*)?$", "2iyaHQlYrR8Eyr4wOmOT5D", "In Love With Myself", "In Love With Myself Petite Meller" },
-            { @"^(i really want to stay at your house|irwtsayh)(\s+(by|from)\s+(rosa walton|hallie coggins|(cyberpunk:?\s+)?edgerunners)\b.*)?$", "42W7fJXB7razFefTxMSyYp", "I Really Want to Stay at Your House", "I Really Want to Stay at Your House Rosa Walton" }
+            { @"^(i really want to stay at your house|irwtsayh)(\s+(by|from)\s+(rosa walton|hallie coggins|(cyberpunk:?\s+)?edgerunners)\b.*)?$", "42W7fJXB7razFefTxMSyYp", "I Really Want to Stay at Your House", "I Really Want to Stay at Your House Rosa Walton" },
+            { @"^chippin(g|'|\u2019)?\s+in(\s+(by|from)\s+(samurai|refused|johnny silverhand|cyberpunk(\s+2077)?)\b.*)?$", "0UHxkkgI5GfV0XBRA1rqfe", "Chippin' In", "Chippin' In SAMURAI Refused" },
+            { @"^never fade away(\s+(by|from)\s+(samurai|refused|p\.?\s*t\.?\s+adamczyk|olga jankowska|cyberpunk(\s+2077)?)\b.*)?$", "6pV1lc8lIc8ARNB6KsZukt", "Never Fade Away", "Never Fade Away SAMURAI Cyberpunk 2077" },
+            { @"^black dog\s+(by|from)\s+(samurai|cyberpunk(\s+2077)?)\b.*$", "5Ln8eNkYC9to99zsPEZbS2", "Black Dog", "Black Dog SAMURAI Cyberpunk 2077" },
+            { @"^let you down\s+(by|from)\s+(dawid podsiad[l\u0142]o|(cyberpunk:?\s+)?edgerunners)\b.*$", "6Efhl5xyn7MsuGhyboRThX", "Let You Down", "Let You Down Dawid Podsiadlo Edgerunners" },
+            { @"^resist and disorder(\s+(by|from)\s+(rezodrone|cyberpunk(\s+2077)?)\b.*)?$", "4onvDep8OyHKT85RBO3b4V", "Resist and Disorder", "Resist and Disorder Rezodrone" },
+            { @"^the rebel path(\s+(by|from)\s+(p\.?\s*t\.?\s+adamczyk|cyberpunk(\s+2077)?)\b.*)?$", "3m8UfZwPMMbiWfGR8Lg2cR", "The Rebel Path", "The Rebel Path Cyberpunk 2077" }
         };
+
+        private static readonly string[] Ost = { "Chippin' In", "Never Fade Away", "Black Dog by SAMURAI", "I Really Want to Stay at Your House", "Let You Down by Dawid Podsiad\u0142o", "Resist and Disorder", "The Rebel Path", "In Love With Myself" };
+        internal static Func<int, int> Roll = new Random().Next;
+
+        internal static string Pick() { return Ost[Roll(Ost.Length)]; }
 
         private static readonly Regex Moon = new Regex(@"\bwish\s+(?:we|i|you\s+and\s+i|me\s+and\s+you)\s+could\s+(?:go|fly|get|run\s+away)\s+to\s+the\s+moon\b", RegexOptions.IgnoreCase);
         internal const string MoonSong = "I Really Want to Stay at Your House";
@@ -801,7 +813,7 @@ namespace CapriDesktop
             if (string.IsNullOrWhiteSpace(song)) return "What should I play?";
             song = song.Trim();
             if (Regex.IsMatch(song, @"^((what('|\u2019)?s|what is)\s+)?((currently|now)\s+)?playing( now)?$|^(this|that|the current) (song|track)$", RegexOptions.IgnoreCase)) return Playing();
-            if (Regex.IsMatch(song, @"^(play\s+)?(me\s+)?((some|any|a|random|good)\s+)?(music|songs?|tunes|tracks?|something)(\s+for me)?$", RegexOptions.IgnoreCase)) return "What should I play?";
+            if (Regex.IsMatch(song, @"^(play\s+)?(me\s+)?((some|any|a|random|good)\s+)?(music|songs?|tunes|tracks?|something)(\s+for me)?$", RegexOptions.IgnoreCase)) { song = Pick(); kind = "song"; }
             if (Safety.Screen(song) != null) return "Not playing that, choom.";
             Match tail = Regex.Match(song, @"^(?:(?:the|my|your)\s+)?(.+?)\s+(playlist|album)$", RegexOptions.IgnoreCase);
             if (tail.Success && kind != "artist") { kind = tail.Groups[2].Value.ToLowerInvariant(); song = tail.Groups[1].Value; }
