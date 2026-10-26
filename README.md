@@ -9,6 +9,8 @@
 
 <p align="center">
   <a href="https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-Setup.exe"><b>Download for Windows</b></a>
+  &nbsp;·&nbsp;
+  <a href="#mac-and-linux-early-preview">Mac and Linux</a>
 </p>
 
 <table align="center">
@@ -57,6 +59,15 @@ Beware that Capri may try to take over your human CPU. We take no responsibility
 
 Windows or your antivirus may warn you because it's a new app. All the code is here.
 
+## Mac and Linux (early preview)
+
+She sits on your windows and chats. Voice, the Mainframe and doing things for you are Windows-only for now.
+
+1. Download [Mac (Apple Silicon)](https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-mac-apple-silicon.zip), [Mac (Intel)](https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-mac-intel.zip) or [Linux](https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-linux-x64.tar.gz)
+2. Install [Ollama](https://ollama.com), then run `ollama pull gemma4:e4b` for her brain
+3. **Mac:** unzip it and open Capri. If macOS says it can't check her, open System Settings → Privacy & Security and click **Open Anyway**. Needs macOS 15 or newer
+4. **Linux:** unpack it and run `Capri/Capri`. She sits on windows on X11; on Wayland she sits on the bottom of your screen
+
 ## How to use her
 
 - **Pencil:** type to her
@@ -93,7 +104,7 @@ Just ask her for things, like "open Spotify", "play Blinding Lights", "pause", "
 - Her own cursor that she moves around your screen
 - Head pats (smh)
 - Mischief mode: screen glitches, stealing your cursor, "you've been hacked" notes
-- Mac and Linux
+- Mac and Linux: her voice, the Mainframe and doing things for you
 
 ## Licence
 
