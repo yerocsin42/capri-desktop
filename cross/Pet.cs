@@ -337,8 +337,11 @@ namespace CapriDesktop
             Arrive();
         }
 
+        internal int Arrivals;
+
         private void Arrive(bool quiet = false)
         {
+            Arrivals++;
             Play(arrive);
             dropAfter = true;
             if (!quiet) Sfx.Play(Cue.Arrive);
