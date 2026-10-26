@@ -130,6 +130,7 @@ h1 em { font-weight: 600; }
 .step code { padding: 1px 5px; border-radius: 4px; background: #f1f2f0; font: 13px "Share Tech Mono", Consolas, monospace; }
 .note { margin: 12px 0 0; font-size: 14px; line-height: 1.5; color: #6b6f74; }
 .shot { display: block; width: min(380px, 100%); height: auto; margin-top: 18px; border-radius: 10px; }
+.fit { display: block; max-width: min(380px, 100%); height: auto; margin: 10px 0 4px; border-radius: 8px; }
 .prompt { position: relative; margin: 10px 0 6px; padding: 14px 16px 44px; border: 1px solid #e7e8e5; border-radius: 8px; background: #fafaf9; }
 .prompt p { margin: 0; font: 13px/1.55 "Share Tech Mono", Consolas, monospace; color: #3a3d41; }
 .copy { position: absolute; right: 10px; bottom: 10px; padding: 6px 14px; border: 1.5px solid #202225; border-radius: 6px; background: #fff; color: #202225; font-size: 12px; cursor: pointer; }
