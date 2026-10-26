@@ -144,6 +144,14 @@ namespace CapriDesktop
         private readonly Clip leave = new Clip("leave", 12, 15, 1.11);
         private readonly Clip perchArrive = new Clip("perch_arrive", 14, 15, 1);
         private readonly Clip perchLeave = new Clip("perch_leave", 12, 15, 1);
+        private readonly Clip grin = new Clip("grin", 16, 8, 1.11);
+        internal static readonly string[] PetLines = { "Heh. Okay, I'll allow it.", "Pets logged. Morale up twelve percent.", "Careful, choom. I bite viruses." };
+        private readonly List<double> petTurns = new List<double>();
+        private int petX;
+        private int petWay;
+        private double petAt = -60;
+        private int petLine;
+        private int petTicket;
         private readonly Body body = new Body();
         private readonly List<MenuItem> wanderPicks = new List<MenuItem>();
         private readonly List<MenuItem> languagePicks = new List<MenuItem>();
@@ -249,7 +257,7 @@ namespace CapriDesktop
         internal double BodySize { get { return body.Size; } }
         internal Clip Showing { get { return clip; } }
         internal Clip PerchGlitch { get { return perchGlitch; } }
-        internal IList<Clip> Clips { get { return new[] { idle, blink, blinkGlitch, glitch, dangle, perch, perchBlink, perchBlinkGlitch, perchGlitch, mouth, walk, dance, perchDance, arrive, leave, perchArrive, perchLeave }; } }
+        internal IList<Clip> Clips { get { return new[] { idle, blink, blinkGlitch, glitch, dangle, perch, perchBlink, perchBlinkGlitch, perchGlitch, mouth, walk, dance, perchDance, arrive, leave, perchArrive, perchLeave, grin }; } }
         internal Clip Arrival { get { return arrive; } }
         internal Clip PerchArrival { get { return perchArrive; } }
         internal Clip SeatDance { get { return perchDance; } }
@@ -385,7 +393,7 @@ namespace CapriDesktop
             if ((!perched && seated) || (clip == dangle && !dragging && !falling)) Play(idle);
             int index = (int)((now - clipStart) * clip.Fps);
             if (clip == leave || clip == perchLeave) index = Math.Min(index, clip.Count - 1);
-            if (clip == glitch && index >= glitch.Count) { Play(idle); index = 0; }
+            if ((clip == glitch && index >= glitch.Count) || (clip == grin && index >= grin.Count * 2)) { Play(idle); index = 0; }
             if (clip == arrive && index >= arrive.Count)
             {
                 Play(idle);
@@ -610,7 +618,7 @@ namespace CapriDesktop
         {
             base.OnPointerMoved(e);
             pointer = e.GetPosition(this);
-            if (!pressed) return;
+            if (!pressed) { Stroke(this.PointToScreen(pointer)); return; }
             PixelPoint at = this.PointToScreen(pointer);
             int dx = at.X - downAt.X;
             int dy = at.Y - downAt.Y;
@@ -633,6 +641,59 @@ namespace CapriDesktop
             e.Pointer.Capture(null);
             if (dragging) Drop();
             else React();
+        }
+
+        internal int Pets { get { return petTicket; } }
+
+        internal bool Smiling { get { return seat != null ? clip == perch && blinkWith == perchBlink : clip == grin; } }
+
+        internal Point? BodySpot()
+        {
+            for (double y = Bounds.Height / 4; y < Bounds.Height * 3 / 4; y += 3)
+                for (double x = 20; x < Bounds.Width - 20; x += 3)
+                    if (Opaque(new Point(x - 12, y)) && Opaque(new Point(x + 12, y))) return new Point(x, y);
+            return null;
+        }
+
+        internal void Stroke(PixelPoint cursor)
+        {
+            if (pressed || dragging || falling || outro != null || Talk.Typing || !Opaque(this.PointToClient(cursor))) { petTurns.Clear(); petWay = 0; return; }
+            int dx = cursor.X - petX;
+            if (Math.Abs(dx) < 6) return;
+            double now = Now;
+            int way = Math.Sign(dx);
+            petX = cursor.X;
+            if (petWay != 0 && way != petWay) petTurns.Add(now);
+            petWay = way;
+            petTurns.RemoveAll(at => now - at > 1.5);
+            if (petTurns.Count < 4 || now - petAt < 20) return;
+            petTurns.Clear();
+            petAt = now;
+            Petted();
+        }
+
+        private void Petted()
+        {
+            EndWalk();
+            if (seat != null) { Play(perch); blinkWith = perchBlink; }
+            else Play(grin);
+            int ticket = ++petTicket;
+            DispatcherTimer.RunOnce(() => PetLine(ticket), TimeSpan.FromMilliseconds(1300));
+        }
+
+        internal void PetLine(int ticket)
+        {
+            if (ticket != petTicket || outro != null || !Talk.Quiet) return;
+            if (clip == grin) Play(idle);
+            Talk.Answer("pets you", PetLines[petLine++ % PetLines.Length]);
+        }
+
+        internal void ForgetPets()
+        {
+            petTicket++;
+            petAt = -60;
+            petTurns.Clear();
+            Play(seat != null ? perch : idle);
         }
 
         internal void React()
