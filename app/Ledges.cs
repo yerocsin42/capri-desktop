@@ -14,6 +14,7 @@ namespace CapriDesktop
         internal Rectangle Bounds;
         internal Rectangle Icon;
         internal bool Floor;
+        internal bool Free;
         internal int Left;
         internal int Right;
         internal int Y;

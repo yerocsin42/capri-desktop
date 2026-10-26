@@ -73,7 +73,7 @@ namespace CapriDesktop
 
         internal static string Spoken(string said) { return Regex.Replace(Regex.Replace(said ?? "", @"\[[^\]]*\]", " ").Replace("*", ""), @"\s+", " ").Trim(); }
 
-        private static readonly string[,] Respelled = { { "chooms", "chewms" }, { "choom", "chewm" }, { "preem", "preme" } };
+        private static readonly string[,] Respelled = { { "chooms", "chewms" }, { "choom", "chewm" }, { "preem", "preme" }, { "yezzirrr", "yessirrr" } };
 
         internal static string Sayable(string text) { return Swap(text, 0, 1); }
 
@@ -142,17 +142,17 @@ namespace CapriDesktop
         internal static string Explain(int status, string detail)
         {
             detail = detail ?? "";
-            if (detail.Contains("quota_exceeded")) return "Out of ElevenLabs credits.";
-            if (detail.Contains("missing_permissions")) return "Key needs Text to Speech, Voices, Models and Agents access.";
+            if (detail.Contains("quota_exceeded")) return "Out of ElevenLabs credits. Untick Speak replies to type.";
+            if (detail.Contains("missing_permissions")) return "Key needs Text to Speech, Voices, Models and Agents access. Edit it on ElevenLabs.";
             if (detail.Contains("voice_not_found")) return "Voice not found. Add it to your ElevenLabs voices.";
-            if (detail.Contains("invalid_api_key")) return "ElevenLabs rejected the key.";
+            if (detail.Contains("invalid_api_key")) return "ElevenLabs rejected the key. Press Forget, paste a new one.";
             Match message = Regex.Match(detail, "\"message\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
             if (message.Success)
             {
                 string text = Regex.Unescape(message.Groups[1].Value).Trim();
                 if (text.Length > 0) return Short(text);
             }
-            if (status == 401) return "ElevenLabs rejected the key.";
+            if (status == 401) return "ElevenLabs rejected the key. Press Forget, paste a new one.";
             if (status == 429) return "ElevenLabs is busy. Try again in a moment.";
             return "ElevenLabs error " + status + ".";
         }
@@ -165,6 +165,19 @@ namespace CapriDesktop
 
         internal static T Read<T>(byte[] json) { using (MemoryStream stream = new MemoryStream(json)) return (T)new DataContractJsonSerializer(typeof(T)).ReadObject(stream); }
 
+        internal const string Unreadable = "ElevenLabs sent a reply Capri couldn't read. Right-click her, Help, Copy error details, and send it in the Discord.";
+
+        internal static T Reply<T>(byte[] json, string path)
+        {
+            try { return Read<T>(json); }
+            catch (SerializationException)
+            {
+                string text = Encoding.UTF8.GetString(json).Trim();
+                Brain.Log(Host + path, -1, "Unreadable " + typeof(T).Name + " reply: " + (text.Length > 200 ? text.Substring(0, 200) : text));
+                throw new VoiceException(Unreadable);
+            }
+        }
+
         internal static VoiceListing Fetch(string key)
         {
             VoiceListing listing = new VoiceListing();
@@ -172,7 +185,7 @@ namespace CapriDesktop
             for (int page = 0; page < 10; page++)
             {
                 string path = "/v2/voices?page_size=100" + (next == null ? "" : "&next_page_token=" + Uri.EscapeDataString(next));
-                VoicePage found = Read<VoicePage>(Send(Open(path, key, "GET"), null));
+                VoicePage found = Reply<VoicePage>(Send(Open(path, key, "GET"), null), "/v2/voices");
                 if (found.Voices != null) listing.Voices.AddRange(found.Voices);
                 if (!found.More || string.IsNullOrEmpty(found.Next)) break;
                 next = found.Next;

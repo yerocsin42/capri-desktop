@@ -22,6 +22,7 @@ namespace CapriSetup
             try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch (EntryPointNotFoundException) { }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            if (args.Length > 0 && args[0] == "--update") return Update(args);
             if (args.Length == 2 && args[0] == "--verify") return Verify(args[1]);
             if (args.Length == 1 && args[0] == "--remove-files") return RemoveFiles();
             using (SetupWindow window = new SetupWindow(args.Length == 1 && args[0] == "--uninstall")) Application.Run(window);
@@ -29,6 +30,30 @@ namespace CapriSetup
         }
 
         [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr context);
+
+        private static int Update(string[] args)
+        {
+            try
+            {
+                int parent;
+                long started;
+                if (args.Length != 3 || !int.TryParse(args[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out parent) || parent <= 0 || !long.TryParse(args[2], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out started) || started <= 0) throw new IOException("The update command is invalid.");
+                Process process = null;
+                try { process = Process.GetProcessById(parent); } catch (ArgumentException) { }
+                if (process != null)
+                    using (process)
+                    {
+                        bool same = false;
+                        try { same = process.StartTime.ToUniversalTime().Ticks == started; } catch (InvalidOperationException) { }
+                        if (same && !process.WaitForExit(60000)) throw new IOException("Capri is still closing. Try the update again.");
+                    }
+                Install(false);
+                using (Process launched = Process.Start(new ProcessStartInfo(Path.Combine(InstallPath, "Capri.exe")) { UseShellExecute = true, WorkingDirectory = InstallPath }))
+                    if (launched == null) throw new IOException("Capri updated but couldn't restart. Open her from the Start menu.");
+                return 0;
+            }
+            catch (Exception error) { MessageBox.Show(error.Message, "Capri couldn't update", MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }
+        }
 
         internal static byte[] Payload()
         {
@@ -51,6 +76,8 @@ namespace CapriSetup
                 if (bytes.Length < 1024 || bytes[0] != 77 || bytes[1] != 90) throw new InvalidDataException("Application payload is not a Windows executable.");
                 File.WriteAllBytes(Path.Combine(output, "Capri.exe"), bytes);
                 using (SHA256 sha = SHA256.Create()) File.WriteAllText(Path.Combine(output, "payload.sha256"), BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant());
+                if (!Ours(Path.Combine(output, "Capri.exe"))) throw new InvalidDataException("The installer doesn't recognise its own Capri.exe.");
+                if (Ours(Application.ExecutablePath) || Ours(Path.Combine(Environment.SystemDirectory, "notepad.exe")) || Ours(Path.Combine(output, "missing.exe"))) throw new InvalidDataException("The installer takes other programs for Capri.");
                 using (SetupWindow preview = new SetupWindow(false))
                 {
                     preview.Show();
@@ -62,7 +89,7 @@ namespace CapriSetup
                     }
                     preview.Close();
                 }
-                File.WriteAllText(Path.Combine(output, "packaging-test.txt"), "PASS embedded executable extracted\nPASS PE signature\nPASS SHA-256 computed\nPASS installer window rendered\nLIMIT installation and uninstallation were not performed\n");
+                File.WriteAllText(Path.Combine(output, "packaging-test.txt"), "PASS embedded executable extracted\nPASS PE signature\nPASS SHA-256 computed\nPASS an unmarked Capri.exe is recognised as Capri, other programs aren't\nPASS installer window rendered\nLIMIT installation and uninstallation were not performed\n");
                 return 0;
             }
             catch (Exception error) { Directory.CreateDirectory(output); File.WriteAllText(Path.Combine(output, "failure.txt"), error.ToString()); return 1; }
@@ -72,7 +99,8 @@ namespace CapriSetup
         {
             string destination = InstallPath;
             string marker = Path.Combine(destination, ".capri-install");
-            if (Directory.Exists(destination) && !File.Exists(marker) && File.Exists(Path.Combine(destination, "Capri.exe"))) throw new IOException("That folder already contains an unrecognized Capri.exe. Move it before installing.");
+            string existing = Path.Combine(destination, "Capri.exe");
+            if (Directory.Exists(destination) && !File.Exists(marker) && File.Exists(existing) && !Ours(existing)) throw new IOException("There's a Capri.exe in " + destination + " that isn't this Capri. Move it out of that folder, then install again.");
             foreach (Process process in Process.GetProcessesByName("Capri"))
             {
                 using (process)
@@ -82,16 +110,24 @@ namespace CapriSetup
                 }
             }
             Directory.CreateDirectory(destination);
-            File.WriteAllBytes(Path.Combine(destination, "Capri.exe"), Payload());
+            string version = Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
+            File.WriteAllText(marker, "Capri desktop companion " + version);
+            string target = Path.Combine(destination, "Capri.exe");
+            string temporary = target + ".new";
+            try
+            {
+                File.WriteAllBytes(temporary, Payload());
+                if (File.Exists(target)) File.Replace(temporary, target, null); else File.Move(temporary, target);
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
             File.Copy(Application.ExecutablePath, Path.Combine(destination, "Uninstall.exe"), true);
-            File.WriteAllText(marker, "Capri desktop companion 0.5.0");
             string menu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Capri.lnk");
             Shortcut(menu, Path.Combine(destination, "Capri.exe"));
             if (desktop) Shortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Capri.lnk"), Path.Combine(destination, "Capri.exe"));
             using (RegistryKey key = Registry.CurrentUser.CreateSubKey(RegistryPath))
             {
                 key.SetValue("DisplayName", "Capri");
-                key.SetValue("DisplayVersion", "0.5.0");
+                key.SetValue("DisplayVersion", version);
                 key.SetValue("Publisher", "Capri fan project");
                 key.SetValue("InstallLocation", destination);
                 key.SetValue("DisplayIcon", Path.Combine(destination, "Capri.exe"));
@@ -100,6 +136,16 @@ namespace CapriSetup
                 key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
                 key.SetValue("EstimatedSize", (Payload().Length + new FileInfo(Application.ExecutablePath).Length) / 1024, RegistryValueKind.DWord);
             }
+        }
+
+        internal static bool Ours(string path)
+        {
+            try
+            {
+                FileVersionInfo info = FileVersionInfo.GetVersionInfo(path);
+                return info.ProductName == "Capri" && string.Equals(info.OriginalFilename, "Capri.exe", StringComparison.OrdinalIgnoreCase);
+            }
+            catch (FileNotFoundException) { return false; }
         }
 
         private static void Shortcut(string path, string target)

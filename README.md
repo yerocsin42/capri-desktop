@@ -80,14 +80,13 @@ Just ask her for things, like "open Spotify", "play Blinding Lights", "pause", "
 | Right-click, Move | she hops between your open windows |
 | Watch my screen | in the Mainframe: she comments as you play |
 | Speak replies | in the Mainframe: turn off to save ElevenLabs credits |
-| Free voice chat | in the Mainframe: talk without ElevenLabs and she types back |
 
 </details>
 
 ## Coming up
 
 - Working with your files: open, read and edit the ones you pick
-- Updates that install themselves
+- Controlling YouTube and your apps: skip, fullscreen, click, type and scroll
 - A free voice that runs on your PC
 - Remembering things about you
 - Looking things up and telling you the answer
