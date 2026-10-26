@@ -411,13 +411,64 @@ namespace CapriDesktop
     {
         internal const int Rate = 24000;
         internal static volatile int Level = 60;
+        internal static volatile bool Typing = true;
         internal static Action<short[]> Out;
+        internal static Action<short[]> TypeOut;
+        internal static Action Untyped;
+        internal const double TypeLimit = 6;
 
         internal static void Play(Cue cue)
         {
             Action<short[]> output = Out;
             int level = Level;
             if (output != null && level > 0) output(Make(cue, level));
+        }
+
+        internal static void Type(string text, double pace, int seed)
+        {
+            Untype();
+            Action<short[]> output = TypeOut;
+            int level = Level;
+            if (output != null && Typing && level > 0 && !string.IsNullOrEmpty(text)) output(Typed(text, pace, level, seed));
+        }
+
+        internal static void Untype()
+        {
+            Action hush = Untyped;
+            if (hush != null) hush();
+        }
+
+        internal static short[] Typed(string text, double pace, int level, int seed)
+        {
+            if (string.IsNullOrEmpty(text) || pace <= 0 || level <= 0) return new short[0];
+            double seconds = Math.Min(TypeLimit, text.Length / pace) + 0.05;
+            int count = (int)(seconds * Rate);
+            short[] samples = new short[count];
+            Random random = new Random(seed);
+            double peak = 0.09 * Math.Min(100, level) / 100.0;
+            int length = Rate * 18 / 1000;
+            for (int i = 0; i < text.Length; i += 2)
+            {
+                if (!char.IsLetterOrDigit(text[i])) continue;
+                double at = i / pace;
+                if (at >= TypeLimit) break;
+                double fade = at < TypeLimit - 1 ? 1 : TypeLimit - at;
+                int start = (int)(at * Rate) + random.Next(0, Rate / 200);
+                double pitch = 1900 * (0.9 + random.NextDouble() * 0.2);
+                double loud = peak * fade * (0.7 + random.NextDouble() * 0.3);
+                double phase = 0, smooth = 0;
+                for (int j = 0; j < length && start + j < count; j++)
+                {
+                    double t = (double)j / Rate;
+                    phase += 2 * Math.PI * pitch / Rate;
+                    double envelope = Math.Min(1, t / 0.0015) * Math.Exp(-t / 0.004);
+                    double wave = Math.Sin(phase) + 0.3 * Math.Sin(phase * 2.01);
+                    smooth += (wave - smooth) * 0.45;
+                    int mixed = samples[start + j] + (int)(smooth * envelope / 1.3 * loud * 32767);
+                    samples[start + j] = (short)Math.Max(short.MinValue, Math.Min(short.MaxValue, mixed));
+                }
+            }
+            return samples;
         }
 
         internal static short[] Make(Cue cue, int level)

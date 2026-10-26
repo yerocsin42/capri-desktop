@@ -88,6 +88,7 @@ namespace CapriDesktop
         [DataMember] public int Sounds = 60;
         [DataMember] public int SleepAfter = 120;
         [DataMember] public bool NoIntro;
+        [DataMember] public bool NoTyping;
         [DataMember] public int BubbleTime = 1;
         [DataMember] public int TalkMods = 3;
         [DataMember] public int TalkVk = 0x56;
@@ -536,6 +537,7 @@ namespace CapriDesktop
         private readonly Ears ears = new Ears();
         private readonly Speaker speaker;
         private readonly Speaker effects;
+        private readonly Speaker typist;
         private volatile Agent agent;
         private bool chatting;
         private bool dropping;
@@ -605,6 +607,7 @@ namespace CapriDesktop
             instant = smoke;
             speaker = new Speaker(smoke);
             effects = new Speaker(smoke) { Plain = true };
+            typist = new Speaker(smoke) { Plain = true };
             restore = signal;
             settingsPath = Path.Combine(data, "settings.json");
             updater = new Updater(data, Application.ExecutablePath, smoke);
@@ -621,6 +624,9 @@ namespace CapriDesktop
             Voice.Loudness = Math.Max(0, Math.Min(150, preferences.Volume));
             Sfx.Level = Math.Max(0, Math.Min(100, preferences.Sounds));
             Sfx.Out = delegate(short[] sound) { Post(delegate { Effect(sound); }); };
+            Sfx.Typing = !preferences.NoTyping;
+            Sfx.TypeOut = delegate(short[] sound) { if (IsDisposed) return; try { typist.Open(Sfx.Rate); typist.Play(sound); } catch (Exception) { } };
+            Sfx.Untyped = delegate { try { typist.Clear(); } catch (Exception) { } };
             preferences.WanderPace = Math.Max(0, Math.Min(3, preferences.WanderPace));
             clip = idle;
             nextGlitch = 30 + random.NextDouble() * 30;
@@ -1491,6 +1497,17 @@ namespace CapriDesktop
         internal bool Dancing { get { return !preferences.NoDance; } }
 
         internal bool Intro { get { return !preferences.NoIntro; } }
+
+        internal bool TypingSound { get { return !preferences.NoTyping; } }
+
+        internal void ToggleTyping()
+        {
+            preferences.NoTyping = !preferences.NoTyping;
+            Sfx.Typing = !preferences.NoTyping;
+            SavePreferences();
+            mainframe.Sync();
+            Sfx.Type("click clack", LettersPerSecond, 1);
+        }
 
         internal void ToggleIntro()
         {
@@ -3361,6 +3378,8 @@ namespace CapriDesktop
             pace = seconds < 0.2 ? LettersPerSecond : Math.Max(8, said.Length / seconds);
             Say(said);
             PlayReply(said, wav);
+            if (seconds < 0.2 && state != TalkState.Dormant) Sfx.Type(said, pace, ticket);
+            else Sfx.Untype();
         }
 
         private void PlayReply(string said, byte[] wav)
@@ -3377,6 +3396,7 @@ namespace CapriDesktop
         private void CloseTalk()
         {
             voice.Stop();
+            Sfx.Untype();
             voiceUntil = 0;
             talkState = TalkState.Off;
             CheckEars(clock.Elapsed.TotalSeconds);
@@ -3538,6 +3558,7 @@ namespace CapriDesktop
             talkKey = false;
             speaker.Close();
             effects.Close();
+            typist.Close();
             voice.Stop();
             engine.Cancel = true;
             engine.Stop();
@@ -3711,6 +3732,34 @@ namespace CapriDesktop
                             Play(seat != null ? perch : idle);
                             if (earlyPet || !smiled || !spoke || !cooled) throw new Exception("Petting her went wrong: early " + earlyPet + ", smiled " + smiled + ", spoke " + spoke + ", cooled " + cooled + " (" + petReply + ")");
                             checks.Add("PASS petting: rubbing the cursor back and forth over her makes her smile and say a short line, not too easily, not again for 20 s, and not when she moves under a still cursor");
+                            System.Collections.Generic.List<short[]> typedHeard = new System.Collections.Generic.List<short[]>();
+                            int untypes = 0;
+                            Action<short[]> realTypeOut = Sfx.TypeOut;
+                            Action realUntyped = Sfx.Untyped;
+                            Sfx.TypeOut = delegate(short[] sound) { typedHeard.Add(sound); };
+                            Sfx.Untyped = delegate { untypes++; };
+                            int typingLevel = Sfx.Level;
+                            Sfx.Level = 60;
+                            Answer(++asking, "Typing test, choom. Short and soft.", TalkState.Talking, true);
+                            short[] typedLine = typedHeard.Count == 1 ? typedHeard[0] : null;
+                            int typedPeak = 0;
+                            if (typedLine != null) foreach (short sample in typedLine) typedPeak = Math.Max(typedPeak, Math.Abs((int)sample));
+                            double typedSeconds = typedLine == null ? 0 : (double)typedLine.Length / Sfx.Rate;
+                            CloseTalk();
+                            int untypedOnClose = untypes;
+                            short[] longTyping = Sfx.Typed(new string('a', 2000), LettersPerSecond, 100, 3);
+                            ToggleTyping();
+                            bool typingOff = !TypingSound && !mainframe.TypingShown && !Sfx.Typing;
+                            typedHeard.Clear();
+                            Answer(++asking, "Quiet line.", TalkState.Talking, true);
+                            int typedWhileOff = typedHeard.Count;
+                            CloseTalk();
+                            ToggleTyping();
+                            Sfx.TypeOut = realTypeOut;
+                            Sfx.Untyped = realUntyped;
+                            Sfx.Level = typingLevel;
+                            if (typedLine == null || Math.Abs(typedSeconds - (35.0 / LettersPerSecond + 0.05)) > 0.02 || typedPeak == 0 || typedPeak > 0.09 * 0.6 * 32767 || untypedOnClose < 2 || longTyping.Length > (Sfx.TypeLimit + 0.06) * Sfx.Rate || !typingOff || typedWhileOff != 0 || !TypingSound || !Sfx.Typing) throw new Exception("Typing sound went wrong: " + typedHeard.Count + " | " + typedSeconds + " s | peak " + typedPeak + " | untypes " + untypedOnClose + " | off " + typingOff + " | " + typedWhileOff);
+                            checks.Add("PASS typing sound: a soft tick per two letters while a text-only reply types out, capped at 6 s, stops when the bubble closes, and Settings > Typing sound turns it off");
                             System.Collections.Generic.List<int[]> spans = Ledges.Open(0, 100, 10, new[] { new Rectangle(20, 0, 30, 50), new Rectangle(90, 5, 40, 40), new Rectangle(0, 11, 100, 40) });
                             if (spans.Count != 2 || spans[0][0] != 0 || spans[0][1] != 20 || spans[1][0] != 50 || spans[1][1] != 90) throw new Exception("Ledge covering math failed.");
                             Point home = anchor;
