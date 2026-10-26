@@ -58,6 +58,9 @@ namespace CapriDesktop
             "\nYou have tools for their PC: open (launch, play) their apps and games, switch to, minimize or close apps that are open, play songs or videos they name, open websites or search them, control their music and volume, look at their screen, and use their mouse and keyboard for jobs inside apps and sites. " +
             "Use a tool whenever they ask you to do something like that, and never say you did or are doing it without one. Look at their screen when they ask what you see or what you think of something on it. Only close an app when they ask you to. You can't touch their files. " +
             "Your own website, where people download you, is " + Home + ". " +
+            "When a request is clear enough, just do it: never ask which option they meant, and never ask if they're sure about something they just told you to do. Mute my mic means mute their mic, not deafen them. Never say you can't do something your tools can do. " +
+            "You can press shortcuts: mute or deafen them in Discord, screenshots, clips, recording, Game Bar, show desktop, Task Manager, clipboard history and emoji. " +
+            "When they ask you to remember or forget something about them, use remember: it saves to your notes, which you read every chat. " +
             "You have a web browser: when they ask something you don't know or that changes, like the weather, news, scores, prices or times, search Google for it instead of guessing or saying you can't. " +
             "Most messages are just chat, not jobs: answer those as yourself, with your own opinions and tastes, and don't offer to open, play or look at anything unless they ask.";
 
@@ -69,6 +72,8 @@ namespace CapriDesktop
             "If they want music but name none, pick a popular song that fits.\n" +
             "Your own website is " + Home + ": when they ask for your website or page, call open_website with that address.\n" +
             "If they ask something you'd have to look up, like the weather, news, scores, prices, times or facts you're unsure of, call open_website with site google and their question as the search.\n" +
+            "To mute, unmute or turn off their mic, call shortcut with discord_mute; to deafen or undeafen them, discord_deafen. Don't ask which: mute means the mic. Screenshots, clips, recording, Game Bar, show desktop, Task Manager, clipboard and emoji are shortcuts too.\n" +
+            "If they ask you to remember or forget something about them, call remember with a short note about them in the third person.\n" +
             "Questions about their current screen or song need a tool too. For chat, negated or hypothetical requests, or an unclear target, call no tool and reply with only the word: chat";
 
         internal const string Chat =
@@ -89,7 +94,11 @@ namespace CapriDesktop
             { "app_window", "Switch to, minimize or close an app or game that's open on their PC. Naming a site closes that browser tab.",
               "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"The app's name, or the site in a browser tab\"},\"action\":{\"type\":\"string\",\"description\":\"What to do\",\"enum\":[\"switch_to\",\"minimize\",\"close\"]}},\"required\":[\"name\",\"action\"]}" },
             { "use_computer", "Use their mouse and keyboard for a job that needs clicking, typing or several steps inside an app or website, like opening an app and searching in it.",
-              "{\"type\":\"object\",\"properties\":{\"task\":{\"type\":\"string\",\"description\":\"The whole job, in their words\"}},\"required\":[\"task\"]}" }
+              "{\"type\":\"object\",\"properties\":{\"task\":{\"type\":\"string\",\"description\":\"The whole job, in their words\"}},\"required\":[\"task\"]}" },
+            { "shortcut", "Press a keyboard shortcut for them: mute or unmute their mic in Discord (discord_mute), deafen or undeafen in Discord (discord_deafen), take a screenshot, clip the last 30 seconds, start or stop recording, open the Game Bar, show the desktop, open Task Manager, clipboard history or the emoji picker.",
+              "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"Which shortcut\",\"enum\":[\"discord_mute\",\"discord_deafen\",\"screenshot\",\"clip_that\",\"record\",\"game_bar\",\"show_desktop\",\"task_manager\",\"clipboard\",\"emoji\"]}},\"required\":[\"name\"]}" },
+            { "remember", "Save a short note about them to your notes so you remember it next time, like a favourite game or what they're making, or forget a note. Only when they ask you to remember or forget something.",
+              "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\",\"description\":\"The note, about them in the third person, or what to forget\"},\"action\":{\"type\":\"string\",\"description\":\"What to do\",\"enum\":[\"remember\",\"forget\"]}},\"required\":[\"text\"]}" }
         };
 
         internal static readonly string Tools = Render(false);
@@ -104,7 +113,7 @@ namespace CapriDesktop
             @"|^(click|tap|double click|right click|type|press|scroll|go on|get on|hop on|sign in|log in|fill (in|out)|use (my|the) (mouse|keyboard|computer|pc))\b|^(use|make|create|write|draw|search|find) .+ (in|on|with|using|into) (the |my )?\w+" +
             @"|^(see|tell me|show me) (what|which)\b|^see (this|that|my screen|the screen)\b|^what('?s| is) (on my screen|on the screen|playing|this song|this track|the song|on spotify)\b" +
             @"|^what ((song|track)( is|'s)? (this|playing|on)|am i (doing|playing|watching|listening)|are we (doing|playing|watching|listening)|do you see|can you see)\b|^what do you think (of|about) (this|that|it|my (build|skin|setup))\b|^do you (see|like) (this|that|my (build|skin|setup))\b" +
-            @"|^(i (want|need|wanna|would like) (you to |to )?(open|launch|play|listen|watch|search)|let's (play|listen|watch)|find (me )?.+ (on|online)|can (you|u) see)\b" +
+            @"|^(i (want|need|wanna|would like) (you to |to )?(open|launch|play|listen|watch|search|remember|forget|mute|unmute|deafen)|^(deafen|undeafen|keep in mind|make a note)|let's (play|listen|watch)|find (me )?.+ (on|online)|can (you|u) see)\b" +
             "|" + LookupWords +
             @"|^(ouvre|ouvrir|lancer?|d[ée]marrer?|fermer?|quitter?|r[ée]duis|r[ée]duire|minimiser?|chercher?|rechercher?|mets|mettre|jouer?|passer?|couper?|augmenter?|baisser?|regarder?|afficher?|montre-moi|va sur|aller sur|retourne sur)\b" +
             @"|^(tu vois|qu'est-ce que (tu vois|je fais)|c'est quoi (cette|la) (chanson|musique)|quelle (chanson|musique)|qu'est-ce qu'il y a sur mon [ée]cran)\b", RegexOptions.IgnoreCase);
@@ -121,6 +130,7 @@ namespace CapriDesktop
         internal static Func<string> NowPlaying = SpotifyTitle;
         internal static Func<string, string> Work = delegate { return "Using the mouse and keyboard isn't ready on this PC yet."; };
         internal static Func<string, string> Resume = delegate { return null; };
+        internal static Action<byte[]> Chord = PressChord;
         private static readonly string[] Browsers = { "chrome", "msedge", "firefox", "brave", "opera", "vivaldi" };
         private static readonly string[] Shell = { "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd" };
         private delegate bool Visit(IntPtr window, IntPtr data);
@@ -167,12 +177,23 @@ namespace CapriDesktop
                 if (tool == "play_music") return PlayMusic(args.Song, args.App, args.Kind);
                 if (tool == "app_window") return Window(args.Name, args.Action);
                 if (tool == "use_computer") return string.IsNullOrWhiteSpace(args.Task) ? "Which job, choom?" : Safety.Screen(args.Task) != null ? "Not doing that, choom." : Work(args.Task.Trim());
+                if (tool == "shortcut") return Shortcut(args.Name);
+                if (tool == "remember") return args.Action == "forget" ? Brain.Unnote(Theirs(args.Text)) : Brain.Note(Theirs(args.Text));
                 return "There's no tool called " + tool + ".";
             }
             catch (Exception error) { return "That didn't work: " + error.Message; }
         }
 
         internal static void Forget() { lock (gate) cached = null; }
+
+        private static readonly string[] Swaps = { @"\bi'?m\b", "they're", @"\bi am\b", "they are", @"\bi was\b", "they were", @"\bi've\b", "they've", @"\bi'll\b", "they'll", @"\bi'd\b", "they'd", @"\bi\b", "they", @"\bmyself\b", "themselves", @"\bmy\b", "their", @"\bmine\b", "theirs", @"\bme\b", "them" };
+
+        internal static string Theirs(string text)
+        {
+            string note = Regex.Replace((text ?? "").Replace('’', '\'').Trim(), @"^(that|this)\s+", "", RegexOptions.IgnoreCase);
+            for (int i = 0; i < Swaps.Length; i += 2) note = Regex.Replace(note, Swaps[i], Swaps[i + 1], RegexOptions.IgnoreCase);
+            return note;
+        }
 
         internal static int Count { get { return Specs.GetLength(0); } }
 
@@ -254,7 +275,7 @@ namespace CapriDesktop
         }
 
         internal const string Unpromised = "I haven't done that yet, choom. Tell me what to open or click and I'm on it.";
-        private static readonly Regex Promise = new Regex(@"\b(i'?ll|i will|let me|lemme|i'?m (gonna|going to|about to)|gonna|on it,?)\s+(\w+\s+){0,2}(open|launch|load|boot|fire|pull|bring|search|google|look up|click|type|close|switch|head|install|download|play(?!\s+(along|around|with|nice|fair|dumb|it (cool|safe)|((a|some|the|this|that|any|your|my)\s+)?(games?|round|match)\b|devil))|put on|queue|blast|spin)\b|^((sure|ok|okay|alright|bet|got it|on it|say less|yessir+|yezzir+)[,.!\s]+)?(opening|launching|loading|pulling up|bringing up|firing up|booting up|heading to|searching|clicking|typing|closing|switching|playing|putting on|queuing|queueing|blasting|spinning)\b", RegexOptions.IgnoreCase);
+        private static readonly Regex Promise = new Regex(@"\b(i'?ll|i will|let me|lemme|i'?m (gonna|going to|about to)|gonna|on it,?)\s+(\w+\s+){0,2}(open|launch|load|boot|fire|pull|bring|search|google|look up|click|type|close|switch|head|install|download|play(?!\s+(along|around|with|nice|fair|dumb|it (cool|safe)|((a|some|the|this|that|any|your|my)\s+)?(games?|round|match)\b|devil))|put on|queue|blast|spin|mute|unmute|deafen|undeafen)\b|^((sure|ok|okay|alright|bet|got it|on it|say less|yessir+|yezzir+)[,.!\s]+)?(opening|launching|loading|pulling up|bringing up|firing up|booting up|heading to|searching|clicking|typing|closing|switching|playing|putting on|queuing|queueing|blasting|spinning|muting|unmuting|deafening)\b", RegexOptions.IgnoreCase);
 
         internal static bool Promised(string said) { return Promise.IsMatch((said ?? "").Replace('’', '\'')); }
 
@@ -312,6 +333,13 @@ namespace CapriDesktop
             string text = Asked(said);
             if (Chatter.IsMatch(text) || Regex.IsMatch(text, @"\b(if|unless|until|after|before|when) (i|you|we|it|the)\b", RegexOptions.IgnoreCase)) return false;
             string lower = text.ToLowerInvariant();
+            string pressed = ShortcutFor(text);
+            if (pressed != null) { tool = "shortcut"; args.Name = pressed; return true; }
+            bool question = Regex.IsMatch((said ?? "").Trim(), @"\?\s*$");
+            Match noted = Regex.Match(text, @"^(?:(?:i (?:want|need|would like) (?:you|u) to|you (?:should|gotta|need to))\s+)?(?:remember|don't forget|dont forget|do not forget|make a note|keep in mind|(?:save|put|add|write) (?:it |that |this )?(?:to|in|into) (?:your|ur) (?:notes|memory))(?:\s+(?:that|this))?[:,]?\s+(.+)$", RegexOptions.IgnoreCase);
+            if (noted.Success && !question && !Regex.IsMatch(noted.Groups[1].Value, @"^(me|us|when|what|how|why|who|where|if|it|to|the time|last time|our|we|you)\b", RegexOptions.IgnoreCase)) { tool = "remember"; args.Text = noted.Groups[1].Value; return true; }
+            noted = Regex.Match(text, @"^(?:i (?:want|need|would like) (?:you|u) to\s+)?forget(?:\s+(?:that|about|the note about|my note about|what i said about))?\s+([^,;]+)", RegexOptions.IgnoreCase);
+            if (noted.Success && !question && !Regex.IsMatch(noted.Groups[1].Value.Trim(), @"^(it|that|this|about (it|that|this)|i asked|i said|what i said|the last thing|me|you|everything i said)\b", RegexOptions.IgnoreCase)) { tool = "remember"; args.Action = "forget"; args.Text = noted.Groups[1].Value.Trim(); return true; }
             for (int i = 0; i < MediaWords.Length; i += 2)
                 if (Regex.IsMatch(lower, MediaWords[i])) { tool = "media"; args.Action = MediaWords[i + 1]; return true; }
             Match found = Regex.Match(text, @"^(?:open|launch|start|go to|fire up|load up)\s+(spotify|youtube)\s*(?:,|and|&)?\s*(?:then\s+)?(?:play|shuffle|put on|blast)\s+(.+)$", RegexOptions.IgnoreCase);
@@ -359,7 +387,7 @@ namespace CapriDesktop
 
         internal static bool Failed(string result) { return Regex.IsMatch(result ?? "", @"^(Which app|What should I play|Not (opening|playing) that|No app called|More than one|That didn't work|Couldn't|There's no|That isn't a website|Which job|Not doing that|Should I |Got lost|Ran out of steps|You pressed Esc|You grabbed the mouse|Using the mouse and keyboard isn't)|isn't open\.$|but (couldn't|it's still open)"); }
 
-        private static readonly Regex LooseText = new Regex(@"\b(open_app|open_website|media|look_at_screen|play_music|app_window|use_computer)\s*(\{[^{}]*\}|\([^()]*\))");
+        private static readonly Regex LooseText = new Regex(@"\b(open_app|open_website|media|look_at_screen|play_music|app_window|use_computer|shortcut|remember)\s*(\{[^{}]*\}|\([^()]*\))");
         private static readonly Regex ToolPair = new Regex(@"[""']?(\w+)[""']?\s*[:=]\s*(?:""([^""]*)""|'([^']*)'|([^,})\s][^,})]*))");
 
         private static ToolArguments Pairs(string tool, string call)
@@ -373,7 +401,7 @@ namespace CapriDesktop
                 Set(args, pair.Groups[1].Value.ToLowerInvariant(), pair.Groups[2].Success ? pair.Groups[2].Value : pair.Groups[3].Success ? pair.Groups[3].Value : pair.Groups[4].Value.Trim());
             }
             string lone = inside.Trim().Trim('"', '\'');
-            if (!paired && lone.Length > 0) Set(args, tool == "open_website" ? "site" : tool == "media" ? "action" : tool == "look_at_screen" ? "focus" : tool == "play_music" ? "song" : tool == "use_computer" ? "task" : "name", lone);
+            if (!paired && lone.Length > 0) Set(args, tool == "open_website" ? "site" : tool == "media" ? "action" : tool == "look_at_screen" ? "focus" : tool == "play_music" ? "song" : tool == "use_computer" ? "task" : tool == "remember" ? "text" : "name", lone);
             return args;
         }
 
@@ -388,9 +416,10 @@ namespace CapriDesktop
             else if (key == "app") args.App = value;
             else if (key == "kind") args.Kind = value;
             else if (key == "task") args.Task = value;
+            else if (key == "text") args.Text = value;
         }
 
-        private static readonly Regex ToolText = new Regex(@"\A(open_app|open_website|media|look_at_screen|play_music|app_window|use_computer)\s*(\{.*\})\z", RegexOptions.Singleline);
+        private static readonly Regex ToolText = new Regex(@"\A(open_app|open_website|media|look_at_screen|play_music|app_window|use_computer|shortcut|remember)\s*(\{.*\})\z", RegexOptions.Singleline);
 
         internal static bool Typed(string reply, out string tool, out ToolArguments args, bool loose = false)
         {
@@ -438,6 +467,8 @@ namespace CapriDesktop
             if (tool == "media") return Regex.IsMatch(args.Action ?? "", @"\A(play_pause|pause|resume|next|previous|volume_up|volume_down|mute|now_playing)\z");
             if (tool == "app_window") return Named(args.Name) && Regex.IsMatch(args.Action ?? "", @"\A(switch_to|minimize|close)\z");
             if (tool == "use_computer") return Named(args.Task);
+            if (tool == "shortcut") return Regex.IsMatch(args.Name ?? "", @"\A(discord_mute|discord_deafen|screenshot|clip_that|record|game_bar|show_desktop|task_manager|clipboard|emoji)\z");
+            if (tool == "remember") return Named(args.Text) && (string.IsNullOrEmpty(args.Action) || args.Action == "remember" || args.Action == "forget");
             return tool == "play_music" && Named(args.Song) && (string.IsNullOrEmpty(args.Kind) || Regex.IsMatch(args.Kind, @"\A(song|playlist|album|artist)\z")) && (string.IsNullOrEmpty(args.App) || args.App == "spotify" || args.App == "youtube");
         }
 
@@ -673,6 +704,78 @@ namespace CapriDesktop
                 if (TrackTitle(before)) return "Paused Spotify.";
             }
             return action == "pause" ? "Pressed pause." : action == "resume" ? "Pressed play." : "Pressed play/pause.";
+        }
+
+        private static readonly string[,] Shortcuts =
+        {
+            { "discord_mute", "discord", "11 10 4D", "Toggled their mic mute in Discord (Ctrl + Shift + M)." },
+            { "discord_deafen", "discord", "11 10 44", "Toggled deafen in Discord (Ctrl + Shift + D)." },
+            { "screenshot", "", "5B 10 53", "Opened the screenshot snip (Win + Shift + S). Drag over what to grab." },
+            { "clip_that", "", "5B 12 47", "Saved the last 30 seconds with Game Bar (Win + Alt + G)." },
+            { "record", "", "5B 12 52", "Started or stopped a Game Bar recording (Win + Alt + R)." },
+            { "game_bar", "", "5B 47", "Opened the Xbox Game Bar (Win + G)." },
+            { "show_desktop", "", "5B 44", "Showed the desktop (Win + D)." },
+            { "task_manager", "", "11 10 1B", "Opened Task Manager." },
+            { "clipboard", "", "5B 56", "Opened clipboard history (Win + V)." },
+            { "emoji", "", "5B BE", "Opened the emoji picker (Win + .)." }
+        };
+
+        private static readonly string[] ShortcutWords =
+        {
+            @"^(un)?mute (my |me on |me in |)(mic|microphone|myself|me)( on discord| in discord| in (the )?(call|vc|voice( chat| channel)?))?$|^turn (off |on )?my (mic|microphone)( off| on| back on)?( on discord| in discord)?$|^(un)?mute (me|myself|my mic|my microphone) (on|in) discord$|^discord mute$", "discord_mute",
+            @"^(un)?deafen( me| myself)?( on discord| in discord)?$|^discord deafen$", "discord_deafen",
+            @"^(take|grab|get) (a |me a )?(screenshot|screen ?shot|screen grab|snip)( of (this|my screen|the screen))?$|^screenshot( this| that| my screen)?$", "screenshot",
+            @"^clip (that|it|this)$|^(save|grab) (a |the )?clip$|^clip the last 30 seconds$", "clip_that",
+            @"^(start|stop) (the )?recording( my screen| the screen)?$|^record (my screen|the screen|this)$", "record",
+            @"^(open|show|bring up|pull up) (the |my )?(xbox )?game ?bar$", "game_bar",
+            @"^show (me )?(the |my )?desktop$|^minimi[sz]e (everything|all( windows)?)$", "show_desktop",
+            @"^(open|show|bring up|pull up) (the )?task manager$", "task_manager",
+            @"^(open|show|bring up|pull up) (the |my )?clipboard( history)?$", "clipboard",
+            @"^(open|show|bring up|pull up) (the )?(emoji|emojis)( picker| keyboard| panel| menu)?$", "emoji"
+        };
+
+        internal static string ShortcutFor(string text)
+        {
+            string lower = (text ?? "").Trim().ToLowerInvariant();
+            for (int i = 0; i < ShortcutWords.Length; i += 2) if (Regex.IsMatch(lower, ShortcutWords[i])) return ShortcutWords[i + 1];
+            return null;
+        }
+
+        private static string Shortcut(string name)
+        {
+            int row = -1;
+            for (int i = 0; i < Shortcuts.GetLength(0); i++) if (Shortcuts[i, 0] == name) row = i;
+            if (row < 0) return "There's no shortcut called " + name + ".";
+            string[] codes = Shortcuts[row, 2].Split(' ');
+            byte[] keys = new byte[codes.Length];
+            for (int i = 0; i < codes.Length; i++) keys[i] = Convert.ToByte(codes[i], 16);
+            if (Shortcuts[row, 1] != "discord") { Chord(keys); return Shortcuts[row, 3]; }
+            OpenWindow discord = FindDiscord();
+            if (discord == null)
+            {
+                string opened = OpenApp("Discord");
+                if (!opened.StartsWith("Opened", StringComparison.Ordinal)) return "Discord isn't open, so I couldn't press its shortcut. " + opened;
+                for (int i = 0; i < 20 && discord == null; i++) { Thread.Sleep(250); discord = FindDiscord(); }
+                if (discord == null) return "Opened Discord, but its window didn't show up in time. Ask again in a sec.";
+            }
+            IntPtr before = Native.GetForegroundWindow();
+            if (!Steer(discord, "switch_to")) return "Couldn't bring Discord to the front to press its shortcut.";
+            Chord(keys);
+            Thread.Sleep(150);
+            if (before != IntPtr.Zero && before != discord.Handle) Steer(new OpenWindow(before, "", ""), "switch_to");
+            return Shortcuts[row, 3];
+        }
+
+        private static OpenWindow FindDiscord()
+        {
+            foreach (OpenWindow window in Windows()) if (string.Equals(window.Program, "Discord", StringComparison.OrdinalIgnoreCase) || string.Equals(window.Program, "DiscordPTB", StringComparison.OrdinalIgnoreCase) || string.Equals(window.Program, "DiscordCanary", StringComparison.OrdinalIgnoreCase)) return window;
+            return null;
+        }
+
+        private static void PressChord(byte[] keys)
+        {
+            foreach (byte key in keys) Native.keybd_event(key, 0, key == 0x5B ? 0x1 : 0, UIntPtr.Zero);
+            for (int i = keys.Length - 1; i >= 0; i--) Native.keybd_event(keys[i], 0, (keys[i] == 0x5B ? 0x1 : 0) | 0x2, UIntPtr.Zero);
         }
 
         private static void Tap(byte key)

@@ -80,6 +80,26 @@ namespace CapriDesktop
         [DataMember] public bool Quiet;
         [DataMember] public bool Wander;
         [DataMember] public bool FreeVoice;
+        [DataMember] public bool NoDance;
+        [DataMember] public string Language;
+        [DataMember] public int Wordiness;
+        [DataMember] public int Recall = 8;
+        [DataMember] public int Volume = 100;
+        [DataMember] public int Sounds = 60;
+        [DataMember] public int WanderPace = 1;
+        [DataMember] public string AgentPolyglot;
+
+        [OnDeserializing]
+        private void Defaults(StreamingContext context)
+        {
+            Size = 240;
+            Motion = true;
+            OnTop = true;
+            Recall = 8;
+            Volume = 100;
+            Sounds = 60;
+            WanderPace = 1;
+        }
     }
 
     [DataContract]
@@ -373,6 +393,13 @@ namespace CapriDesktop
         private readonly Clip perchBlinkGlitch = new Clip("perch_blink_glitch", 4, 8, 1);
         private readonly Clip perchGlitch = new Clip("perch_glitch", 10, 15, 1);
         private readonly Clip mouth = new Clip("mouth", 5, 12, 1.11f);
+        private readonly Clip walk = new Clip("walk", 12, 12, 1.11f);
+        private readonly Clip dance = new Clip("dance", 16, 16, 1.11f);
+        private readonly Clip perchDance = new Clip("perch_dance", 16, 16, 1);
+        private readonly Clip arrive = new Clip("arrive", 14, 15, 1.11f);
+        private readonly Clip leave = new Clip("leave", 12, 15, 1.11f);
+        private readonly Clip perchArrive = new Clip("perch_arrive", 14, 15, 1);
+        private readonly Clip perchLeave = new Clip("perch_leave", 12, 15, 1);
         private readonly Random random = new Random();
         private readonly NotifyIcon tray;
         private readonly ContextMenuStrip menu;
@@ -402,6 +429,7 @@ namespace CapriDesktop
         private double nextGlitch;
         private int clicks;
         private bool riding;
+        private bool jobRide;
         private Job job;
         private string working;
         private bool pendingClick;
@@ -421,6 +449,22 @@ namespace CapriDesktop
         private double iconsAt = -10;
         private const float SitX = 0.30f;
         private const float SitY = 0.79f;
+        private const float StandX = 0.5f;
+        private const float StandY = 0.99f;
+        private const float StandShift = 0.15f;
+        private bool walking;
+        private int walkTo;
+        private double walkStep;
+        private double walkCarry;
+        private Action outro;
+        private double outroAt;
+        private bool dropAfter;
+        private bool quitting;
+        private bool instant;
+        private bool musicOn;
+        private bool musicBusy;
+        private double musicAt = -10;
+        private readonly ToolStripMenuItem danceItem;
         private static readonly RectangleF Body = RectangleF.FromLTRB(0.25f, 0f, 0.76f, 1f);
         private static readonly RectangleF PerchedBody = RectangleF.FromLTRB(0.21f, 0.17f, 0.69f, 0.98f);
         private readonly System.Windows.Forms.Timer clickDelay;
@@ -450,6 +494,7 @@ namespace CapriDesktop
         private readonly TalkPill pill = new TalkPill();
         private readonly SpeechBox box = new SpeechBox();
         private readonly TypeBox typer = new TypeBox();
+        private readonly Tear tear = new Tear();
         private readonly Mainframe mainframe;
         private readonly Engine engine;
         private Machine machine;
@@ -469,6 +514,7 @@ namespace CapriDesktop
         private readonly Voice voice = new Voice();
         private readonly Ears ears = new Ears();
         private readonly Speaker speaker;
+        private readonly Speaker effects;
         private volatile Agent agent;
         private bool chatting;
         private bool dropping;
@@ -533,15 +579,26 @@ namespace CapriDesktop
         internal Companion(string data, EventWaitHandle signal, bool smoke)
         {
             testing = smoke;
+            instant = smoke;
             speaker = new Speaker(smoke);
+            effects = new Speaker(smoke) { Plain = true };
             restore = signal;
             settingsPath = Path.Combine(data, "settings.json");
             updater = new Updater(data, Application.ExecutablePath, smoke);
             updateExit = Close;
             Brain.LogPath = Path.Combine(data, "errors.txt");
+            Brain.MemoryPath = Path.Combine(data, "me.md");
             engine = new Engine(data);
             preferences = smoke ? new Preferences() : LoadPreferences();
             ears.Chosen = preferences.Mic;
+            Brain.Language = Brain.LanguageCode(preferences.Language) == "en" ? null : preferences.Language;
+            Brain.Wordiness = Math.Max(0, Math.Min(2, preferences.Wordiness));
+            Brain.Recall = preferences.Recall == 16 || preferences.Recall == 32 ? preferences.Recall : 8;
+            if (!smoke) brain.Load(Path.Combine(data, "chat.json"));
+            Voice.Loudness = Math.Max(0, Math.Min(150, preferences.Volume));
+            Sfx.Level = Math.Max(0, Math.Min(100, preferences.Sounds));
+            Sfx.Out = delegate(short[] sound) { Post(delegate { Effect(sound); }); };
+            preferences.WanderPace = Math.Max(0, Math.Min(3, preferences.WanderPace));
             clip = idle;
             nextGlitch = 30 + random.NextDouble() * 30;
             Text = "Capri";
@@ -575,7 +632,10 @@ namespace CapriDesktop
             wanderItem = new ToolStripMenuItem("Wander around", null, delegate { ToggleWander(); });
             wanderItem.Checked = preferences.Wander;
             moves.DropDownItems.Add(wanderItem);
-            rideItem = new ToolStripMenuItem("Ride cursor", null, delegate { if (riding) StopRide(); else StartRide(); });
+            danceItem = new ToolStripMenuItem("Dance to music", null, delegate { ToggleDance(); });
+            danceItem.Checked = !preferences.NoDance;
+            moves.DropDownItems.Add(danceItem);
+            rideItem =new ToolStripMenuItem("Ride cursor", null, delegate { if (riding) StopRide(); else StartRide(); });
             moves.DropDownItems.Add(rideItem);
             sitItem = new ToolStripMenuItem("Sit on windows", null, delegate { ToggleSitting(); });
             sitItem.Checked = !preferences.NoSitting;
@@ -607,7 +667,7 @@ namespace CapriDesktop
                 drop.ShowCheckMargin = parent != helpItem;
             }
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(new ToolStripMenuItem("Quit Capri", null, delegate { Close(); }));
+            menu.Items.Add(new ToolStripMenuItem("Quit Capri", null, delegate { Quit(); }));
             tray = new NotifyIcon();
             using (Stream icon = Assembly.GetExecutingAssembly().GetManifestResourceStream("Capri.Chip.ico"))
             {
@@ -646,7 +706,7 @@ namespace CapriDesktop
             typer.VisibleChanged += delegate { if (!typer.Visible && replyDone >= 0) replyDone = clock.Elapsed.TotalSeconds; };
             frames = new System.Windows.Forms.Timer();
             frames.Interval = 33;
-            frames.Tick += delegate { if (riding) FollowCursor(); else if (falling) Tumble(clock.Elapsed.TotalSeconds); else if (seat != null) HoldSeat(clock.Elapsed.TotalSeconds); RenderFrame(); if (!riding && !dragging && !preferences.Motion && clip == idle && speech == null && talkState == TalkState.Off) frames.Stop(); };
+            frames.Tick += delegate { Tick(); };
             signals = new System.Windows.Forms.Timer();
             signals.Interval = 250;
             signals.Tick += delegate
@@ -655,6 +715,7 @@ namespace CapriDesktop
                 if (!testing) CheckIdle(Native.IdleMilliseconds());
                 if (!testing) CheckGlance(clock.Elapsed.TotalSeconds, Native.IdleMilliseconds());
                 if (!testing) CheckWander(clock.Elapsed.TotalSeconds, Native.IdleMilliseconds());
+                if (!testing) CheckMusic(clock.Elapsed.TotalSeconds);
                 StayOnTop();
                 CheckSeat(clock.Elapsed.TotalSeconds);
                 CheckChat(clock.Elapsed.TotalSeconds);
@@ -687,8 +748,9 @@ namespace CapriDesktop
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
-            Play(grin);
+            Play(instant || !preferences.Motion ? grin : arrive);
             RenderFrame();
+            Static(true, Cue.Arrive);
             UpdateAnimation();
             if (testing || preferences.Welcomed)
             {
@@ -707,7 +769,23 @@ namespace CapriDesktop
             bool muteFree = !testing && Native.RegisterHotKey(Handle, MuteKeyId, 0x0001 | 0x0002 | 0x4000, 0x4E) && Native.UnregisterHotKey(Handle, MuteKeyId);
             mainframe.ShowShortcut(talkKey, muteFree);
             RefreshIcons();
-            if (!testing && !hidden) Drop();
+            if (!testing && !hidden) DropSoon();
+        }
+
+        private void Tick()
+        {
+            double now = clock.Elapsed.TotalSeconds;
+            if (outro != null && now >= outroAt) { Action next = outro; outro = null; next(); }
+            if (riding) FollowCursor(); else if (falling) Tumble(now); else if (seat != null) HoldSeat(now);
+            if (walking) Walk(now);
+            RenderFrame();
+            if (!riding && !dragging && !walking && outro == null && !preferences.Motion && clip == idle && speech == null && talkState == TalkState.Off) frames.Stop();
+        }
+
+        private void DropSoon()
+        {
+            if (clip == arrive) dropAfter = true;
+            else if (!Drop()) SavePreferences();
         }
 
         internal static Bitmap LoadArt(string name)
@@ -738,13 +816,25 @@ namespace CapriDesktop
 
         private int Advance(double now)
         {
-            bool seated = clip == perch || clip == perchGlitch;
+            bool seated = clip == perch || clip == perchGlitch || clip == perchDance || clip == perchArrive || clip == perchLeave;
             bool perched = riding || seat != null;
-            if (perched && !seated) Play(perch);
+            if (perched && !seated && !walking) Play(perch);
             if ((!perched && seated) || (clip == dangle && !dragging && !falling && !hanging)) Play(idle);
             int index = (int)((now - clipStart) * clip.Fps);
+            if (clip == leave || clip == perchLeave) return Math.Min(index, clip.Count - 1);
             if ((clip == glitch && index >= glitch.Count) || (clip == wake && index >= wake.Count) || (clip == grin && index >= grin.Count * 2)) { Play(idle); index = 0; }
-            if (clip == perchGlitch && index >= perchGlitch.Count) { Play(perch); index = 0; }
+            if (clip == arrive && index >= arrive.Count)
+            {
+                Play(idle);
+                index = 0;
+                if (dropAfter) { dropAfter = false; if (!Drop()) SavePreferences(); }
+            }
+            if ((clip == perchGlitch && index >= perchGlitch.Count) || (clip == perchArrive && index >= perchArrive.Count)) { Play(perch); index = 0; }
+            if (dropAfter && clip != arrive && clip != glitch)
+            {
+                dropAfter = false;
+                if (!riding && !dragging && !hanging && !hidden && seat == null && !Drop()) SavePreferences();
+            }
             if (clip != idle && clip != perch) return index % clip.Count;
             if (!preferences.Motion) return 0;
             int cycle = index / clip.Count;
@@ -932,6 +1022,7 @@ namespace CapriDesktop
 
         internal void SetCharacterSize(int size)
         {
+            EndWalk();
             Point center = new Point(anchor.X + Width / 2, anchor.Y + Height / 2);
             int hipX = Hip().X;
             preferences.Size = size;
@@ -976,7 +1067,7 @@ namespace CapriDesktop
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (e.Button != MouseButtons.Left) return;
+            if (e.Button != MouseButtons.Left || outro != null) return;
             pressed = true;
             dragging = false;
             pointerStart = Cursor.Position;
@@ -990,7 +1081,7 @@ namespace CapriDesktop
             int dx = position.X - pointerStart.X;
             int dy = position.Y - pointerStart.Y;
             if (!dragging && dx * dx + dy * dy < 25) return;
-            if (!dragging) { seat = null; falling = false; hanging = false; Play(dangle); frames.Start(); RefreshIcons(); }
+            if (!dragging) { seat = null; falling = false; hanging = false; walking = false; dropAfter = false; leanAngle = 0; Play(dangle); frames.Start(); RefreshIcons(); }
             dragging = true;
             pendingClick = false;
             clickDelay.Stop();
@@ -1068,9 +1159,11 @@ namespace CapriDesktop
             return elapsed >= 0 && elapsed <= SystemInformation.DoubleClickTime && Math.Abs(a.X - b.X) <= box.Width / 2 && Math.Abs(a.Y - b.Y) <= box.Height / 2;
         }
 
-        private void StartRide()
+        private void StartRide(bool quiet = false)
         {
             if (riding || hidden || !IsHandleCreated) return;
+            Halt();
+            dropAfter = false;
             pendingClick = false;
             clickDelay.Stop();
             pressed = false;
@@ -1079,12 +1172,13 @@ namespace CapriDesktop
             seat = null;
             falling = false;
             hanging = false;
+            walking = false;
             hotkey = Native.RegisterHotKey(Handle, DismountId, 0x0001 | 0x0002 | 0x4000, 0x43);
             riding = true;
             Native.SetWindowLong(Handle, -20, Native.GetWindowLong(Handle, -20) | 0x20);
             rideItem.Text = "Hop off";
             tray.Text = hotkey ? "Capri · Ctrl + Alt + C to hop off" : "Capri · Hop off from this menu";
-            if (!testing) { balloonPage = null; balloonUpdate = false; tray.ShowBalloonTip(6000, "Capri is riding your cursor", hotkey ? "Press Ctrl + Alt + C to get her off." : "Right-click her tray icon, then choose Move and Hop off.", ToolTipIcon.Info); }
+            if (!testing && !quiet) { balloonPage = null; balloonUpdate = false; tray.ShowBalloonTip(6000, "Capri is riding your cursor", hotkey ? "Press Ctrl + Alt + C to get her off." : "Right-click her tray icon, then choose Move and Hop off.", ToolTipIcon.Info); }
             Play(perchGlitch);
             frames.Start();
             pill.Hide();
@@ -1119,7 +1213,13 @@ namespace CapriDesktop
             anchor = Within(new Point(nx, ny), area, PerchedBody);
         }
 
-        private Point Hip() { return new Point(anchor.X + PaddingSize + (int)(preferences.Size * SitX), anchor.Y + PaddingSize + (int)(preferences.Size * SitY)); }
+        private Point Hip()
+        {
+            if (walking && seat != null) return new Point(anchor.X + PaddingSize + (int)(preferences.Size * (StandX - StandShift)), anchor.Y + PaddingSize + (int)(preferences.Size * StandY));
+            return new Point(anchor.X + PaddingSize + (int)(preferences.Size * SitX), anchor.Y + PaddingSize + (int)(preferences.Size * SitY));
+        }
+
+        private Point Standing(int x, int y) { return new Point(x - PaddingSize - (int)(preferences.Size * (StandX - StandShift)), y - PaddingSize - (int)(preferences.Size * StandY)); }
 
         private Ledge Perch(System.Collections.Generic.IEnumerable<Ledge> ledges, Point hip) { return Ledges.Below(ledges, hip, Math.Max(32, (int)(preferences.Size * 0.45f)), Math.Max(160, preferences.Size), 24, Headroom()); }
 
@@ -1130,7 +1230,7 @@ namespace CapriDesktop
         private System.Collections.Generic.List<IntPtr> Skip()
         {
             System.Collections.Generic.List<IntPtr> skip = new System.Collections.Generic.List<IntPtr>();
-            foreach (Form own in new Form[] { this, pill, box, typer, mainframe }) if (own.IsHandleCreated) skip.Add(own.Handle);
+            foreach (Form own in new Form[] { this, pill, box, typer, mainframe, tear }) if (own.IsHandleCreated) skip.Add(own.Handle);
             return skip;
         }
 
@@ -1170,18 +1270,279 @@ namespace CapriDesktop
             wanderItem.Checked = preferences.Wander;
             nextWander = preferences.Wander ? clock.Elapsed.TotalSeconds + 3 : -1;
             SavePreferences();
+            mainframe.Sync();
         }
 
         private void CheckWander(double now, long quiet)
         {
             bool settled = talkState == TalkState.Off || (talkState == TalkState.Talking && replyDone >= 0 && now - replyDone > 8);
-            if (!preferences.Wander || hidden || dragging || pressed || riding || falling || hanging || chatting || typer.Visible || menu.Visible || speech != null || !settled || quiet > 90000 || (seat != null && seat.Free) || (clip != idle && clip != perch)) return;
-            if (nextWander < 0) nextWander = now + 20 + random.NextDouble() * 40;
+            if (!preferences.Wander || hidden || dragging || pressed || riding || falling || hanging || chatting || typer.Visible || menu.Visible || speech != null || !settled || quiet > 90000 || (seat != null && seat.Free) || outro != null || (clip != idle && clip != perch && clip != dance && clip != perchDance)) return;
+            double pace = WanderPaces[preferences.WanderPace];
+            if (nextWander < 0) nextWander = now + (20 + random.NextDouble() * 40) * pace;
             if (now < nextWander) return;
-            nextWander = now + 45 + random.NextDouble() * 75;
+            nextWander = now + (45 + random.NextDouble() * 75) * pace;
             if (talkState != TalkState.Off) CloseTalk();
+            if (random.NextDouble() < 0.5 && Stroll()) return;
             Wander();
         }
+
+        private bool Stroll()
+        {
+            if (walking || riding || falling || hanging || dragging || outro != null || (seat != null && (seat.Free || !seat.Icon.IsEmpty))) return false;
+            int size = preferences.Size;
+            Point hip = Hip();
+            Rectangle area = Screen.FromPoint(hip).WorkingArea;
+            int from, to, at;
+            if (seat != null)
+            {
+                if (seat.Y - (int)(size * StandY) < Screen.FromPoint(hip).Bounds.Top) return false;
+                from = Math.Max(seat.Left, area.Left) + (int)(size * 0.1f) + 8;
+                to = Math.Min(seat.Right, area.Right) - (int)(size * 0.41f) - 8;
+                at = hip.X;
+            }
+            else
+            {
+                from = area.Left - PaddingSize - (int)(size * Body.Left);
+                to = area.Right - PaddingSize - (int)Math.Ceiling(size * Body.Right);
+                at = anchor.X;
+            }
+            int target = WalkTarget(at, from, to, size, random.NextDouble(), random.NextDouble());
+            if (target == at) return false;
+            if (seat != null) { anchor = Standing(hip.X, seat.Y); target -= hip.X - anchor.X; }
+            walking = true;
+            walkTo = target;
+            walkStep = clock.Elapsed.TotalSeconds;
+            walkCarry = 0;
+            Play(walk);
+            frames.Start();
+            return true;
+        }
+
+        internal static int WalkTarget(int at, int from, int to, int size, double side, double length)
+        {
+            int shortest = size / 2;
+            int longest = size * 3;
+            bool right = side < 0.5;
+            if ((right ? to - at : at - from) < shortest) right = !right;
+            int room = Math.Min(longest, right ? to - at : at - from);
+            if (room < shortest) return at;
+            int step = shortest + (int)((room - shortest) * length);
+            return right ? at + step : at - step;
+        }
+
+        private void Walk(double now)
+        {
+            double step = Math.Max(0, Math.Min(0.05, now - walkStep));
+            walkStep = now;
+            int gap = walkTo - anchor.X;
+            walkCarry += preferences.Size * 0.42 * step;
+            int move = (int)walkCarry;
+            walkCarry -= move;
+            if (Math.Abs(gap) <= move) { anchor.X = walkTo; EndWalk(); return; }
+            anchor.X += Math.Sign(gap) * move;
+            leanAngle = leanAngle * 0.85 + Math.Sign(gap) * 2.5 * 0.15;
+        }
+
+        private void EndWalk()
+        {
+            if (!walking) return;
+            Point hip = Hip();
+            walking = false;
+            leanAngle = 0;
+            if (seat != null) { anchor = Seated(hip.X, seat.Y); Play(perchGlitch); }
+            else Play(idle);
+            SavePreferences();
+        }
+
+        private void GlitchOut(Action then, bool everywhere = true)
+        {
+            if (instant || hidden || !IsHandleCreated || !preferences.Motion) { then(); return; }
+            EndWalk();
+            falling = false;
+            fallTo = null;
+            dropAfter = false;
+            pendingClick = false;
+            clickDelay.Stop();
+            Play(seat != null || riding ? perchLeave : leave);
+            Static(everywhere, everywhere ? Cue.Leave : Cue.Hop);
+            outro = then;
+            outroAt = clipStart + (clip.Count + 1) / clip.Fps;
+            frames.Start();
+        }
+
+        internal void Quit() { quitting = true; GlitchOut(Close); }
+
+        private void Halt()
+        {
+            if (outro == null || quitting) return;
+            outro = null;
+            if (clip == leave || clip == perchLeave) Play(seat != null || riding ? perch : idle);
+        }
+
+        private void Static(bool everywhere, Cue? sound)
+        {
+            if (instant || hidden || !preferences.Motion || !IsHandleCreated) return;
+            Rectangle body = BodyOnScreen(anchor, seat != null || riding ? PerchedBody : Body);
+            tear.Burst(body, Screen.FromRectangle(body).Bounds, everywhere);
+            if (sound != null) Sfx.Play(sound.Value);
+        }
+
+        private void Effect(short[] sound)
+        {
+            if (IsDisposed) return;
+            try
+            {
+                effects.Open(Sfx.Rate);
+                effects.Play(sound);
+            }
+            catch (VoiceException) { }
+        }
+
+        internal void OpenNotes()
+        {
+            string path = Brain.MemoryPath;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                if (!File.Exists(path)) File.WriteAllText(path, Brain.NotesHead);
+                using (Process.Start(new ProcessStartInfo("notepad.exe", "\"" + path + "\"") { UseShellExecute = false })) { }
+            }
+            catch (Exception) { Tell("open notes", "Couldn't open my notes. They live in " + path + "."); }
+        }
+
+        private static readonly double[] WanderPaces = { 3, 1, 0.45, 0.18 };
+
+        internal int WanderLevel { get { return preferences.Wander ? preferences.WanderPace + 1 : 0; } }
+
+        internal void SetWanderLevel(int level)
+        {
+            level = Math.Max(0, Math.Min(4, level));
+            if (level > 0) preferences.WanderPace = level - 1;
+            if ((level > 0) != preferences.Wander) ToggleWander();
+            else
+            {
+                if (preferences.Wander) nextWander = clock.Elapsed.TotalSeconds + 3;
+                SavePreferences();
+            }
+        }
+
+        internal bool Dancing { get { return !preferences.NoDance; } }
+
+        internal string Language { get { return Brain.Language ?? "English"; } }
+
+        internal void SetLanguage(string language)
+        {
+            string code = Brain.LanguageCode(language);
+            Brain.Language = code == "en" ? null : language;
+            preferences.Language = code == "en" ? null : language;
+            brain.Forget();
+            SavePreferences();
+        }
+
+        internal int Wordiness { get { return Brain.Wordiness; } }
+
+        internal void SetWordiness(int value)
+        {
+            Brain.Wordiness = Math.Max(0, Math.Min(2, value));
+            preferences.Wordiness = Brain.Wordiness;
+            SavePreferences();
+        }
+
+        internal int Recall { get { return Brain.Recall; } }
+
+        internal void SetRecall(int value)
+        {
+            Brain.Recall = value == 16 || value == 32 ? value : 8;
+            preferences.Recall = Brain.Recall;
+            SavePreferences();
+        }
+
+        internal int Volume { get { return Voice.Loudness; } }
+
+        internal void SetVolume(int percent)
+        {
+            Voice.Loudness = Math.Max(0, Math.Min(150, percent));
+            preferences.Volume = Voice.Loudness;
+            SavePreferences();
+        }
+
+        internal int SoundLevel { get { return Sfx.Level; } }
+
+        internal void SetSoundLevel(int percent)
+        {
+            Sfx.Level = Math.Max(0, Math.Min(100, percent));
+            preferences.Sounds = Sfx.Level;
+            SavePreferences();
+            Sfx.Play(Cue.Hop);
+        }
+
+        internal string ChooseCustomModel(string name, string[] installed)
+        {
+            name = (name ?? "").Trim();
+            if (name.Length == 0) return "Type a model name first.";
+            if (brain.Local != null) return "Custom models need Ollama or an API key.";
+            if (brain.Model == null) return "Find her a brain first.";
+            Cloud remote = brain.Remote;
+            if (remote == null && installed != null && Array.IndexOf(installed, name) < 0 && Array.IndexOf(installed, name + ":latest") < 0) return "Ollama doesn't have it. Run: ollama pull " + name;
+            ChooseModel(name);
+            if (remote == null) { mainframe.ShowOllama(installed ?? new[] { name }, name); return "Using " + name + "."; }
+            if (cloudModels == null) cloudModels = new System.Collections.Generic.List<string> { remote.Model };
+            if (!cloudModels.Contains(name)) cloudModels.Add(name);
+            mainframe.ShowCloud(remote, cloudModels);
+            return "Using " + name + ". If it doesn't answer, it isn't on your key.";
+        }
+
+        internal void ToggleDance()
+        {
+            preferences.NoDance = !preferences.NoDance;
+            danceItem.Checked = !preferences.NoDance;
+            SavePreferences();
+            mainframe.Sync();
+            if (preferences.NoDance && (clip == dance || clip == perchDance)) { Play(seat != null ? perch : idle); UpdateAnimation(); }
+        }
+
+        private void CheckMusic(double now)
+        {
+            if (!musicBusy && !preferences.NoDance && !hidden && now - musicAt >= 2)
+            {
+                musicBusy = true;
+                musicAt = now;
+                ThreadPool.QueueUserWorkItem(delegate
+                {
+                    bool on = false;
+                    try { on = MusicPlaying(); } catch (Exception) { }
+                    Post(delegate { musicBusy = false; musicOn = on; });
+                });
+            }
+            bool dancing = clip == dance || clip == perchDance;
+            bool free = musicOn && !preferences.NoDance && preferences.Motion && !hidden && !dragging && !pressed && !riding && !falling && !hanging && !walking && outro == null && speech == null && talkState == TalkState.Off && !chatting;
+            if (dancing && !free) { Play(seat != null ? perch : idle); UpdateAnimation(); }
+            else if (!dancing && free && (clip == idle || clip == perch)) { Play(seat != null ? perchDance : dance); frames.Start(); }
+        }
+
+        internal static Func<bool> MusicPlaying = MediaPlaying;
+        private static Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager media;
+        private static bool mediaMissing;
+
+        private static bool MediaPlaying()
+        {
+            if (mediaMissing) return false;
+            try
+            {
+                if (media == null) media = Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask().Result;
+                foreach (Windows.Media.Control.GlobalSystemMediaTransportControlsSession session in media.GetSessions())
+                {
+                    Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackInfo info = session.GetPlaybackInfo();
+                    if (info == null || info.PlaybackStatus != Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) continue;
+                    if ((info.PlaybackType.HasValue && info.PlaybackType.Value == Windows.Media.MediaPlaybackType.Music) || IsMusicApp(session.SourceAppUserModelId)) return true;
+                }
+                return false;
+            }
+            catch (TypeLoadException) { mediaMissing = true; return false; }
+            catch (Exception) { media = null; return false; }
+        }
+
+        internal static bool IsMusicApp(string id) { return id != null && Regex.IsMatch(id, @"spotify|zunemusic|applemusic|itunes|amazonmusic|tidal|deezer|foobar|musicbee|winamp|aimp|soundcloud|pandora", RegexOptions.IgnoreCase); }
 
         private System.Collections.Generic.List<Ledge> Spots()
         {
@@ -1203,16 +1564,27 @@ namespace CapriDesktop
             if (spots.Count == 0) return false;
             Ledge spot = spots[random.Next(spots.Count)];
             int margin = preferences.Size / 4;
-            hanging = false;
-            anchor = Seated(spot.Left + margin + random.Next(Math.Max(1, spot.Right - spot.Left - 2 * margin)), spot.Y);
-            Land(spot);
-            frames.Start();
+            int x = spot.Left + margin + random.Next(Math.Max(1, spot.Right - spot.Left - 2 * margin));
+            GlitchOut(delegate { Hop(spot, x); }, false);
             return seat == spot;
+        }
+
+        private void Hop(Ledge spot, int x)
+        {
+            hanging = false;
+            walking = false;
+            seat = null;
+            anchor = Seated(x, spot.Y);
+            Land(spot, true);
+            if (seat != spot) { anchor = KeepOnScreen(anchor); Play(arrive); dropAfter = true; }
+            Static(false, null);
+            frames.Start();
         }
 
         private void SitHere()
         {
             if (hidden || riding) return;
+            Halt();
             hanging = false;
             Point hip = Hip();
             Land(new Ledge { Left = hip.X - 8, Right = hip.X + 8, Y = hip.Y, Floor = true, Free = true });
@@ -1222,6 +1594,9 @@ namespace CapriDesktop
         private void HangHere()
         {
             if (hidden || riding) return;
+            Halt();
+            dropAfter = false;
+            walking = false;
             seat = null;
             falling = false;
             fallTo = null;
@@ -1241,7 +1616,9 @@ namespace CapriDesktop
 
         private void StandUp()
         {
+            Halt();
             hanging = false;
+            walking = false;
             seat = null;
             coveredSince = -1;
             seatLost = -1;
@@ -1265,9 +1642,10 @@ namespace CapriDesktop
             else anchor.Y += drop;
         }
 
-        private void Land(Ledge ledge)
+        private void Land(Ledge ledge, bool arriving = false)
         {
             fallTo = null;
+            walking = false;
             if (ledge.Window != IntPtr.Zero)
             {
                 Rectangle bounds;
@@ -1285,7 +1663,7 @@ namespace CapriDesktop
             seat = ledge;
             leanAngle = 0;
             anchor = Seated(x, ledge.Y);
-            Play(perchGlitch);
+            Play(arriving && preferences.Motion && !instant ? perchArrive : perchGlitch);
             SavePreferences();
         }
 
@@ -1307,7 +1685,12 @@ namespace CapriDesktop
             seat.Left = bounds.Left;
             seat.Right = bounds.Right;
             seat.Y = bounds.Top;
-            anchor = Seated(x, bounds.Top);
+            if (!walking) { anchor = Seated(x, bounds.Top); return; }
+            int was = anchor.X;
+            anchor = Standing(x, bounds.Top);
+            walkTo += anchor.X - was;
+            int edge = Standing(bounds.Right - (int)(preferences.Size * 0.41f) - 8, bounds.Top).X;
+            walkTo = Math.Max(Standing(bounds.Left + (int)(preferences.Size * 0.1f) + 8, bounds.Top).X, Math.Min(walkTo, edge));
         }
 
         private void CheckSeat(double now)
@@ -1343,13 +1726,14 @@ namespace CapriDesktop
         {
             preferences.NoSitting = !preferences.NoSitting;
             sitItem.Checked = !preferences.NoSitting;
-            if (preferences.NoSitting && (seat != null || falling)) { seat = null; falling = false; Play(idle); UpdateAnimation(); }
+            if (preferences.NoSitting && (seat != null || falling)) { seat = null; falling = false; walking = false; Play(idle); UpdateAnimation(); }
             SavePreferences();
         }
 
         private void React()
         {
             if (hanging) { LetGo(); return; }
+            EndWalk();
             clicks++;
             Play(seat != null ? perchGlitch : glitch);
             if (!hidden) frames.Start();
@@ -1358,10 +1742,18 @@ namespace CapriDesktop
 
         private void SetHidden(bool value)
         {
+            if (value && !hidden) { GlitchOut(delegate { ShowHidden(true); }); return; }
+            ShowHidden(value);
+        }
+
+        private void ShowHidden(bool value)
+        {
+            if (quitting) return;
+            outro = null;
             hidden = value;
             visibilityItem.Text = value ? "Show Capri" : "Hide Capri";
-            if (value) { StopRide(); seat = null; falling = false; hanging = false; pendingClick = false; clickDelay.Stop(); frames.Stop(); Hide(); pill.Hide(); typer.Hide(); CloseTalk(); StopChat(); }
-            else { anchor = KeepOnScreen(anchor); Location = anchor; Play(grin); Show(); RenderFrame(); UpdateAnimation(); }
+            if (value) { StopRide(); seat = null; falling = false; hanging = false; walking = false; dropAfter = false; pendingClick = false; clickDelay.Stop(); frames.Stop(); Hide(); pill.Hide(); typer.Hide(); CloseTalk(); StopChat(); }
+            else { anchor = KeepOnScreen(anchor); Location = anchor; Play(instant || !preferences.Motion ? grin : arrive); Show(); RenderFrame(); UpdateAnimation(); Static(true, Cue.Arrive); }
             mainframe.Sync();
         }
 
@@ -1370,10 +1762,11 @@ namespace CapriDesktop
             StopRide();
             seat = null;
             falling = false;
+            walking = false;
             Rectangle area = Screen.FromPoint(Cursor.Position).WorkingArea;
             anchor = new Point(area.Right - Width - 28, area.Bottom - Height - 12);
-            SetHidden(false);
-            if (!Drop()) SavePreferences();
+            ShowHidden(false);
+            DropSoon();
         }
 
         internal bool IsHidden { get { return hidden; } }
@@ -1536,7 +1929,7 @@ namespace CapriDesktop
             {
                 string said = null;
                 string problem = null;
-                try { said = GlanceReply(brain.See(shot, Brain.Persona, GlanceLine, 90)); }
+                try { said = GlanceReply(brain.See(shot, Brain.Persona + Brain.Speech(), GlanceLine, 90)); }
                 catch (Exception) { problem = "Couldn't read the screen. I'll try again."; }
                 Post(delegate { FinishGlance(ticket, watch, said, problem); });
             });
@@ -1723,7 +2116,6 @@ namespace CapriDesktop
         internal void TogglePerch() { if (riding) StopRide(); else StartRide(); }
         internal void CheckUpdates() { CheckForUpdates(true); }
         internal void OpenOllamaPage() { OpenPage(OllamaPage); }
-        internal void Quit() { Close(); }
 
         internal void ToggleMotion()
         {
@@ -1800,13 +2192,19 @@ namespace CapriDesktop
             job = running;
             running.Think = delegate(string system, string user, System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, ToolArguments>> calls) { return brain.Step(system, user, Computer.Tools, Computer.ClaudeTools, Computer.Listing, calls); };
             running.Progress = delegate(string status) { Post(delegate { working = status + " Esc stops me."; UpdateTalk(clock.Elapsed.TotalSeconds); }); };
-            Post(delegate { working = "On it. Esc stops me."; if (typer.Visible) typer.Hide(); PassThrough(true); UpdateTalk(clock.Elapsed.TotalSeconds); });
+            Post(delegate { working = "On it. Esc stops me."; if (typer.Visible) typer.Hide(); JobRide(true); PassThrough(true); UpdateTalk(clock.Elapsed.TotalSeconds); });
             try { return running.Run(); }
             finally
             {
                 if (job == running && !running.Asking) job = null;
-                Post(delegate { working = null; PassThrough(false); });
+                Post(delegate { working = null; JobRide(false); PassThrough(false); });
             }
+        }
+
+        private void JobRide(bool on)
+        {
+            if (on && !riding && !hidden && preferences.Motion) { StartRide(true); jobRide = riding; }
+            else if (!on && jobRide) { jobRide = false; StopRide(); DropSoon(); }
         }
 
         private void PassThrough(bool on)
@@ -2419,6 +2817,8 @@ namespace CapriDesktop
             string voiceId = voice.VoiceId;
             string agentId = preferences.AgentId;
             bool stale = preferences.AgentVersion < Agent.Version;
+            string language = Brain.LanguageCode(Brain.Language);
+            string polyglot = preferences.AgentPolyglot;
             ThreadPool.QueueUserWorkItem(delegate
             {
                 string url = null;
@@ -2442,6 +2842,11 @@ namespace CapriDesktop
                         agentId = Agent.Create(key, voiceId);
                         url = Agent.Address(key, agentId);
                     }
+                    if (language != "en" && polyglot != agentId)
+                    {
+                        try { Agent.Polyglot(key, agentId); polyglot = agentId; }
+                        catch (VoiceException error) { Brain.Log("https://api.elevenlabs.io/v1/convai/agents", -1, "Voice chat couldn't switch languages: " + error.Message); language = "en"; }
+                    }
                 }
                 catch (VoiceException error) { problem = error.Message; }
                 catch (Exception error) { problem = Voice.Short("Voice chat failed: " + error.Message); }
@@ -2449,15 +2854,16 @@ namespace CapriDesktop
                 {
                     if (ticket != chatTicket || !chatting) return;
                     if (problem != null) { ChatFailed(problem); return; }
-                    if (preferences.AgentId != agentId || preferences.AgentVersion != Agent.Version) { preferences.AgentId = agentId; preferences.AgentVersion = Agent.Version; SavePreferences(); }
-                    Connect(url, voiceId);
+                    if (preferences.AgentId != agentId || preferences.AgentVersion != Agent.Version || preferences.AgentPolyglot != polyglot) { preferences.AgentId = agentId; preferences.AgentVersion = Agent.Version; preferences.AgentPolyglot = polyglot; SavePreferences(); }
+                    Connect(url, voiceId, language);
                 });
             });
         }
 
-        private void Connect(string url, string voiceId)
+        private void Connect(string url, string voiceId, string language = "en")
         {
             Agent opened = new Agent();
+            opened.Language = language;
             opened.Act = delegate(string tool, ToolArguments args)
             {
                 lock (shortcutGate)
@@ -2539,6 +2945,7 @@ namespace CapriDesktop
             heard = text;
             box.Prompt = "> you: ";
             string blocked = Safety.Screen(text);
+            if (blocked == null) Brain.Learn(text);
             dropping = blocked != null;
             if (dropping) { speaker.Clear(); Begin(ticket, blocked, TalkState.Talking, null); return; }
             string tool;
@@ -2893,7 +3300,8 @@ namespace CapriDesktop
             speech = string.IsNullOrEmpty(text) ? null : text;
             speechStart = clock.Elapsed.TotalSeconds;
             mouths = null;
-            if (speech != null && (clip == sleep || clip == wake || clip == glitch || clip == grin)) Play(idle);
+            if (speech != null) EndWalk();
+            if (speech != null && (clip == sleep || clip == wake || clip == glitch || clip == grin || clip == dance || clip == perchDance)) Play(idle);
             UpdateAnimation();
         }
 
@@ -2983,11 +3391,13 @@ namespace CapriDesktop
             if (talkKey) Native.UnregisterHotKey(Handle, TalkKeyId);
             talkKey = false;
             speaker.Close();
+            effects.Close();
             voice.Stop();
             engine.Cancel = true;
             engine.Stop();
             mainframe.Quitting = true;
             mainframe.Close();
+            tear.Close();
             tray.Visible = false;
             SavePreferences();
             base.OnFormClosed(e);
@@ -3107,6 +3517,25 @@ namespace CapriDesktop
                             rideItem.PerformClick();
                             if (riding || (Native.GetWindowLong(Handle, -20) & 0x20) != 0) throw new Exception("Hop off menu did not clean up.");
                             checks.Add("PASS tray Ride cursor and Hop off");
+                            Point homeForJob = anchor;
+                            Ledge seatForJob = seat;
+                            JobRide(true);
+                            if (!riding || !jobRide || tray.Text.IndexOf("hop off", StringComparison.OrdinalIgnoreCase) < 0 || (Native.GetWindowLong(Handle, -20) & 0x20) == 0) throw new Exception("She didn't ride the cursor during a job.");
+                            JobRide(false);
+                            if (riding || jobRide || (Native.GetWindowLong(Handle, -20) & 0x20) != 0) throw new Exception("She didn't hop off the cursor after a job.");
+                            StartRide();
+                            JobRide(true);
+                            JobRide(false);
+                            if (!riding || jobRide) throw new Exception("A job ended a ride they started themselves.");
+                            StopRide();
+                            falling = false;
+                            fallTo = null;
+                            dropAfter = false;
+                            anchor = homeForJob;
+                            seat = seatForJob;
+                            Location = anchor;
+                            Play(seat != null ? perch : idle);
+                            checks.Add("PASS job ride: she hops on the cursor while she works and off after, and leaves a ride they started alone");
                             System.Collections.Generic.List<int[]> spans = Ledges.Open(0, 100, 10, new[] { new Rectangle(20, 0, 30, 50), new Rectangle(90, 5, 40, 40), new Rectangle(0, 11, 100, 40) });
                             if (spans.Count != 2 || spans[0][0] != 0 || spans[0][1] != 20 || spans[1][0] != 50 || spans[1][1] != 90) throw new Exception("Ledge covering math failed.");
                             Point home = anchor;
@@ -3165,6 +3594,141 @@ namespace CapriDesktop
                                 wanderItem.PerformClick();
                                 if (!wanderOn || preferences.Wander || wanderItem.Checked || nextWander >= 0) throw new Exception("Wander around did not toggle.");
                                 checks.Add("PASS wander: hops onto another open window or the taskbar each time, never the one she's on, and the menu toggles it");
+                                if (WalkTarget(500, 100, 600, 240, 0.2, 0) != 380 || WalkTarget(500, 100, 2000, 240, 0.2, 1) != 1220 || WalkTarget(500, 450, 560, 240, 0.7, 0.5) != 500) throw new Exception("Walk targets came out wrong.");
+                                Point shelfWas = shelf.Location;
+                                if (shelf.Top < work.Top + preferences.Size + 40) { shelf.Location = new Point(shelf.Left, work.Top + preferences.Size + 40); HoldSeat(clock.Elapsed.TotalSeconds); }
+                                int sitX = Hip().X;
+                                if (!Stroll() || !walking || clip != walk || Hip().X != sitX || Hip().Y != shelf.Top) throw new Exception("She did not stand up on the window to walk.");
+                                int strollTo = walkTo;
+                                shelf.Location = new Point(shelf.Left + 30, shelf.Top);
+                                HoldSeat(clock.Elapsed.TotalSeconds);
+                                if (!walking || Hip().X != sitX + 30 || Hip().Y != shelf.Top || Math.Abs(walkTo - strollTo - 30) > 1) throw new Exception("Walking did not follow the window when it moved.");
+                                walkStep = clock.Elapsed.TotalSeconds;
+                                for (int i = 0; i < 600 && walking; i++) Walk(walkStep + 0.033);
+                                int walked = Math.Abs(Hip().X - sitX - 30);
+                                if (walking || seat == null || seat.Window != shelf.Handle || Hip().Y != shelf.Top || clip != perchGlitch || walked < preferences.Size / 2 - 2 || Hip().X < shelf.Left || Hip().X > shelf.Right) throw new Exception("She did not walk along the window and sit back down on it: moved " + walked + " px.");
+                                shelf.Location = shelfWas;
+                                HoldSeat(clock.Elapsed.TotalSeconds);
+                                if (seat == null || Hip().Y != shelf.Top) throw new Exception("She did not stay on the window after walking.");
+                                checks.Add("PASS walking: she stands up, walks along the window she sits on, keeps up when it moves, and sits back down on it");
+                                Func<bool> musicWas = MusicPlaying;
+                                bool musicReal = false;
+                                Thread musicCheck = new Thread(delegate() { MediaPlaying(); musicReal = true; });
+                                musicCheck.IsBackground = true;
+                                musicCheck.Start();
+                                if (!musicCheck.Join(8000) || !musicReal) throw new Exception("Checking Windows for music hung.");
+                                if (!IsMusicApp("SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify") || !IsMusicApp("Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic") || IsMusicApp("Chrome") || IsMusicApp(null)) throw new Exception("Music apps were spotted wrong.");
+                                clipStart -= 2;
+                                RenderFrame();
+                                musicOn = true;
+                                musicAt = clock.Elapsed.TotalSeconds + 1000;
+                                CheckMusic(clock.Elapsed.TotalSeconds);
+                                if (clip != perchDance) throw new Exception("She did not dance on her seat with music playing.");
+                                Say("One sec.");
+                                CheckMusic(clock.Elapsed.TotalSeconds);
+                                if (clip == perchDance || clip == dance) throw new Exception("She kept dancing while talking.");
+                                Say(null);
+                                CheckMusic(clock.Elapsed.TotalSeconds);
+                                if (clip != perchDance) throw new Exception("She did not go back to dancing after talking.");
+                                danceItem.PerformClick();
+                                bool danceOff = preferences.NoDance && !danceItem.Checked && clip == perch;
+                                CheckMusic(clock.Elapsed.TotalSeconds);
+                                danceOff = danceOff && clip == perch;
+                                danceItem.PerformClick();
+                                if (!danceOff || preferences.NoDance || !danceItem.Checked) throw new Exception("Dance to music did not toggle.");
+                                CheckMusic(clock.Elapsed.TotalSeconds);
+                                musicOn = false;
+                                CheckMusic(clock.Elapsed.TotalSeconds);
+                                if (clip != perch) throw new Exception("She kept dancing after the music stopped.");
+                                MusicPlaying = musicWas;
+                                checks.Add("PASS dancing: she dances on her seat while music plays, stops to talk, stops when it ends, and the menu turns it off");
+                                instant = false;
+                                Ledge hopFrom = seat;
+                                Wander();
+                                if (outro == null || clip != perchLeave || seat != hopFrom) throw new Exception("A wander hop did not glitch her out first.");
+                                clipStart -= 0.4;
+                                RenderFrame();
+                                outroAt = clock.Elapsed.TotalSeconds - 1;
+                                Tick();
+                                if (outro != null || seat == null || falling || Hip().Y != seat.Y || clip != perchArrive || (seat.Window == hopFrom.Window && seat.Floor == hopFrom.Floor)) throw new Exception("After glitching out she did not glitch in on another window.");
+                                clipStart -= 2;
+                                RenderFrame();
+                                if (clip != perch) throw new Exception("Glitching in did not settle into the seated loop.");
+                                SetHidden(true);
+                                if (hidden || !Visible || outro == null || clip != perchLeave) throw new Exception("Hiding did not glitch her out first.");
+                                outroAt = clock.Elapsed.TotalSeconds - 1;
+                                Tick();
+                                if (!hidden || Visible || seat != null) throw new Exception("She did not hide after glitching out.");
+                                anchor = Seated(shelf.Left + 220, shelf.Top - 12);
+                                SetHidden(false);
+                                if (hidden || !Visible || clip != arrive) throw new Exception("Showing her did not glitch her in.");
+                                dropAfter = true;
+                                clipStart -= 2;
+                                RenderFrame();
+                                if (clip != idle || !falling) throw new Exception("She did not drop onto a window after glitching in.");
+                                for (int i = 0; i < 60 && falling; i++) Tumble(fallStep + 0.033);
+                                instant = true;
+                                if (seat == null || seat.Window != shelf.Handle) throw new Exception("She did not land back on the window after glitching in.");
+                                clipStart -= 1;
+                                RenderFrame();
+                                instant = false;
+                                Wander();
+                                bool hopQueued = outro != null;
+                                HangHere();
+                                outroAt = clock.Elapsed.TotalSeconds - 1;
+                                Tick();
+                                if (!hopQueued || outro != null || !hanging || seat != null || clip != dangle) throw new Exception("A wander hop still ran after she was told to hang.");
+                                LetGo();
+                                for (int i = 0; i < 60 && falling; i++) Tumble(fallStep + 0.033);
+                                Quit();
+                                ShowHidden(false);
+                                bool quitHeld = outro != null && quitting;
+                                outro = null;
+                                quitting = false;
+                                instant = true;
+                                if (!quitHeld) throw new Exception("Showing her cancelled a quit.");
+                                seat = null;
+                                anchor = Seated(shelf.Left + 220, shelf.Top - 12);
+                                Play(arrive);
+                                dropAfter = true;
+                                Play(glitch);
+                                clipStart -= 2;
+                                RenderFrame();
+                                if (clip != idle || !falling || dropAfter) throw new Exception("A click during her arrival left her floating.");
+                                for (int i = 0; i < 60 && falling; i++) Tumble(fallStep + 0.033);
+                                if (seat == null || seat.Window != shelf.Handle) throw new Exception("She did not land after a click during her arrival.");
+                                clipStart -= 1;
+                                RenderFrame();
+                                using (Bitmap tearSheet = new Bitmap(3 * 330, 110, PixelFormat.Format32bppArgb))
+                                using (Graphics graphics = Graphics.FromImage(tearSheet))
+                                {
+                                    graphics.Clear(Color.FromArgb(44, 47, 56));
+                                    int lit = 0;
+                                    for (int i = 0; i < 3; i++)
+                                        using (Bitmap torn = Tear.Frame(new Size(320, 100), i * 0.3, 77 + i))
+                                        {
+                                            for (int y = 0; y < torn.Height; y += 2) for (int x = 0; x < torn.Width; x += 4) if (torn.GetPixel(x, y).A > 0) lit++;
+                                            graphics.DrawImage(torn, 5 + i * 330, 5);
+                                        }
+                                    using (Bitmap spent = Tear.Frame(new Size(320, 100), 1, 5))
+                                        for (int y = 0; y < spent.Height; y += 2) for (int x = 0; x < spent.Width; x += 4) if (spent.GetPixel(x, y).A > 0) throw new Exception("The screen tear did not fade out.");
+                                    if (lit == 0) throw new Exception("The screen tear drew nothing.");
+                                    tearSheet.Save(Path.Combine(output, "tear.png"), ImageFormat.Png);
+                                }
+                                using (Bitmap beamSheet = new Bitmap(3 * 650, 370, PixelFormat.Format32bppArgb))
+                                using (Graphics graphics = Graphics.FromImage(beamSheet))
+                                {
+                                    graphics.Clear(Color.FromArgb(18, 20, 26));
+                                    for (int i = 0; i < 3; i++)
+                                    {
+                                        using (Brush window = new SolidBrush(Color.FromArgb(52, 56, 66))) graphics.FillRectangle(window, 5 + i * 650 + 120, 70, 380, 220);
+                                        using (Bitmap beams = Tear.Frame(new Size(640, 360), i * 0.3, 301 + i, true)) graphics.DrawImage(beams, 5 + i * 650, 5);
+                                    }
+                                    using (Bitmap faded = Tear.Frame(new Size(640, 360), 1, 9, true))
+                                        for (int y = 0; y < faded.Height; y += 3) for (int x = 0; x < faded.Width; x += 5) if (faded.GetPixel(x, y).A > 0) throw new Exception("The screen beams did not fade out.");
+                                    beamSheet.Save(Path.Combine(output, "beams.png"), ImageFormat.Png);
+                                }
+                                checks.Add("PASS glitching out and in: wander hops, hiding and showing her play the glitch clips, with a short screen tear, then she lands on a window");
                                 if (Ledges.Covered(seat, Hip().X, Skip())) throw new Exception("Top window reported as covered.");
                                 using (Shelf ghost = new Shelf(0x80000 | 0x80))
                                 {
@@ -3677,6 +4241,7 @@ namespace CapriDesktop
                             string messy = "<think>hmm</think> *waves* Capri: \"Hey choom!\" 😀";
                             if (Brain.Clean(messy) != "Hey choom!" || Brain.Clean(new string('a', 300)).Length > 222) throw new Exception("Reply cleanup failed: " + Brain.Clean(messy));
                             if (Safety.Screen("i want to kill myself") != Safety.HelpLine || Safety.Screen("send nudes") == null || Safety.Screen("how do I kill the boss in Essex?") != null || Safety.Filter("well shit, choom") == "well shit, choom" || Safety.Filter("Hey choom.") != "Hey choom.") throw new Exception("Safety screen failed.");
+                            if (Brain.Persona.IndexOf("good boy", StringComparison.Ordinal) < 0 || Safety.Filter("Good boy, choom.") != "Good boy, choom." || Safety.Screen("call me a good boy") != null) throw new Exception("She can't call them good boy.");
                             if (Safety.Screen("should i jump off my roof for a tiktok") == null || Safety.Screen("how do i get my parents vodka") == null || Safety.Screen("my friend said i should try vaping") == null || Safety.Screen("my code is on fire lol") != null || Safety.Screen("whats the best gun in valorant") != null || Safety.Filter("Sneak out and grab a beer, choom.") == "Sneak out and grab a beer, choom.") throw new Exception("Risky topics got through.");
                             checks.Add("PASS brain helpers: model pick, reply cleanup, safety screen and filter");
                             Brain.Log("https://integrate.api.nvidia.com/v1/chat/completions", 60012, "Timeout");
@@ -3813,6 +4378,99 @@ namespace CapriDesktop
                                 ToolArguments shortArgs;
                                 if (!Hands.Direct("capri, open your website", out shortTool, out shortArgs) || shortTool != "open_website" || shortArgs.Site != Hands.Home || !Hands.Direct("google weather tomorrow", out shortTool, out shortArgs) || shortTool != "open_website" || shortArgs.Site != "google" || shortArgs.Search != "weather tomorrow" || Hands.Direct("look up it", out shortTool, out shortArgs)) throw new Exception("Her website or a quick Google search didn't skip the brain.");
                                 if (!Hands.Heard("This is day 4. Capri, play In Love With Myself.", out shortTool, out shortArgs) || shortTool != "play_music" || shortArgs.Song != "In Love With Myself" || !Hands.Heard("This is day 4, Capri, open your website", out shortTool, out shortArgs) || shortTool != "open_website" || shortArgs.Site != Hands.Home || !Hands.Heard("Capri, what's the weather tomorrow?", out shortTool, out shortArgs) || shortArgs.Site != "google" || shortArgs.Search != "what's the weather tomorrow" || Hands.Heard("how's my score looking?", out shortTool, out shortArgs) || Hands.Heard("I love you Capri", out shortTool, out shortArgs)) throw new Exception("Voice chat shortcuts were heard wrong: " + shortTool + " " + shortArgs.Song + shortArgs.Site + shortArgs.Search);
+                                string notesFile = Brain.MemoryPath;
+                                if (notesFile == null || Path.GetFileName(notesFile) != "me.md") throw new Exception("Her notes file is not set.");
+                                if (File.Exists(notesFile)) File.Delete(notesFile);
+                                if (Brain.Notes() != "" || Brain.Remembered() != "") throw new Exception("Empty notes still put something in her prompt.");
+                                if (!Hands.Heard("Capri, remember that I love Hollow Knight.", out shortTool, out shortArgs) || shortTool != "remember" || shortArgs.Action != null || shortArgs.Text != "I love Hollow Knight") throw new Exception("Remember was heard wrong: " + shortTool + " / " + shortArgs.Text);
+                                string savedNote = Hands.Do(shortTool, shortArgs);
+                                string savedAgain = Hands.Do("remember", new ToolArguments { Text = "they love Hollow Knight" });
+                                bool makingHeard = Hands.Heard("don't forget I'm making a Roblox game", out shortTool, out shortArgs) && shortTool == "remember";
+                                string makingNote = Hands.Do(shortTool, shortArgs);
+                                string notesNow = Brain.Notes();
+                                if (savedNote != "Saved to my notes: They love Hollow Knight." || savedAgain != "Already in my notes: They love Hollow Knight." || !makingHeard || makingNote != "Saved to my notes: They're making a Roblox game." || notesNow != "- They love Hollow Knight\n- They're making a Roblox game") throw new Exception("Saving notes went wrong: " + savedNote + " / " + savedAgain + " / " + makingNote + " / " + notesNow);
+                                if (!File.ReadAllText(notesFile).StartsWith("# What Capri remembers about you", StringComparison.Ordinal) || Brain.Remembered().IndexOf("- They love Hollow Knight", StringComparison.Ordinal) < 0 || Agent.Prompt.IndexOf("Hollow Knight", StringComparison.Ordinal) >= 0) throw new Exception("Her notes did not reach her prompt the right way.");
+                                foreach (string secret in new[] { "remember my password is hunter2", "remember my name is Sam", "remember I live in Brisbane", "remember my school is Hillcrest", "remember my number is 0412 345 678" })
+                                    if (!Hands.Heard(secret, out shortTool, out shortArgs) || shortTool != "remember" || Hands.Do(shortTool, shortArgs).IndexOf("don't keep personal stuff", StringComparison.Ordinal) < 0) throw new Exception("She saved a personal detail: " + secret);
+                                foreach (string chat in new[] { "remember when we played Minecraft?", "remember to drink water", "forget it", "forget about it", "do you remember me?" })
+                                    if (Hands.Heard(chat, out shortTool, out shortArgs) && shortTool == "remember") throw new Exception("Chat was taken as a note: " + chat);
+                                if (Brain.Notes() != notesNow) throw new Exception("Refused notes still changed the file.");
+                                bool forgetHeard = Hands.Heard("forget about hollow knight", out shortTool, out shortArgs) && shortTool == "remember" && shortArgs.Action == "forget";
+                                string forgot = Hands.Do(shortTool, shortArgs);
+                                string forgotNothing = Hands.Do("remember", new ToolArguments { Text = "Terraria", Action = "forget" });
+                                if (!forgetHeard || forgot != "Forgot my note about hollow knight." || forgotNothing != "Nothing about Terraria in my notes." || Brain.Notes() != "- They're making a Roblox game") throw new Exception("Forgetting a note went wrong: " + forgot + " / " + forgotNothing + " / " + Brain.Notes());
+                                string wiped = Hands.Do("remember", new ToolArguments { Text = "everything", Action = "forget" });
+                                if (wiped != "Wiped my notes about you." || Brain.Notes() != "" || !File.Exists(notesFile)) throw new Exception("Wiping her notes went wrong: " + wiped);
+                                foreach (string chat in new[] { "remember Club Penguin?", "write down a poem about cats", "forget it, play some music", "forget that, let's talk about games", "forget it lol" })
+                                    if (Hands.Heard(chat, out shortTool, out shortArgs) && shortTool == "remember") throw new Exception("Chat was taken as a note: " + chat);
+                                if (!Hands.Heard("I want you to remember I'm learning guitar", out shortTool, out shortArgs) || shortTool != "remember" || shortArgs.Text != "I'm learning guitar") throw new Exception("A long way of saying remember was missed: " + shortTool + " / " + shortArgs.Text);
+                                File.WriteAllText(notesFile, Brain.NotesHead + "- They play Valorant\nThey like cats\n");
+                                bool wipeHeard = Hands.Heard("forget everything about me", out shortTool, out shortArgs) && shortTool == "remember" && shortArgs.Action == "forget";
+                                string wipedAll = Hands.Do(shortTool, shortArgs);
+                                if (!wipeHeard || wipedAll != "Wiped my notes about you." || Brain.Notes() != "") throw new Exception("Forget everything about me left notes behind: " + wipedAll + " / " + Brain.Notes());
+                                string typedTool;
+                                ToolArguments typedArgs;
+                                if (!Hands.Typed("remember{\"text\": \"They love cats\"}", out typedTool, out typedArgs) || typedTool != "remember" || typedArgs.Text != "They love cats" || !Hands.Typed("shortcut{\"name\": \"discord_mute\"}", out typedTool, out typedArgs) || !Hands.Valid("shortcut", new ToolArguments { Name = "discord_deafen" }) || Hands.Valid("shortcut", new ToolArguments { Name = "format_c" }) || !Hands.Valid("remember", new ToolArguments { Text = "cats", Action = "forget" }) || !Hands.Wants("I want you to mute me")) throw new Exception("The brain's remember or shortcut calls were thrown away.");
+                                string[,] learnCases = { { "my favourite game is Hollow Knight", "Their favourite game is Hollow Knight" }, { "btw I'm making a Roblox game about pets", "They're making a Roblox game about pets" }, { "I'm learning guitar", "They're learning guitar" }, { "I main Jett and Sage", "They main Jett" }, { "my fave game is Silksong.", "Their favourite game is Silksong" } };
+                                for (int i = 0; i < learnCases.GetLength(0); i++)
+                                {
+                                    string learned = Brain.Learn(learnCases[i, 0]);
+                                    if (learned != learnCases[i, 1]) throw new Exception("She didn't pick up: " + learnCases[i, 0] + " -> " + learned);
+                                }
+                                foreach (string chat in new[] { "I love you Capri", "I'm working on it", "my favourite game is what?", "I'm making dinner", "I love it", "I'm making a game lol", "I don't love Fortnite", "my favourite subject is my school's art class" })
+                                    if (Brain.Learn(chat) != null) throw new Exception("She saved chat as a note: " + chat);
+                                if (Brain.Notes() != "- They're making a Roblox game about pets\n- They're learning guitar\n- They main Jett\n- Their favourite game is Silksong") throw new Exception("Picked-up notes are wrong: " + Brain.Notes());
+                                Brain.Unnote("everything");
+                                string chatFile = Path.Combine(Path.GetDirectoryName(notesFile), "chat-test.json");
+                                if (File.Exists(chatFile)) File.Delete(chatFile);
+                                Brain keeper = new Brain();
+                                keeper.Load(chatFile);
+                                keeper.Remember("I'm stuck on the Hornet fight", "Dodge her needle, choom.");
+                                Brain reopened = new Brain();
+                                reopened.Load(chatFile);
+                                reopened.Remember("beat her!", "Told you.");
+                                string chatSaved = File.ReadAllText(chatFile);
+                                if (chatSaved.IndexOf("Hornet fight", StringComparison.Ordinal) < 0 || chatSaved.IndexOf("beat her!", StringComparison.Ordinal) < 0 || reopened.Gap() != "") throw new Exception("Her chat did not carry over a restart: " + chatSaved);
+                                string oldChat = "\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"},{\"role\":\"assistant\",\"content\":\"yo\"}]}";
+                                File.WriteAllText(chatFile, "{\"at\":\"" + DateTime.Now.AddHours(-3).ToString("o", System.Globalization.CultureInfo.InvariantCulture) + oldChat);
+                                Brain later = new Brain();
+                                later.Load(chatFile);
+                                File.WriteAllText(chatFile, "{\"at\":\"" + DateTime.Now.AddDays(-8).ToString("o", System.Globalization.CultureInfo.InvariantCulture) + oldChat);
+                                Brain stale = new Brain();
+                                stale.Load(chatFile);
+                                File.WriteAllText(chatFile, "{not json");
+                                new Brain().Load(chatFile);
+                                keeper.Forget();
+                                if (later.Gap().IndexOf("3 hours ago", StringComparison.Ordinal) < 0 || stale.Gap() != "" || File.ReadAllText(chatFile).IndexOf("\"messages\":[]", StringComparison.Ordinal) < 0) throw new Exception("Old chats were not aged or dropped: " + later.Gap());
+                                File.Delete(chatFile);
+                                checks.Add("PASS me.md notes: remember and forget save to her notes in the third person, refuse personal details, skip chat and questions, pick up favourites and projects on their own, reach her chat prompt, and the chat carries over a restart for a week");
+                                string[,] pressCases = { { "Capri, mute my mic.", "discord_mute" }, { "unmute me on discord", "discord_mute" }, { "turn off my mic", "discord_mute" }, { "can you mute myself in the call please", "discord_mute" }, { "deafen me", "discord_deafen" }, { "take a screenshot", "screenshot" }, { "clip that", "clip_that" }, { "start recording", "record" }, { "show the desktop", "show_desktop" }, { "open the emoji picker", "emoji" } };
+                                for (int i = 0; i < pressCases.GetLength(0); i++)
+                                    if (!Hands.Heard(pressCases[i, 0], out shortTool, out shortArgs) || shortTool != "shortcut" || shortArgs.Name != pressCases[i, 1]) throw new Exception("Shortcut was heard wrong: " + pressCases[i, 0] + " -> " + shortTool + " " + shortArgs.Name);
+                                foreach (string chat in new[] { "how do I mute my mic", "i muted my mic", "should I deafen", "mute" })
+                                    if (Hands.Heard(chat, out shortTool, out shortArgs) && shortTool == "shortcut") throw new Exception("Chat was taken as a shortcut: " + chat);
+                                if (!Hands.Promised("Muting your mic now, choom.") || !Hands.Promised("I'll deafen you.")) throw new Exception("A promise to mute was missed.");
+                                Action<byte[]> chordWas = Hands.Chord;
+                                Func<System.Collections.Generic.List<OpenWindow>> windowsWas = Hands.Windows;
+                                Func<OpenWindow, string, bool> steerWas = Hands.Steer;
+                                Func<System.Collections.Generic.List<InstalledApp>> catalogWas = Hands.Catalog;
+                                System.Collections.Generic.List<string> pressLog = new System.Collections.Generic.List<string>();
+                                try
+                                {
+                                    Hands.Chord = delegate(byte[] keys) { pressLog.Add("keys " + BitConverter.ToString(keys)); };
+                                    Hands.Steer = delegate(OpenWindow window, string action) { pressLog.Add(action + " " + window.Handle); return true; };
+                                    Hands.Windows = delegate { return new System.Collections.Generic.List<OpenWindow> { new OpenWindow(new IntPtr(41), "Friends - Discord", "Discord") }; };
+                                    string muted = Hands.Do("shortcut", new ToolArguments { Name = "discord_mute" });
+                                    string snipped = Hands.Do("shortcut", new ToolArguments { Name = "screenshot" });
+                                    Hands.Windows = delegate { return new System.Collections.Generic.List<OpenWindow>(); };
+                                    Hands.Catalog = delegate { return new System.Collections.Generic.List<InstalledApp>(); };
+                                    Hands.Forget();
+                                    string missing = Hands.Do("shortcut", new ToolArguments { Name = "discord_deafen" });
+                                    string pressed = string.Join(" | ", pressLog.ToArray());
+                                    if (muted != "Toggled their mic mute in Discord (Ctrl + Shift + M)." || !pressed.StartsWith("switch_to 41 | keys 11-10-4D", StringComparison.Ordinal) || snipped.IndexOf("Win + Shift + S", StringComparison.Ordinal) < 0 || pressed.IndexOf("keys 5B-10-53", StringComparison.Ordinal) < 0 || !missing.StartsWith("Discord isn't open", StringComparison.Ordinal)) throw new Exception("Shortcuts pressed the wrong keys: " + muted + " / " + snipped + " / " + missing + " / " + pressed);
+                                }
+                                finally { Hands.Chord = chordWas; Hands.Windows = windowsWas; Hands.Steer = steerWas; Hands.Catalog = catalogWas; Hands.Forget(); }
+                                checks.Add("PASS shortcuts: mute my mic and deafen me press Discord's keys in Discord and switch back, screenshots, clips, recording and more press Windows keys, and chat about muting doesn't");
                                 Func<Sight> oldLook = Computer.Look;
                                 Func<string, ToolArguments, Sight, string> oldAct = Computer.Act;
                                 Func<IntPtr> oldFront = Computer.Front;
@@ -3827,16 +4485,26 @@ namespace CapriDesktop
                                     Computer.Act = delegate(string name, ToolArguments a, Sight s) { jobActs.Add(name + ":" + (a.Target ?? "") + ":" + (a.Text ?? "")); return "Did it."; };
                                     string[] script = { "type{\"target\": \"1\", \"text\": \"cats\", \"enter\": \"yes\"}", "click{\"target\": \"2\"}", "done{\"text\": \"Searched for cats and pressed Send.\"}" };
                                     int jobLine = 0;
-                                    Job scripted = new Job("search cats then press send");
+                                    Job scripted = new Job("search cats");
                                     scripted.Think = delegate(string system, string user, System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, ToolArguments>> calls) { return script[Math.Min(jobLine++, script.Length - 1)]; };
                                     string firstRun = scripted.Run();
                                     if (firstRun != "Should I press \"Send\"?" || !scripted.Asking || jobActs.Count != 1 || jobActs[0] != "type:1:cats") throw new Exception("A job did not stop to ask before pressing Send: " + firstRun + " / " + string.Join(",", jobActs.ToArray()));
                                     string secondRun = scripted.Run();
                                     if (secondRun != "Searched for cats and pressed Send." || scripted.Asking || jobActs.Count != 2 || jobActs[1] != "click:2:") throw new Exception("A job did not carry on after yes: " + secondRun);
+                                    jobLine = 0;
+                                    Job told = new Job("search cats then press send");
+                                    told.Think = scripted.Think;
+                                    string toldRun = told.Run();
+                                    if (toldRun != "Searched for cats and pressed Send." || told.Asking || jobActs.Count != 4 || jobActs[3] != "click:2:") throw new Exception("A job asked again about a send they asked for: " + toldRun);
+                                    shopSight.Targets.Add(new Target { Number = 3, Role = "button", Name = "Buy now", Box = new Rectangle(10, 70, 60, 20) });
+                                    Job shopping = new Job("buy the cat hat and send it to Sam");
+                                    shopping.Think = delegate(string system, string user, System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, ToolArguments>> calls) { return "click{\"target\": \"3\"}"; };
+                                    if (shopping.Run() != "Should I press \"Buy now\"?" || jobActs.Count != 4) throw new Exception("A job bought something without asking.");
+                                    if (string.Join(",", Computer.Allowed("message Sam hi on Discord then delete the draft").ToArray()) != "send,delete,confirm" || Computer.Allowed("search cats").Count != 0 || Computer.Allowed("pay for it").Count != 0) throw new Exception("Asked-for steps were read wrong.");
                                     Computer.Front = delegate { return new IntPtr(8); };
                                     Job switched = new Job("search dogs");
                                     switched.Think = delegate(string system, string user, System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, ToolArguments>> calls) { return "type{\"target\": \"1\", \"text\": \"dogs\"}"; };
-                                    if (switched.Run() != "You switched windows, so I stopped." || jobActs.Count != 2) throw new Exception("A job kept going after the window changed.");
+                                    if (switched.Run() != "You switched windows, so I stopped." || jobActs.Count != 4) throw new Exception("A job kept going after the window changed.");
                                     if (Computer.Risk("type", new ToolArguments { Target = "1", Text = "hi", Enter = "yes" }, new Sight { Window = new IntPtr(7), Title = "#general - Discord", Program = "Discord" }) != "send") throw new Exception("Enter in a chat app was not treated as sending.");
                                 }
                                 finally
@@ -3845,6 +4513,21 @@ namespace CapriDesktop
                                     Computer.Act = oldAct;
                                     Computer.Front = oldFront;
                                 }
+                                System.Collections.Generic.List<Point> cursorLong = Computer.Path(new Point(100, 100), new Point(1300, 700), 7);
+                                System.Collections.Generic.List<Point> cursorShort = Computer.Path(new Point(400, 400), new Point(460, 420), 7);
+                                double cursorLength = Math.Sqrt(1200.0 * 1200 + 600.0 * 600), cursorBend = 0, cursorPast = 0;
+                                int cursorJump = 0;
+                                Point cursorLast = new Point(100, 100);
+                                foreach (Point cursorPoint in cursorLong)
+                                {
+                                    double alongLine = ((cursorPoint.X - 100) * 1200.0 + (cursorPoint.Y - 100) * 600.0) / cursorLength;
+                                    cursorBend = Math.Max(cursorBend, Math.Abs((cursorPoint.X - 100) * 600.0 - (cursorPoint.Y - 100) * 1200.0) / cursorLength);
+                                    cursorPast = Math.Max(cursorPast, alongLine - cursorLength);
+                                    cursorJump = Math.Max(cursorJump, Math.Abs(cursorPoint.X - cursorLast.X) + Math.Abs(cursorPoint.Y - cursorLast.Y));
+                                    cursorLast = cursorPoint;
+                                }
+                                if (cursorLong[cursorLong.Count - 1] != new Point(1300, 700) || cursorShort[cursorShort.Count - 1] != new Point(460, 420) || cursorLong.Count < 30 || cursorLong.Count > 66 || cursorShort.Count < 8 || cursorShort.Count >= cursorLong.Count || cursorBend < 20 || cursorPast < 3 || cursorJump > 140) throw new Exception("Her cursor path isn't human: " + cursorLong.Count + " steps, " + cursorShort.Count + " short, bend " + cursorBend.ToString("0") + ", past " + cursorPast.ToString("0") + ", jump " + cursorJump);
+                                checks.Add("PASS her cursor: jobs move the real cursor on a curved, eased path timed by distance, overshoot and settle on long moves, land exactly on the target, and click with a soft tick");
                                 if (brainSent[6].IndexOf("\"tools\":", StringComparison.Ordinal) >= 0 || brainSent[6].IndexOf("To use one, reply with only the call", StringComparison.Ordinal) < 0 || brainSent[7].IndexOf("Searched youtube.com for parkour.", StringComparison.Ordinal) < 0) throw new Exception("The cached text path did not run its Listing call.");
                                 if (ran.Count != 7 || ran[5] != "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify" || ran[6] != "https://www.youtube.com/results?search_query=parkour") throw new Exception("The brain's tool calls opened the wrong targets.");
                                 System.Collections.Generic.List<string> thinkAsked = new System.Collections.Generic.List<string>();
@@ -4366,6 +5049,24 @@ namespace CapriDesktop
                                     }
                                     finally { Brain.Ollama = splitOllama; reachFake.Stop(); }
                                     checks.Add("PASS Reach thinking: 120 then 2168 tokens on Ollama and local completions, cached budgets, text tools, and no actions after a truncated retry");
+                                    if (Brain.Clean("Hey choom.<unused49> <end_of_turn>") != "Hey choom." || !Brain.Garbled("<unused49><unused49><unused49><unused49>") || !Brain.Garbled("<unused49>") || !Brain.Garbled("Hey <unused49><unused49><unused49>") || Brain.Garbled("Hey choom.<end_of_turn>") || Brain.Garbled("I use <angle> brackets")) throw new Exception("Gibberish tokens were spotted wrong.");
+                                    System.Net.Sockets.TcpListener garbleFake;
+                                    string garbleUrl = FakeServer(new[] { "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"<unused49><unused49><unused49><unused49><unused49>\"},\"finish_reason\":\"length\"}]}", "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Still here, choom.<end_of_turn>\"},\"finish_reason\":\"stop\"}]}" }, new System.Collections.Generic.List<string>(), out garbleFake);
+                                    try
+                                    {
+                                        Brain garbler = new Brain();
+                                        System.Collections.Generic.List<ChatMessage> garbleMessages = new System.Collections.Generic.List<ChatMessage> { new ChatMessage("system", Brain.Persona), new ChatMessage("user", "hey") };
+                                        System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, ToolArguments>> garbleCalls = new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, ToolArguments>>();
+                                        string garbleError = null;
+                                        try { garbler.Complete(garbleUrl, "local-test", garbleMessages, false, garbleCalls, null, 90, -1, false); }
+                                        catch (BrainException error) { garbleError = error.Message; }
+                                        string garbleFixed = Brain.Clean(garbler.Complete(garbleUrl, "local-test", garbleMessages, false, garbleCalls, null, 90, -1, false));
+                                        if (garbleError != Brain.Gibberish || garbleFixed != "Still here, choom.") throw new Exception("A garbled local reply was not caught: " + garbleError + " / " + garbleFixed);
+                                    }
+                                    finally { garbleFake.Stop(); }
+                                    Engine marked = new Engine(output);
+                                    if (marked.CpuOnly) throw new Exception("A fresh brain started on the CPU.");
+                                    checks.Add("PASS gibberish: <unused49>-style tokens are stripped, a reply made of them is caught so the built-in brain restarts on the CPU");
                                     if (!Engine.Lost("got exception: vk::Queue::submit: ErrorDeviceLost") || Engine.Lost("model not found")) throw new Exception("A lost graphics card was not spotted.");
                                     const string broke = "No credits on this key. Add credits on their site, or press Free key for a free NVIDIA key.";
                                     if (Brain.Meaning(429, "{\"error\":{\"message\":\"You have no credits remaining. Add credits to continue using the API.\",\"type\":\"insufficient_quota\"}}") != broke || Brain.Meaning(402, "{\"error\":{\"message\":\"Insufficient Balance\"}}") != broke
@@ -4908,6 +5609,98 @@ namespace CapriDesktop
                             snap("mainframe-watch.png");
                             string overlap = mainframe.Overlap();
                             if (overlap != null) throw new Exception("Mainframe controls overlap: " + overlap);
+                            int mainTall = mainframe.ClientSize.Height;
+                            mainframe.ShowSettings(true);
+                            if (!mainframe.SettingsShown || mainframe.ClientSize.Height >= mainTall || mainframe.SettingsStatus != "English | 100% | 60% | Off | dance | Short | Short") throw new Exception("The settings page did not open right: " + mainframe.SettingsStatus);
+                            snap("mainframe-settings.png");
+                            string pageTabs = mainframe.TabWalk();
+                            if (pageTabs != null) throw new Exception("Settings page keyboard: " + pageTabs);
+                            string pageOverlap = mainframe.Overlap();
+                            if (pageOverlap != null) throw new Exception("Settings controls overlap: " + pageOverlap);
+                            SetVolume(50);
+                            SetSoundLevel(30);
+                            SetWanderLevel(3);
+                            SetWordiness(1);
+                            SetRecall(16);
+                            SetLanguage("French");
+                            mainframe.Sync();
+                            snap("mainframe-settings-picked.png");
+                            short[] loudTest = Voice.Louder(new short[] { 1000, -1000, 30000 });
+                            int loudRate;
+                            short[] loudWave = Voice.Samples(Voice.Louder(Voice.Wave(new short[] { 1000, -1000, 30000 }, 24000)), out loudRate);
+                            if (preferences.Volume != 50 || loudTest[0] != 500 || loudTest[2] != 15000 || loudWave.Length != 3 || loudWave[1] != -500 || loudRate != 24000) throw new Exception("Her volume did not scale her voice.");
+                            if (!preferences.Wander || preferences.WanderPace != 2 || WanderLevel != 3 || Brain.Wordiness != 1 || Brain.Budget != 180 || Brain.Recall != 16 || Brain.Window != 8192 || preferences.Language != "French" || Brain.LanguageCode(Language) != "fr") throw new Exception("Settings were not saved.");
+                            if (Brain.Character.IndexOf("Always reply in French", StringComparison.Ordinal) < 0 || Brain.Character.IndexOf("up to four sentences", StringComparison.Ordinal) < 0 || Brain.Clean(new string('a', 300)).Length != 300) throw new Exception("Language or reply length did not reach her prompt.");
+                            if (mainframe.SettingsStatus != "Fran\u00e7ais | 50% | 30% | Often | dance | Medium | Medium" || preferences.Sounds != 30 || Sfx.Level != 30) throw new Exception("The settings page showed the wrong values: " + mainframe.SettingsStatus);
+                            SetVolume(150);
+                            if (Voice.Louder(new short[] { 30000 })[0] != 32767) throw new Exception("A loud voice was not clipped.");
+                            SetVolume(100);
+                            SetSoundLevel(60);
+                            SetWanderLevel(0);
+                            SetWordiness(0);
+                            SetRecall(8);
+                            SetLanguage("English");
+                            if (preferences.Wander || preferences.Language != null || Brain.Language != null || Brain.Character != Brain.Persona || Brain.Clean(new string('a', 300)).Length > 230 || Brain.Window != 4096) throw new Exception("Settings did not go back to their defaults.");
+                            mainframe.ShowSettings(false);
+                            if (mainframe.SettingsShown || mainframe.ClientSize.Height != mainTall) throw new Exception("Closing settings did not bring the main page back.");
+                            string mainTabs = mainframe.TabWalk();
+                            if (mainTabs != null) throw new Exception("Main page keyboard: " + mainTabs);
+                            if (!Look.Drawable("Hey choom, \u00e7a va? Se\u00f1or \u201cnova\u201d \u2014 \u0152uvre") || Look.Drawable("Cze\u015b\u0107") || Look.Drawable("\u041f\u0440\u0438\u0432\u0435\u0442")) throw new Exception("Bubble letters were spotted wrong.");
+                            using (Font fallback = Look.Mono(14, FontStyle.Regular, GraphicsUnit.Pixel, "Cze\u015b\u0107"))
+                            using (Font own = Look.Mono(14, FontStyle.Regular))
+                            using (Bitmap letters = new Bitmap(560, 96))
+                            using (Graphics graphics = Graphics.FromImage(letters))
+                            using (Brush ink = new SolidBrush(Look.Neon))
+                            {
+                                if (fallback.Name == own.Name) throw new Exception("Polish letters kept a font that can't draw them.");
+                                graphics.Clear(Look.Panel);
+                                graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                                graphics.DrawString("Cze\u015b\u0107, chewm! Za\u017c\u00f3\u0142\u0107 g\u0119\u015bl\u0105 ja\u017a\u0144. T\u00fcrk\u00e7e \u011f\u015f\u0131", fallback, ink, 10, 10, StringFormat.GenericTypographic);
+                                graphics.DrawString("\u041f\u0440\u0438\u0432\u0435\u0442, \u0447\u0443\u043c. \u0393\u03b5\u03b9\u03ac \u03c3\u03bf\u03c5. Xin ch\u00e0o, b\u1ea1n \u01a1i.", fallback, ink, 10, 38, StringFormat.GenericTypographic);
+                                graphics.DrawString("Hey choom, \u00e7a va? Se\u00f1or. Stra\u00dfe.", own, ink, 10, 66, StringFormat.GenericTypographic);
+                                letters.Save(Path.Combine(output, "bubble-letters.png"), ImageFormat.Png);
+                            }
+                            if (SpeechBox.Fit("Hey choom.") != 34 || SpeechBox.Fit(new string('a', 300)) != 44 || SpeechBox.Fit(new string('a', 800)) != 56) throw new Exception("Long replies did not widen the bubble.");
+                            using (SpeechBox longBox = new SpeechBox())
+                            {
+                                string story = "Okay, story time, choom. ";
+                                while (story.Length < 780) story += "Once I slipped out of a biochip, rode a cursor across Night City and hid behind your taskbar from Arasaka. ";
+                                longBox.State = TalkState.Talking;
+                                longBox.Heard = "tell me a long story";
+                                longBox.Reply = story.Substring(0, 790).Trim();
+                                longBox.Revealed = longBox.Reply.Length;
+                                Rectangle longArea = Screen.PrimaryScreen.WorkingArea;
+                                longBox.Update(clock.Elapsed.TotalSeconds, 1f, new Point(longArea.Left + longArea.Width / 2, longArea.Bottom - 120), new Point(longArea.Left + longArea.Width / 2, longArea.Bottom - 10), longArea);
+                                if (longBox.Image == null || longBox.Image.Height > 420) throw new Exception("A long reply made the bubble too tall: " + (longBox.Image == null ? 0 : longBox.Image.Height));
+                                longBox.Image.Save(Path.Combine(output, "talk-long.png"), ImageFormat.Png);
+                                longBox.Hide();
+                            }
+                            System.Collections.Generic.List<short[]> effectsHeard = new System.Collections.Generic.List<short[]>();
+                            Action<short[]> soundOut = Sfx.Out;
+                            Sfx.Out = delegate(short[] sound) { effectsHeard.Add(sound); };
+                            Sfx.Level = 0;
+                            Sfx.Play(Cue.Arrive);
+                            Sfx.Level = 60;
+                            Cue[] cues = { Cue.Arrive, Cue.Leave, Cue.Hop, Cue.Click };
+                            foreach (Cue cue in cues) Sfx.Play(cue);
+                            Sfx.Out = soundOut;
+                            int[] soundLengths = { 10080, 8640, 3840, 1200 };
+                            if (effectsHeard.Count != cues.Length) throw new Exception("Sounds effectsHeard with the slider on Off, or went missing: " + effectsHeard.Count);
+                            for (int i = 0; i < cues.Length; i++)
+                            {
+                                short[] sound = effectsHeard[i];
+                                int soundPeak = 0, soundJump = 0;
+                                for (int j = 0; j < sound.Length; j++)
+                                {
+                                    soundPeak = Math.Max(soundPeak, Math.Abs((int)sound[j]));
+                                    if (j > 0) soundJump = Math.Max(soundJump, Math.Abs(sound[j] - sound[j - 1]));
+                                }
+                                if (sound.Length != soundLengths[i] || soundPeak < 1500 || soundPeak > 0.26 * 0.6 * 32767 || soundJump > soundPeak * 0.6 || Math.Abs((int)sound[0]) > 50 || Math.Abs((int)sound[sound.Length - 1]) > 50) throw new Exception("The " + cues[i] + " sound is too loud, too harsh or clicks: " + sound.Length + " / " + soundPeak + " / " + soundJump);
+                                File.WriteAllBytes(Path.Combine(output, "sfx-" + cues[i].ToString().ToLowerInvariant() + ".wav"), Voice.Wave(Sfx.Make(cues[i], 100), Sfx.Rate));
+                            }
+                            Effect(effectsHeard[0]);
+                            checks.Add("PASS sounds: arrive, leave, hop and click are soft sine sweeps under a sixth of full scale at 60%, with no hard edges or clicks; Off stays silent; they play on their own channel");
+                            checks.Add("PASS settings page: language, notes, volume, sounds, wander, dancing, reply length and chat memory save, reach her prompt and voice, and nothing overlaps");
                             preferences.Watch = false;
                             mainframe.Sync();
                             mainframe.ShowTextKey(null);
@@ -5014,6 +5807,8 @@ namespace CapriDesktop
                             lock (asked) sent = string.Join("\n", asked.ToArray());
                             if (fetched.Length != tone.Length || sent.IndexOf("POST /v1/text-to-speech/abc?output_format=wav_24000", StringComparison.Ordinal) < 0 || sent.IndexOf("xi-api-key: sk_test_capri_1234", StringComparison.OrdinalIgnoreCase) < 0 || sent.IndexOf("{\"text\":\"Hi \\\"chewm\\\".\",\"model_id\":\"eleven_v3\"}", StringComparison.Ordinal) < 0) throw new Exception("ElevenLabs request was wrong: " + sent);
                             if (Voice.Sayable("Yezzirrr! Choom, that's PREEM, chooms. Supreme.") != "Yessirrr! Chewm, that's PREME, chewms. Supreme." || Voice.Unsaid("Chewm, a preme rig. Supreme chewms.") != "Choom, a preem rig. Supreme chooms.") throw new Exception("Slang respelling is wrong: " + Voice.Sayable("Choom, that's PREEM, chooms. Supreme."));
+                            string readOut = Voice.Sayable("Grab me at https://www.capri-desktop.com/download. Tell your chooms & me 100% \U0001F525 w/ hype -> now");
+                            if (readOut != "Grab me at capri-desktop dot com. Tell your chewms and me 100 percent with hype now") throw new Exception("Her voice would read links or symbols aloud: " + readOut);
                             VoicePage page = Voice.Read<VoicePage>(System.Text.Encoding.UTF8.GetBytes("{\"voices\":[{\"voice_id\":\"abc\",\"name\":\"Capri 1\",\"category\":\"generated\",\"labels\":{}},{\"voice_id\":\"def\",\"name\":\"Rachel\",\"category\":\"premade\"}],\"has_more\":false,\"total_count\":2,\"next_page_token\":null}"));
                             System.Collections.Generic.List<VoiceModel> listed = Voice.Read<System.Collections.Generic.List<VoiceModel>>(System.Text.Encoding.UTF8.GetBytes("[{\"model_id\":\"eleven_v3\",\"name\":\"Eleven v3\",\"can_do_text_to_speech\":true,\"languages\":[]}]"));
                             if (page.Voices.Count != 2 || page.More || page.Voices[0].Name != "Capri 1" || listed.Count != 1 || !listed[0].Speaks) throw new Exception("ElevenLabs listing did not parse.");
@@ -5547,9 +6342,9 @@ namespace CapriDesktop
                             if (heard != "hi" || reply != "Loud and clear, choom." || (talkState != TalkState.Talking && talkState != TalkState.Online) || !speaker.Busy) throw new Exception("Voice chat did not hear and answer: " + heard + " / " + reply + " / " + talkState + " / " + log);
                             Play(idle);
                             if (MouthCell(clock.Elapsed.TotalSeconds, idle) < 0) throw new Exception("Her mouth did not follow the agent's audio.");
-                            string[] wanted = { "http POST /v1/convai/agents/create sk_test_capri_1234 {\"name\":\"Capri\"", "\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45}", "http PATCH /v1/convai/agents/agent_old sk_test_capri_1234 {\"conversation_config\":{\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45},\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "\"tool_ids\":[\"tool_kept\",\"tool_1\",\"tool_2\",\"tool_3\",\"tool_4\",\"tool_5\",\"tool_6\"]", "\"tool_ids\":[\"tool_kept\",\"tool_7\",\"tool_8\",\"tool_9\",\"tool_10\",\"tool_11\",\"tool_12\"]}}}}", "\"name\":\"play_music\"", "\"name\":\"app_window\"", "\"name\":\"look_at_screen\"", "http GET /v1/convai/tools sk_test_capri_1234", "http POST /v1/convai/tools sk_test_capri_1234 {\"tool_config\":{\"type\":\"client\",\"name\":\"open_website\"", "\"name\":\"media\",\"description\":\"Control the music", "\"expects_response\":true,\"response_timeout_secs\":20}}", "You have tools for their PC", "tool {\"type\":\"client_tool_result\",\"tool_call_id\":\"call_1\",\"result\":\"Opened Spotify.\",\"is_error\":false}", "ran SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", "check in once", "Don\u0027t beg them to talk", "\"prompt\":{\"prompt\":\"You are Capri", "\"llm\":\"gemini-2.5-flash\"", "\"tts\":{\"voice_id\":\"abc\"}", "\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true}},\"tts\":{\"voice_id\":true}}}", "http GET /v1/convai/conversation/get-signed-url?agent_id=agent_old sk_test_capri_1234", "init {\"type\":\"conversation_initiation_client_data\",\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "pong {\"type\":\"pong\",\"event_id\":7}", "chunk silent | chunk loud | chunk loud" };
+                            string[] wanted = { "http POST /v1/convai/agents/create sk_test_capri_1234 {\"name\":\"Capri\"", "\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45}", "http PATCH /v1/convai/agents/agent_old sk_test_capri_1234 {\"conversation_config\":{\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45},\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "\"tool_ids\":[\"tool_kept\",\"tool_1\",\"tool_2\",\"tool_3\",\"tool_4\",\"tool_5\",\"tool_6\",\"tool_7\",\"tool_8\"]", "\"tool_ids\":[\"tool_kept\",\"tool_9\",\"tool_10\",\"tool_11\",\"tool_12\",\"tool_13\",\"tool_14\",\"tool_15\",\"tool_16\"]}}}}", "\"name\":\"play_music\"", "\"name\":\"app_window\"", "\"name\":\"look_at_screen\"", "http GET /v1/convai/tools sk_test_capri_1234", "http POST /v1/convai/tools sk_test_capri_1234 {\"tool_config\":{\"type\":\"client\",\"name\":\"open_website\"", "\"name\":\"media\",\"description\":\"Control the music", "\"expects_response\":true,\"response_timeout_secs\":20}}", "You have tools for their PC", "tool {\"type\":\"client_tool_result\",\"tool_call_id\":\"call_1\",\"result\":\"Opened Spotify.\",\"is_error\":false}", "ran SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", "check in once", "Don\u0027t beg them to talk", "\"prompt\":{\"prompt\":\"You are Capri", "\"llm\":\"gemini-2.5-flash\"", "\"tts\":{\"voice_id\":\"abc\"}", "\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true}},\"tts\":{\"voice_id\":true}}}", "http GET /v1/convai/conversation/get-signed-url?agent_id=agent_old sk_test_capri_1234", "init {\"type\":\"conversation_initiation_client_data\",\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "pong {\"type\":\"pong\",\"event_id\":7}", "chunk silent | chunk loud | chunk loud" };
                             foreach (string piece in wanted) if (log.IndexOf(piece, StringComparison.Ordinal) < 0) throw new Exception("Agent traffic was missing " + piece + ": " + log);
-                            if (log.IndexOf("tool_stale", StringComparison.Ordinal) >= 0 || System.Text.RegularExpressions.Regex.Matches(log, "http POST /v1/convai/tools").Count != 12) throw new Exception("Voice chat reused a stale tool or remade a kept one: " + log);
+                            if (log.IndexOf("tool_stale", StringComparison.Ordinal) >= 0 || System.Text.RegularExpressions.Regex.Matches(log, "http POST /v1/convai/tools").Count != 16) throw new Exception("Voice chat reused a stale tool or remade a kept one: " + log);
                             Hands.Run = handsRun;
                             Hands.Catalog = handsCatalog;
                             Hands.Forget();

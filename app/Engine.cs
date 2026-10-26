@@ -138,10 +138,24 @@ namespace CapriDesktop
         private int port;
         private bool serverEyes;
         private bool serverCpu;
+        private int serverWindow;
         internal volatile bool Cancel;
         internal volatile bool CpuOnly;
 
-        internal Engine(string data) { root = Path.Combine(data, "brain"); }
+        internal Engine(string data)
+        {
+            root = Path.Combine(data, "brain");
+            CpuOnly = File.Exists(CpuMark);
+        }
+
+        private string CpuMark { get { return Path.Combine(Folder, "cpu-only.txt"); } }
+
+        internal void KeepCpu()
+        {
+            try { if (Directory.Exists(Folder)) File.WriteAllText(CpuMark, "The graphics card garbled replies, so the brain runs on the CPU. Delete this file to try the graphics card again.\n"); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
 
         internal static Pick Fit(Machine machine)
         {
@@ -270,10 +284,10 @@ namespace CapriDesktop
 
         internal static int Threads(int processors) { return Math.Max(1, Math.Min(4, processors / 2)); }
 
-        internal ProcessStartInfo StartInfo(Pick pick, bool eyes, bool cpu, int number)
+        internal ProcessStartInfo StartInfo(Pick pick, bool eyes, bool cpu, int number, int window = 4096)
         {
             int threads = Threads(Environment.ProcessorCount);
-            ProcessStartInfo info = new ProcessStartInfo(Server, "-m \"" + ModelPath(pick) + "\"" + (eyes ? " --mmproj \"" + EyesPath(pick) + "\"" : "") + " --host 127.0.0.1 --port " + number + " -c 4096 -np 1 -a capri --jinja --reasoning off --no-webui --sleep-idle-seconds 900 --log-disable -t " + threads + " -tb " + threads + " -b 256 -ub 128 --poll 0 --poll-batch 0" + (cpu ? " --device none -ngl 0 --no-mmproj-offload" : ""));
+            ProcessStartInfo info = new ProcessStartInfo(Server, "-m \"" + ModelPath(pick) + "\"" + (eyes ? " --mmproj \"" + EyesPath(pick) + "\"" : "") + " --host 127.0.0.1 --port " + number + " -c " + window + " -np 1 -a capri --jinja --reasoning off --no-webui --sleep-idle-seconds 900 --log-disable -t " + threads + " -tb " + threads + " -b 256 -ub 128 --poll 0 --poll-batch 0" + (cpu ? " --device none -ngl 0 --no-mmproj-offload" : ""));
             info.UseShellExecute = false;
             info.CreateNoWindow = true;
             info.WorkingDirectory = Folder;
@@ -292,13 +306,15 @@ namespace CapriDesktop
             lock (gate)
             {
                 bool eyes = HasEyes(pick);
-                if (server != null && !server.HasExited && serverEyes == eyes && serverCpu == CpuOnly) return;
+                int window = Brain.Window;
+                if (server != null && !server.HasExited && serverEyes == eyes && serverCpu == CpuOnly && serverWindow == window) return;
                 if (server != null) Stop();
                 if (!File.Exists(Server) || !File.Exists(ModelPath(pick))) throw new BrainException("Brain not downloaded. Press Set up her brain.");
                 port = FreePort();
                 serverEyes = eyes;
                 serverCpu = CpuOnly;
-                server = Process.Start(StartInfo(pick, eyes, serverCpu, port));
+                serverWindow = window;
+                server = Process.Start(StartInfo(pick, eyes, serverCpu, port, window));
                 Lower(server);
                 Bind(server);
             }

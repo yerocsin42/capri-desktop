@@ -18,6 +18,15 @@ namespace CapriDesktop
         private static readonly int[] Gaps = { 10, 15, 30, 60, 90, 120, 180, 300, 600 };
         private static readonly string[] GapNames = { "10 s", "15 s", "30 s", "1 min", "1.5 min", "2 min", "3 min", "5 min", "10 min" };
         private const int SetupHeight = 118;
+        private const int PageTall = 556;
+        private const int Far = 30000;
+        private static readonly int[][] PageBars = { new[] { 58, 170 }, new[] { 184, 276 }, new[] { 286, 370 }, new[] { 380, 536 } };
+        private static readonly int[] Volumes = { 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 125, 150 };
+        private static readonly string[] VolumeNames = { "Mute", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%", "125%", "150%" };
+        private static readonly string[] SoundNames = { "Off", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%" };
+        private static readonly string[] WanderNames = { "Off", "Rarely", "Sometimes", "Often", "Restless" };
+        private static readonly string[] Lengths = { "Short", "Medium", "Long" };
+        private static readonly int[] Recalls = { 8, 16, 32 };
         private const int KeyRow = 72;
         internal const string KeyNote = "No key needed, she runs on your PC. Keys are for low-power PCs or if her brain won't run.";
         private static readonly int VoiceHeight = Companion.FreeChatOn ? 224 : 196;
@@ -68,6 +77,26 @@ namespace CapriDesktop
         private bool loaded;
         private bool syncing;
         internal bool Quitting;
+        private readonly Key more;
+        private readonly List<KeyValuePair<Control, int>> mainLeft = new List<KeyValuePair<Control, int>>();
+        private readonly List<KeyValuePair<Control, int>> pageLeft = new List<KeyValuePair<Control, int>>();
+        private readonly Dictionary<Control, bool> stops = new Dictionary<Control, bool>();
+        private bool paged;
+        private readonly Key languages;
+        private readonly ContextMenuStrip languageMenu;
+        private readonly Slider volume;
+        private readonly Label volumeName;
+        private readonly Slider sounds;
+        private readonly Label soundsName;
+        private readonly Slider wander;
+        private readonly Label wanderName;
+        private readonly Toggle dance;
+        private readonly Slider replies;
+        private readonly Label repliesName;
+        private readonly Slider recall;
+        private readonly Label recallName;
+        private readonly Entry custom;
+        private readonly Label customNote;
 
         internal Mainframe(Companion owner, Icon icon, string version)
         {
@@ -88,13 +117,15 @@ namespace CapriDesktop
             Label build = Caption("v" + version, 200, 20, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
             build.AutoSize = false;
             build.TextAlign = ContentAlignment.MiddleRight;
-            build.Bounds = new Rectangle(200, 20, 92, 22);
+            build.Bounds = new Rectangle(230, 20, 62, 22);
             Key minimize = Make("", 300, 20, 26, 22, delegate { WindowState = FormWindowState.Minimized; });
             minimize.Glyph = 1;
             minimize.AccessibleName = "Minimize";
             Key close = Make("", 330, 20, 26, 22, delegate { Close(); });
             close.Glyph = 2;
             close.AccessibleName = "Close";
+            more = Make("Settings", 152, 20, 72, 22, delegate { ShowSettings(!paged); });
+            int header = Controls.Count;
             Caption("BRAIN >", 28, 58, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
             brainName = Caption("", 28, 78, Look.Mono(10.5f, FontStyle.Bold, GraphicsUnit.Point), Look.Ink);
             brainNote = Caption("", 28, 100, Font, Look.Dim);
@@ -184,8 +215,127 @@ namespace CapriDesktop
             Key quit = Lower(Make("Quit Capri", 256, 392 + v, 100, 28, delegate { capri.Quit(); }));
             quit.Accent = Look.Red;
             updateNote = Lower(Caption("", 28, 430 + v, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim));
+            for (int i = header; i < Controls.Count; i++) mainLeft.Add(new KeyValuePair<Control, int>(Controls[i], Controls[i].Left));
+            int first = Controls.Count;
+            Caption("YOU >", 28, 58, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
+            Caption("Language", 28, 86, Font, Look.Dim);
+            languageMenu = Dropdown();
+            for (int i = 0; i < Brain.Languages.GetLength(0); i++)
+            {
+                string picked = Brain.Languages[i, 1];
+                ToolStripMenuItem item = Choice(Brain.Languages[i, 0], false, delegate { capri.SetLanguage(picked); Sync(); });
+                item.Tag = picked;
+                languageMenu.Items.Add(item);
+            }
+            languages = Make("English", 128, 80, 228, 28, delegate { languageMenu.Show(languages, new Point(0, languages.Height)); });
+            languages.Chevron = true;
+            languages.AccessibleName = "Her language";
+            Make("Open her notes", 28, 116, 160, 28, delegate { capri.OpenNotes(); });
+            Caption("me.md", 200, 122, Font, Look.Dim);
+            Caption("She keeps what you ask her to remember.", 28, 152, Look.Mono(8.5f, FontStyle.Italic, GraphicsUnit.Point), Look.Dim);
+            Caption("VOICE >", 28, 184, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
+            Caption("Volume", 28, 213, Font, Look.Dim);
+            volume = PageSlider(VolumeNames, 206, "Her voice volume");
+            volumeName = Caption("100%", 292, 213, Font, Look.Ink);
+            volume.Changed += delegate { if (syncing) return; volumeName.Text = VolumeNames[volume.Value]; capri.SetVolume(Volumes[volume.Value]); };
+            Caption("Sounds", 28, 249, Font, Look.Dim);
+            sounds = PageSlider(SoundNames, 242, "Sound effects volume");
+            soundsName = Caption("60%", 292, 249, Font, Look.Ink);
+            sounds.Changed += delegate { if (syncing) return; soundsName.Text = SoundNames[sounds.Value]; capri.SetSoundLevel(sounds.Value * 10); };
+            Caption("MOVES >", 28, 286, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
+            Caption("Wander", 28, 315, Font, Look.Dim);
+            wander = PageSlider(WanderNames, 308, "How much she wanders");
+            wanderName = Caption("Off", 292, 315, Font, Look.Ink);
+            wander.Changed += delegate { if (syncing) return; wanderName.Text = WanderNames[wander.Value]; capri.SetWanderLevel(wander.Value); };
+            dance = Check("Dance to music", 28, 344, 328, delegate { if (!syncing) capri.ToggleDance(); });
+            dance.Hint = "When songs play";
+            dance.HintFont = Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point);
+            Caption("BRAIN >", 28, 380, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
+            Caption("Replies", 28, 409, Font, Look.Dim);
+            replies = PageSlider(Lengths, 402, "Reply length");
+            repliesName = Caption("Short", 292, 409, Font, Look.Ink);
+            replies.Changed += delegate { if (syncing) return; repliesName.Text = Lengths[replies.Value]; capri.SetWordiness(replies.Value); };
+            Caption("Memory", 28, 445, Font, Look.Dim);
+            recall = PageSlider(Lengths, 438, "How much of the chat she keeps");
+            recallName = Caption("Short", 292, 445, Font, Look.Ink);
+            recall.Changed += delegate { if (syncing) return; recallName.Text = Lengths[recall.Value]; capri.SetRecall(Recalls[recall.Value]); };
+            custom = Input(28, 476, 244);
+            custom.Cue = "Custom model name";
+            custom.Box.AccessibleName = "Custom model name";
+            custom.Box.KeyDown += delegate(object sender, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; UseCustom(); } };
+            Make("Use", 280, 476, 76, 28, delegate { UseCustom(); });
+            customNote = Caption("Any Ollama model you've pulled, or a model id on your key.", 28, 512, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
+            customNote.MaximumSize = new Size(328, 0);
+            for (int i = first; i < Controls.Count; i++)
+            {
+                pageLeft.Add(new KeyValuePair<Control, int>(Controls[i], Controls[i].Left));
+                Controls[i].Left += Far;
+                Reachable(Controls[i], false);
+            }
             Searching();
             Sync();
+        }
+
+        private Slider PageSlider(string[] names, int y, string name)
+        {
+            Slider slider = new Slider(names);
+            slider.Bounds = new Rectangle(96, y, 188, 30);
+            slider.AccessibleName = name;
+            Controls.Add(slider);
+            return slider;
+        }
+
+        private void UseCustom()
+        {
+            customNote.Text = capri.ChooseCustomModel(custom.Box.Text, lastInstalled);
+        }
+
+        internal bool SettingsShown { get { return paged; } }
+
+        internal string SettingsStatus { get { return languages.Text + " | " + volumeName.Text + " | " + soundsName.Text + " | " + wanderName.Text + " | " + (dance.Checked ? "dance" : "-") + " | " + repliesName.Text + " | " + recallName.Text; } }
+
+        internal void ShowSettings(bool on)
+        {
+            paged = on;
+            more.Text = on ? "Back" : "Settings";
+            more.Invalidate();
+            foreach (KeyValuePair<Control, int> entry in mainLeft) { entry.Key.Left = Scaled(entry.Value) + (on ? Far : 0); Reachable(entry.Key, !on); }
+            foreach (KeyValuePair<Control, int> entry in pageLeft) { entry.Key.Left = Scaled(entry.Value) + (on ? 0 : Far); Reachable(entry.Key, on); }
+            if (Hidden(ActiveControl)) more.Focus();
+            if (on) Sync();
+            Arrange(expanded);
+        }
+
+        private void Reachable(Control control, bool on)
+        {
+            if (!stops.ContainsKey(control)) stops[control] = control.TabStop;
+            control.TabStop = on && stops[control];
+            foreach (Control child in control.Controls) Reachable(child, on);
+        }
+
+        private bool Hidden(Control control)
+        {
+            List<KeyValuePair<Control, int>> hidden = paged ? mainLeft : pageLeft;
+            for (Control top = control; top != null && top != this; top = top.Parent)
+                foreach (KeyValuePair<Control, int> entry in hidden) if (entry.Key == top) return true;
+            return false;
+        }
+
+        internal string TabWalk()
+        {
+            Control from = more;
+            int reached = 0;
+            for (int i = 0; i < 80; i++)
+            {
+                if (!SelectNextControl(from, true, true, true, true)) break;
+                Control at = ActiveControl;
+                if (at == null || at == from || at == more) break;
+                if (Hidden(at)) return "Tab reached a hidden " + (at.AccessibleName ?? at.Text);
+                reached++;
+                from = at;
+            }
+            more.Focus();
+            return reached == 0 ? "Tab reached nothing" : null;
         }
 
         private T Lower<T>(T control) where T : Control
@@ -234,6 +384,12 @@ namespace CapriDesktop
             using (GraphicsPath edge = Look.Plate(new RectangleF(s, s, Width - 2 * s - 1, Height - 2 * s - 1), 12 * s, -1, Height / 2f, 0, true))
             using (Pen cyan = new Pen(Look.Cyan, 2 * s))
                 graphics.DrawPath(cyan, edge);
+            if (paged)
+            {
+                using (Brush red = new SolidBrush(Look.Red))
+                    foreach (int[] bar in PageBars) graphics.FillRectangle(red, 13 * s, bar[0] * s, 3 * s, (bar[1] - bar[0]) * s);
+                return;
+            }
             int shift = (expanded ? SetupHeight : 0) + KeyRow;
             using (Brush red = new SolidBrush(Look.Red))
             {
@@ -288,7 +444,8 @@ namespace CapriDesktop
             brainNote.MaximumSize = new Size(Scaled(328), 0);
             voiceNote.MaximumSize = new Size(Scaled(328), 0);
             updateNote.MaximumSize = new Size(Scaled(328), 0);
-            ClientSize = new Size(Scaled(Wide), Scaled(Tall + shift));
+            customNote.MaximumSize = new Size(Scaled(328), 0);
+            ClientSize = new Size(Scaled(Wide), Scaled(paged ? PageTall : Tall + shift));
             Invalidate(true);
         }
 
@@ -300,7 +457,7 @@ namespace CapriDesktop
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { modelMenu.Dispose(); voiceMenu.Dispose(); speechModelMenu.Dispose(); micMenu.Dispose(); }
+            if (disposing) { modelMenu.Dispose(); voiceMenu.Dispose(); speechModelMenu.Dispose(); micMenu.Dispose(); languageMenu.Dispose(); }
             base.Dispose(disposing);
         }
 
@@ -329,6 +486,26 @@ namespace CapriDesktop
             int chosen = Array.IndexOf(Gaps, capri.GlanceGap);
             gap.Value = chosen < 0 ? 5 : chosen;
             gapName.Text = GapNames[gap.Value];
+            string language = capri.Language;
+            foreach (ToolStripMenuItem item in languageMenu.Items)
+            {
+                item.Checked = (string)item.Tag == language;
+                if (item.Checked) languages.Text = item.Text;
+            }
+            languages.Invalidate();
+            int loud = 0;
+            for (int i = 0; i < Volumes.Length; i++) if (Math.Abs(Volumes[i] - capri.Volume) < Math.Abs(Volumes[loud] - capri.Volume)) loud = i;
+            volume.Value = loud;
+            volumeName.Text = VolumeNames[loud];
+            sounds.Value = Math.Max(0, Math.Min(10, (capri.SoundLevel + 5) / 10));
+            soundsName.Text = SoundNames[sounds.Value];
+            wander.Value = capri.WanderLevel;
+            wanderName.Text = WanderNames[wander.Value];
+            dance.Checked = capri.Dancing;
+            replies.Value = capri.Wordiness;
+            repliesName.Text = Lengths[replies.Value];
+            recall.Value = Math.Max(0, Array.IndexOf(Recalls, capri.Recall));
+            recallName.Text = Lengths[recall.Value];
             syncing = false;
         }
 

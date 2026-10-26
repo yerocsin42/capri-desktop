@@ -63,6 +63,24 @@ namespace CapriDesktop
 #else
         private SoundPlayer player;
 #endif
+        internal static volatile int Loudness = 100;
+
+        internal static short[] Louder(short[] samples)
+        {
+            int percent = Loudness;
+            if (percent == 100) return samples;
+            short[] scaled = new short[samples.Length];
+            for (int i = 0; i < samples.Length; i++) scaled[i] = (short)Math.Max(short.MinValue, Math.Min(short.MaxValue, samples[i] * percent / 100));
+            return scaled;
+        }
+
+        internal static byte[] Louder(byte[] wav)
+        {
+            if (Loudness == 100) return wav;
+            int rate;
+            short[] samples = Samples(wav, out rate);
+            return samples.Length == 0 ? wav : Wave(Louder(samples), rate);
+        }
 
         internal bool Ready { get { return Key != null && VoiceId != null; } }
 
@@ -92,7 +110,18 @@ namespace CapriDesktop
 
         private static readonly string[,] Respelled = { { "chooms", "chewms" }, { "choom", "chewm" }, { "preem", "preme" }, { "yezzirrr", "yessirrr" } };
 
-        internal static string Sayable(string text) { return Swap(text, 0, 1); }
+        internal static string Sayable(string text) { return Swap(Plain(text), 0, 1); }
+
+        private static string Plain(string text)
+        {
+            text = Regex.Replace(text ?? "", @"https?://(?:www\.)?([^/\s]+?)(?:/\S*?)?(?=[.,!?)]*(?:\s|$))", delegate(Match link) { return link.Groups[1].Value.Replace(".", " dot "); });
+            text = Regex.Replace(text, @"[\uD800-\uDBFF][\uDC00-\uDFFF]|[☀-➿️‍]", "");
+            text = Regex.Replace(text, @"\s*&\s*", " and ");
+            text = Regex.Replace(text, @"(\d)\s*%", "$1 percent");
+            text = Regex.Replace(text, @"\bw/(?=\s)", "with");
+            text = Regex.Replace(text, @"\s*(->|=>|~+)\s*", " ");
+            return Regex.Replace(text, @"\s+", " ").Trim();
+        }
 
         internal static string Unsaid(string text) { return Swap(text, 1, 0); }
 
@@ -344,6 +373,7 @@ namespace CapriDesktop
 
         internal void Play(byte[] wav)
         {
+            wav = Louder(wav);
 #if CROSS
             if (Playback != null) Playback(wav);
 #else
@@ -363,6 +393,54 @@ namespace CapriDesktop
             player.Dispose();
             player = null;
 #endif
+        }
+    }
+
+    internal enum Cue { Arrive, Leave, Hop, Click }
+
+    internal static class Sfx
+    {
+        internal const int Rate = 24000;
+        internal static volatile int Level = 60;
+        internal static Action<short[]> Out;
+
+        internal static void Play(Cue cue)
+        {
+            Action<short[]> output = Out;
+            int level = Level;
+            if (output != null && level > 0) output(Make(cue, level));
+        }
+
+        internal static short[] Make(Cue cue, int level)
+        {
+            switch (cue)
+            {
+                case Cue.Arrive: return Sweep(0.42, 330, 990, 0.03, level);
+                case Cue.Leave: return Sweep(0.36, 880, 250, 0.012, level);
+                case Cue.Hop: return Sweep(0.16, 520, 1240, 0.008, level);
+                default: return Sweep(0.05, 1600, 1350, 0.003, level * 3 / 4);
+            }
+        }
+
+        private static short[] Sweep(double seconds, double from, double to, double attack, int level)
+        {
+            int count = (int)(seconds * Rate);
+            short[] samples = new short[count];
+            double phase = 0, fifth = 0, smooth = 0;
+            double peak = 0.26 * Math.Max(0, Math.Min(100, level)) / 100.0;
+            for (int i = 0; i < count; i++)
+            {
+                double t = (double)i / Rate;
+                double along = (double)i / count;
+                double pitch = from * Math.Pow(to / from, 1 - Math.Pow(1 - along, 3));
+                phase += 2 * Math.PI * pitch / Rate;
+                fifth += 3 * Math.PI * pitch / Rate;
+                double envelope = Math.Min(1, t / attack) * Math.Pow(1 - along, 2.2);
+                double wave = Math.Sin(phase) + 0.28 * Math.Sin(fifth) + 0.12 * Math.Sin(2 * phase);
+                smooth += (wave - smooth) * 0.5;
+                samples[i] = (short)(Math.Max(-1, Math.Min(1, smooth * envelope / 1.4)) * peak * 32767);
+            }
+            return samples;
         }
     }
 }

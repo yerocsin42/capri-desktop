@@ -115,9 +115,17 @@ namespace CapriDesktop
             }
         }
 
-        internal static Font Mono(float size, FontStyle style, GraphicsUnit unit = GraphicsUnit.Pixel)
+        private const string Extras = "ıŁłŒœŠšŸŽžƒ–—‘’‚“”„†‡•…‰‹›€™";
+
+        internal static bool Drawable(string text)
         {
-            if (embedded != null) return new Font(embedded, size, embedded.IsStyleAvailable(style) ? style : FontStyle.Regular, unit);
+            foreach (char c in text ?? "") if (c > 0xFF && Extras.IndexOf(c) < 0) return false;
+            return true;
+        }
+
+        internal static Font Mono(float size, FontStyle style, GraphicsUnit unit = GraphicsUnit.Pixel, string text = null)
+        {
+            if (embedded != null && Drawable(text)) return new Font(embedded, size, embedded.IsStyleAvailable(style) ? style : FontStyle.Regular, unit);
             foreach (string family in new[] { "Cascadia Mono", "Consolas", "Courier New" })
             {
                 Font font = new Font(family, size, style, unit);
@@ -444,6 +452,107 @@ namespace CapriDesktop
         }
     }
 
+    internal sealed class Tear : Overlay
+    {
+        internal const double Length = 0.32;
+        internal const double WideLength = 0.55;
+        private static readonly Color Crimson = Color.FromArgb(176, 6, 32);
+        private static readonly Color Ink = Color.FromArgb(8, 6, 10);
+        private readonly Timer ticks = new Timer();
+        private readonly System.Diagnostics.Stopwatch watch = new System.Diagnostics.Stopwatch();
+        private readonly Random random = new Random();
+        private Rectangle area;
+        private int seed;
+        private bool wide;
+
+        internal Tear() : base("Capri glitch")
+        {
+            ticks.Interval = 33;
+            ticks.Tick += delegate { Step(); };
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams value = base.CreateParams;
+                value.ExStyle |= 0x00000020;
+                return value;
+            }
+        }
+
+        internal void Burst(Rectangle body, Rectangle screen, bool everywhere)
+        {
+            wide = everywhere;
+            area = wide ? screen : Rectangle.Intersect(Rectangle.Inflate(body, body.Width, body.Height / 8), screen);
+            if (area.Width < 8 || area.Height < 8) return;
+            seed = random.Next();
+            ticks.Interval = wide ? 40 : 33;
+            watch.Reset();
+            watch.Start();
+            Step();
+            ticks.Start();
+        }
+
+        private void Step()
+        {
+            double t = watch.Elapsed.TotalSeconds;
+            double length = wide ? WideLength : Length;
+            if (t >= length) { ticks.Stop(); Hide(); return; }
+            Present(Frame(area.Size, t / length, seed + (int)(t * 30), wide), area.Location);
+        }
+
+        internal static Bitmap Frame(Size size, double progress, int seed, bool wide = false)
+        {
+            Bitmap image = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppPArgb);
+            Random pick = new Random(seed);
+            double fade = Math.Max(0, 1 - progress);
+            fade = fade * fade * (3 - 2 * fade);
+            if (fade <= 0) return image;
+            using (Graphics graphics = Graphics.FromImage(image))
+            {
+                int bars = (int)Math.Round((wide ? 16 + pick.Next(10) : 6 + pick.Next(7)) * (0.45 + 0.55 * fade));
+                int unit = Math.Max(2, size.Height / (wide ? 90 : 26));
+                for (int i = 0; i < bars; i++)
+                {
+                    int y = pick.Next(size.Height);
+                    int tall = 1 + (int)(unit * 6 * Math.Pow(pick.NextDouble(), 2.2));
+                    int width = wide && pick.Next(3) == 0 ? size.Width : size.Width / 4 + pick.Next(Math.Max(1, size.Width * 3 / 4));
+                    int x = width >= size.Width ? 0 : pick.Next(Math.Max(1, size.Width - width));
+                    int kind = pick.Next(10);
+                    Color colour = kind < 4 ? Ink : kind < 8 ? Look.Red : Crimson;
+                    int alpha = (int)((kind < 4 ? 180 + pick.Next(60) : 150 + pick.Next(100)) * fade);
+                    if (alpha <= 0) continue;
+                    using (Brush brush = new SolidBrush(Color.FromArgb(alpha, colour))) graphics.FillRectangle(brush, x, y, width, tall);
+                    if (kind < 4 && tall > 3)
+                        using (Brush edge = new SolidBrush(Color.FromArgb(alpha * 2 / 3, Look.Red)))
+                        {
+                            graphics.FillRectangle(edge, x, y, width, 1);
+                            graphics.FillRectangle(edge, x, y + tall - 1, width, 1);
+                        }
+                    if (pick.Next(3) == 0)
+                        using (Brush ghost = new SolidBrush(Color.FromArgb(alpha / 3, Look.Red))) graphics.FillRectangle(ghost, x + pick.Next(-size.Width / 16, size.Width / 16 + 1), y + tall + 1, width / 2, Math.Max(1, tall / 2));
+                }
+                if (wide)
+                    for (int i = 0, lines = 1 + pick.Next(3); i < lines; i++)
+                    {
+                        int x = pick.Next(size.Width);
+                        int thick = 1 + pick.Next(Math.Max(2, size.Width / 400));
+                        int top = pick.Next(size.Height / 2);
+                        int alpha = (int)((110 + pick.Next(90)) * fade);
+                        using (Brush brush = new SolidBrush(Color.FromArgb(alpha, i % 2 == 0 ? Look.Red : Ink))) graphics.FillRectangle(brush, x, top, thick, size.Height / 2 + pick.Next(size.Height / 2));
+                    }
+            }
+            return image;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) ticks.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
     internal sealed class SpeechBox : Overlay
     {
         internal event Action Dismissed;
@@ -478,6 +587,12 @@ namespace CapriDesktop
         {
             base.OnMouseUp(e);
             if (e.Button == MouseButtons.Left && Dismissed != null) Dismissed();
+        }
+
+        internal static int Fit(string text)
+        {
+            int length = (text ?? "").Length;
+            return length > 420 ? 56 : length > 220 ? 44 : Columns;
         }
 
         internal static float PanelWidth(float s)
@@ -517,17 +632,19 @@ namespace CapriDesktop
 
         private Bitmap Render(float s, Point head, Point feet, Rectangle area, bool cursorOn, out Point at)
         {
-            using (Font text = Look.Mono(14 * s, FontStyle.Regular))
-            using (Font heard = Look.Mono(14 * s, FontStyle.Italic))
-            using (Font bold = Look.Mono(14 * s, FontStyle.Bold))
+            string all = Speaker + (Reply ?? "") + (Heard ?? "");
+            using (Font text = Look.Mono(14 * s, FontStyle.Regular, GraphicsUnit.Pixel, all))
+            using (Font heard = Look.Mono(14 * s, FontStyle.Italic, GraphicsUnit.Pixel, all))
+            using (Font bold = Look.Mono(14 * s, FontStyle.Bold, GraphicsUnit.Pixel, all))
             {
                 float cw = Look.CharWidth(text);
                 float line = 19 * s;
                 float margin = 12 * s;
                 float top = 10 * s;
                 float tail = 16 * s;
-                List<string> lines = Look.Wrap(Speaker + (Reply ?? ""), Columns);
-                float panelWidth = 24 * s + Columns * cw + 14 * s;
+                int columns = Fit(Speaker + (Reply ?? ""));
+                List<string> lines = Look.Wrap(Speaker + (Reply ?? ""), columns);
+                float panelWidth = 24 * s + columns * cw + 14 * s;
                 float panelHeight = 13 * s + line * (1 + lines.Count) + 10 * s;
                 int width = (int)Math.Ceiling(panelWidth + margin * 2);
                 int height = (int)Math.Ceiling(top + panelHeight + tail + 4 * s);
@@ -558,7 +675,7 @@ namespace CapriDesktop
                     float x = panel.Left + 24 * s;
                     float row2 = panel.Top + 12 * s;
                     string you = Prompt + (Heard ?? "");
-                    if (you.Length > Columns) you = you.Substring(0, Columns - 3) + "...";
+                    if (you.Length > columns) you = you.Substring(0, columns - 3) + "...";
                     using (Brush dim = new SolidBrush(Look.Dim)) graphics.DrawString(you, heard, dim, x, row2, StringFormat.GenericTypographic);
                     row2 += line;
                     int remaining = Speaker.Length + (State == TalkState.Thinking ? (Reply ?? "").Length : Math.Max(0, Revealed));

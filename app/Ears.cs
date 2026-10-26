@@ -229,6 +229,7 @@ namespace CapriDesktop
     internal sealed class Speaker : IDisposable
     {
         private readonly bool silent;
+        internal bool Plain;
         private readonly List<IntPtr> pending = new List<IntPtr>();
         private readonly List<int> shapes = new List<int>();
         private readonly List<short> leftover = new List<short>();
@@ -291,6 +292,7 @@ namespace CapriDesktop
             }
             leftover.RemoveRange(0, at);
             if (silent || device == IntPtr.Zero) return;
+            if (!Plain) samples = Voice.Louder(samples);
             int size = Marshal.SizeOf(typeof(WaveHeader));
             WaveHeader header = new WaveHeader { Data = Marshal.AllocHGlobal(samples.Length * 2), Length = samples.Length * 2 };
             Marshal.Copy(samples, 0, header.Data, samples.Length);

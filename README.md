@@ -65,7 +65,11 @@ She sits on your windows and chats. Voice, the Mainframe and doing things for yo
 
 1. Download [Mac (Apple Silicon)](https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-mac-apple-silicon.zip), [Mac (Intel)](https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-mac-intel.zip) or [Linux](https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-linux-x64.tar.gz)
 2. Install [Ollama](https://ollama.com), then run `ollama pull gemma4:e4b` for her brain
-3. **Mac:** unzip it and open Capri. If macOS says it can't check her, open System Settings → Privacy & Security and click **Open Anyway**. Needs macOS 15 or newer
+3. **Mac:** unzip it, drag Capri into Applications, then open Terminal and run this once. Needs macOS 15 or newer
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Capri.app
+   ```
+   Apple hasn't approved (notarized) her yet, so macOS blocks her or calls her "damaged" until you do. That line only clears the downloaded-from-the-internet flag on Capri
 4. **Linux:** unpack it and run `Capri/Capri`. She sits on windows on X11; on Wayland she sits on the bottom of your screen
 
 ## How to use her
@@ -105,6 +109,10 @@ Just ask her for things, like "open Spotify", "play Blinding Lights", "pause", "
 - Head pats (smh)
 - Mischief mode: screen glitches, stealing your cursor, "you've been hacked" notes
 - Mac and Linux: her voice, the Mainframe and doing things for you
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build her, test her and send a pull request.
 
 ## Licence
 
