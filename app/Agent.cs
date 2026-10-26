@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.WebSockets;
@@ -29,6 +30,36 @@ namespace CapriDesktop
         [DataMember(Name = "agent_response_event")] public AgentReply Reply;
         [DataMember(Name = "user_transcription_event")] public AgentHeard Heard;
         [DataMember(Name = "ping_event")] public AgentPing Ping;
+        [DataMember(Name = "client_tool_call")] public AgentToolCall Call;
+    }
+
+    [DataContract]
+    internal sealed class AgentToolCall
+    {
+        [DataMember(Name = "tool_name")] public string Name;
+        [DataMember(Name = "tool_call_id")] public string Id;
+        [DataMember(Name = "parameters")] public ToolArguments Arguments;
+    }
+
+    [DataContract]
+    internal sealed class AgentToolList
+    {
+        [DataMember(Name = "tools")] public AgentTool[] Tools;
+    }
+
+    [DataContract]
+    internal sealed class AgentTool
+    {
+        [DataMember(Name = "id")] public string Id;
+        [DataMember(Name = "tool_config")] public AgentToolConfig Config;
+    }
+
+    [DataContract]
+    internal sealed class AgentToolConfig
+    {
+        [DataMember(Name = "type")] public string Type;
+        [DataMember(Name = "name")] public string Name;
+        [DataMember(Name = "description")] public string Description;
     }
 
     [DataContract]
@@ -64,7 +95,7 @@ namespace CapriDesktop
     internal sealed class Agent : IDisposable
     {
         internal const double Pace = 15;
-        internal const int Version = 3;
+        internal const int Version = 5;
         private const string Patience = "\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45}";
         internal event Action<int> Opened;
         internal event Action<string> Heard;
@@ -77,12 +108,13 @@ namespace CapriDesktop
         private ClientWebSocket socket;
         private Thread worker;
         private volatile bool ready;
+        internal Func<string, ToolArguments, string> Act;
 
-        internal static string Prompt { get { return Brain.Persona + "\nYou are talking out loud in a live voice chat: keep every reply to one or two short spoken sentences, and never write tags in square brackets.\nIf the user goes quiet, that's fine: they're probably busy or gaming. Don't beg them to talk or say they left you hanging. If they stay quiet, check in once with one short line, then let them be.\nSo the voice says your slang right, always spell choom as chewm and preem as preme."; } }
+        internal static string Prompt { get { return Brain.Persona + Hands.Note + "\nYou are talking out loud in a live voice chat: keep every reply to one or two short spoken sentences, and never write tags in square brackets.\nIf the user goes quiet, that's fine: they're probably busy or gaming. Don't beg them to talk or say they left you hanging. If they stay quiet, check in once with one short line, then let them be.\nSo the voice says your slang right, always spell choom as chewm, preem as preme and yezzirrr as yessirrr."; } }
 
         internal static string Create(string key, string voiceId)
         {
-            string body = "{\"name\":\"Capri\",\"conversation_config\":{\"agent\":{\"language\":\"en\",\"prompt\":{\"prompt\":" + Voice.Quote(Prompt) + ",\"llm\":\"gemini-2.5-flash\"}}," + Patience + ",\"tts\":{\"voice_id\":" + Voice.Quote(voiceId) + "}},\"platform_settings\":{\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true}},\"tts\":{\"voice_id\":true}}}}}";
+            string body = "{\"name\":\"Capri\",\"conversation_config\":{\"agent\":{\"language\":\"en\"," + Brains(key) + "}," + Patience + ",\"tts\":{\"voice_id\":" + Voice.Quote(voiceId) + "}},\"platform_settings\":{\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true}},\"tts\":{\"voice_id\":true}}}}}";
             AgentMade made = Voice.Read<AgentMade>(Voice.Send(Voice.Open("/v1/convai/agents/create", key, "POST"), Encoding.UTF8.GetBytes(body)));
             if (string.IsNullOrEmpty(made.Id)) throw new VoiceException("ElevenLabs didn't make the agent.");
             return made.Id;
@@ -90,7 +122,26 @@ namespace CapriDesktop
 
         internal static void Tune(string key, string agentId)
         {
-            Voice.Send(Voice.Open("/v1/convai/agents/" + Uri.EscapeDataString(agentId), key, "PATCH"), Encoding.UTF8.GetBytes("{\"conversation_config\":{" + Patience + "}}"));
+            Voice.Send(Voice.Open("/v1/convai/agents/" + Uri.EscapeDataString(agentId), key, "PATCH"), Encoding.UTF8.GetBytes("{\"conversation_config\":{" + Patience + ",\"agent\":{" + Brains(key) + "}}}"));
+        }
+
+        private static string Brains(string key) { return "\"prompt\":{\"prompt\":" + Voice.Quote(Prompt) + ",\"llm\":\"gemini-2.5-flash\",\"tool_ids\":" + ToolIds(key) + "}"; }
+
+        private static string ToolIds(string key)
+        {
+            AgentToolList found = Voice.Read<AgentToolList>(Voice.Send(Voice.Open("/v1/convai/tools", key, "GET"), null));
+            List<string> ids = new List<string>();
+            for (int i = 0; i < Hands.Count; i++)
+            {
+                string id = null;
+                if (found.Tools != null)
+                    foreach (AgentTool tool in found.Tools)
+                        if (tool.Config != null && tool.Config.Type == "client" && tool.Config.Name == Hands.Name(i) && tool.Config.Description == Hands.Description(i)) { id = tool.Id; break; }
+                if (id == null) id = Voice.Read<AgentTool>(Voice.Send(Voice.Open("/v1/convai/tools", key, "POST"), Encoding.UTF8.GetBytes(Hands.ElevenLabsTool(i)))).Id;
+                if (string.IsNullOrEmpty(id)) throw new VoiceException("ElevenLabs didn't save her tools.");
+                ids.Add(Voice.Quote(id));
+            }
+            return "[" + string.Join(",", ids.ToArray()) + "]";
         }
 
         internal static string Address(string key, string agentId)
@@ -201,6 +252,16 @@ namespace CapriDesktop
                 if (audio != null) audio(samples);
             }
             else if (item.Type == "interruption") { Action interrupted = Interrupted; if (interrupted != null) interrupted(); }
+            else if (item.Type == "client_tool_call" && item.Call != null && item.Call.Id != null)
+            {
+                AgentToolCall call = item.Call;
+                Func<string, ToolArguments, string> act = Act;
+                ThreadPool.QueueUserWorkItem(delegate
+                {
+                    string result = act == null ? "Her tools are off." : act(call.Name, call.Arguments);
+                    Send("{\"type\":\"client_tool_result\",\"tool_call_id\":" + Voice.Quote(call.Id) + ",\"result\":" + Voice.Quote(result) + ",\"is_error\":false}");
+                });
+            }
         }
     }
 }

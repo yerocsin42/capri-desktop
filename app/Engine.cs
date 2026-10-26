@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using Microsoft.Win32;
 
@@ -20,6 +21,10 @@ namespace CapriDesktop
         internal readonly string Url;
         internal readonly string Sha256;
         internal readonly long Size;
+        internal string EyesFile;
+        internal string EyesUrl;
+        internal string EyesSha256;
+        internal long EyesSize;
 
         internal Pick(string name, string ollama, string repository, string revision, string file, string sha256, long size)
         {
@@ -32,6 +37,15 @@ namespace CapriDesktop
         }
 
         internal string Download { get { return Engine.Amount(Size); } }
+
+        internal Pick Eyes(string repository, string revision, string file, string sha256, long size)
+        {
+            EyesFile = file;
+            EyesUrl = "https://huggingface.co/" + repository + "/resolve/" + revision + "/" + file;
+            EyesSha256 = sha256;
+            EyesSize = size;
+            return this;
+        }
     }
 
     internal sealed class Machine
@@ -113,8 +127,8 @@ namespace CapriDesktop
         private const long ZipSize = 32182350;
         internal static readonly Pick[] Picks =
         {
-            new Pick("Gemma 4 E4B", "gemma4:e4b-it-qat", "ggml-org/gemma-4-E4B-it-GGUF", "a69f018d7678a2b9f5e705f8903d6fb29b9b25dc", "gemma-4-E4B-it-Q4_0.gguf", "a555b900214b477d8880e7832e0b8925e139b0159640036b09fe472b6f2097f2", 4590807392),
-            new Pick("Gemma 4 E2B", "gemma4:e2b-it-qat", "unsloth/gemma-4-E2B-it-GGUF", "0314792d7f1f7e229411f620751375812bb9faf2", "gemma-4-E2B-it-Q4_K_M.gguf", "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8", 3106738272),
+            new Pick("Gemma 4 E4B", "gemma4:e4b-it-qat", "ggml-org/gemma-4-E4B-it-GGUF", "a69f018d7678a2b9f5e705f8903d6fb29b9b25dc", "gemma-4-E4B-it-Q4_0.gguf", "a555b900214b477d8880e7832e0b8925e139b0159640036b09fe472b6f2097f2", 4590807392).Eyes("ggml-org/gemma-4-E4B-it-GGUF", "a69f018d7678a2b9f5e705f8903d6fb29b9b25dc", "mmproj-gemma-4-E4B-it-Q8_0.gguf", "197f49a93027f9843772bd24a6a9e0be2a32a788de5a3def330e9c585d86edd1", 559874816),
+            new Pick("Gemma 4 E2B", "gemma4:e2b-it-qat", "unsloth/gemma-4-E2B-it-GGUF", "0314792d7f1f7e229411f620751375812bb9faf2", "gemma-4-E2B-it-Q4_K_M.gguf", "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8", 3106738272).Eyes("ggml-org/gemma-4-E2B-it-GGUF", "6938c58e698502037401a5f19f6905f2fb2f7dee", "mmproj-gemma-4-E2B-it-Q8_0.gguf", "9406f99c16d68cda4f1f0552192dcc99021ea1fc6d2fd50b1dc3ccf30d04b292", 557368064),
             new Pick("Qwen3 4B", "qwen3:4b-instruct-2507-q4_K_M", "unsloth/Qwen3-4B-Instruct-2507-GGUF", "a06e946bb6b655725eafa393f4a9745d460374c9", "Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597", 2497281120)
         };
         private readonly string root;
@@ -122,7 +136,10 @@ namespace CapriDesktop
         private Process server;
         private IntPtr job;
         private int port;
+        private bool serverEyes;
+        private bool serverCpu;
         internal volatile bool Cancel;
+        internal volatile bool CpuOnly;
 
         internal Engine(string data) { root = Path.Combine(data, "brain"); }
 
@@ -139,6 +156,18 @@ namespace CapriDesktop
         private string Folder { get { return Path.Combine(root, "engine-" + Build); } }
         private string Server { get { return Path.Combine(Folder, "llama-server.exe"); } }
         private string ModelPath(Pick pick) { return Path.Combine(Path.Combine(root, "models"), pick.File); }
+        private string EyesPath(Pick pick) { return pick.EyesFile == null ? null : Path.Combine(Path.Combine(root, "models"), pick.EyesFile); }
+
+        internal bool HasEyes(Pick pick) { string path = EyesPath(pick); return path != null && File.Exists(path); }
+
+        internal void InstallEyes(Pick pick, Action<string, long, long> progress)
+        {
+            if (pick.EyesFile == null || HasEyes(pick)) return;
+            Cancel = false;
+            string drive = Path.GetPathRoot(root);
+            if (new DriveInfo(drive).AvailableFreeSpace < pick.EyesSize + (64L << 20)) throw new IOException("Her eyes need " + Amount(pick.EyesSize) + " free on " + drive.TrimEnd('\\') + ".");
+            Fetch(pick.EyesUrl, EyesPath(pick), pick.EyesSize, pick.EyesSha256, "her eyes", progress, delegate { return Cancel; });
+        }
 
         internal Pick Installed()
         {
@@ -149,6 +178,8 @@ namespace CapriDesktop
 
         internal string Address { get { lock (gate) return "http://127.0.0.1:" + port; } }
 
+        internal bool Crashed { get { lock (gate) return server != null && server.HasExited; } }
+
         internal void Install(Pick pick, Action<string, long, long> progress)
         {
             Directory.CreateDirectory(root);
@@ -158,7 +189,7 @@ namespace CapriDesktop
             if (!File.Exists(Server))
             {
                 string zip = Path.Combine(root, "engine-" + Build + ".zip");
-                Fetch(ZipUrl, zip, ZipSize, ZipSha, "the engine", progress);
+                Fetch(ZipUrl, zip, ZipSize, ZipSha, "the engine", progress, delegate { return Cancel; });
                 string staging = Folder + ".new";
                 if (Directory.Exists(staging)) Directory.Delete(staging, true);
                 ZipFile.ExtractToDirectory(zip, staging);
@@ -170,11 +201,11 @@ namespace CapriDesktop
             if (!File.Exists(ModelPath(pick)))
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(ModelPath(pick)));
-                Fetch(pick.Url, ModelPath(pick), pick.Size, pick.Sha256, pick.Name, progress);
+                Fetch(pick.Url, ModelPath(pick), pick.Size, pick.Sha256, pick.Name, progress, delegate { return Cancel; });
             }
         }
 
-        private void Fetch(string url, string target, long size, string sha256, string label, Action<string, long, long> progress)
+        internal static void Fetch(string url, string target, long size, string sha256, string label, Action<string, long, long> progress, Func<bool> stopped)
         {
             ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
             string part = target + ".part";
@@ -202,7 +233,7 @@ namespace CapriDesktop
                             int read;
                             while ((read = body.Read(buffer, 0, buffer.Length)) > 0)
                             {
-                                if (Cancel) throw new OperationCanceledException();
+                                if (stopped()) throw new OperationCanceledException();
                                 file.Write(buffer, 0, read);
                                 have += read;
                                 if (have - shown >= (4L << 20)) { shown = have; progress("Downloading " + label, have, size); }
@@ -210,8 +241,8 @@ namespace CapriDesktop
                         }
                     }
                 }
-                catch (WebException) { if (Cancel) throw new OperationCanceledException(); }
-                catch (IOException) { if (Cancel) throw new OperationCanceledException(); }
+                catch (WebException) { if (stopped()) throw new OperationCanceledException(); }
+                catch (IOException) { if (stopped()) throw new OperationCanceledException(); }
                 if (have < size)
                 {
                     stalls = have > before ? 0 : stalls + 1;
@@ -241,11 +272,14 @@ namespace CapriDesktop
         {
             lock (gate)
             {
-                if (server != null && !server.HasExited) return;
-                if (server != null) { server.Dispose(); server = null; }
-                if (!File.Exists(Server) || !File.Exists(ModelPath(pick))) throw new BrainException("Her brain isn't downloaded. Open Capri Mainframe to set it up.");
+                bool eyes = HasEyes(pick);
+                if (server != null && !server.HasExited && serverEyes == eyes && serverCpu == CpuOnly) return;
+                if (server != null) Stop();
+                if (!File.Exists(Server) || !File.Exists(ModelPath(pick))) throw new BrainException("Brain not downloaded. Press Set up her brain.");
                 port = FreePort();
-                ProcessStartInfo info = new ProcessStartInfo(Server, "-m \"" + ModelPath(pick) + "\" --host 127.0.0.1 --port " + port + " -c 4096 -np 1 -a capri --reasoning off --no-webui --sleep-idle-seconds 900 --log-disable");
+                serverEyes = eyes;
+                serverCpu = CpuOnly;
+                ProcessStartInfo info = new ProcessStartInfo(Server, "-m \"" + ModelPath(pick) + "\"" + (eyes ? " --mmproj \"" + EyesPath(pick) + "\"" : "") + " --host 127.0.0.1 --port " + port + " -c 4096 -np 1 -a capri --jinja --reasoning off --no-webui --sleep-idle-seconds 900 --log-disable" + (CpuOnly ? " --device none -ngl 0 --no-mmproj-offload" : ""));
                 info.UseShellExecute = false;
                 info.CreateNoWindow = true;
                 info.WorkingDirectory = Folder;
@@ -257,7 +291,7 @@ namespace CapriDesktop
             {
                 Process running;
                 lock (gate) running = server;
-                if (running == null || running.HasExited) throw new BrainException("Her brain crashed while loading. Try Refresh in Capri Mainframe.");
+                if (running == null || running.HasExited) throw new BrainException("Brain crashed loading. Close games, press Refresh.");
                 try
                 {
                     HttpWebRequest request = (HttpWebRequest)WebRequest.Create(Address + "/health");
@@ -268,8 +302,10 @@ namespace CapriDesktop
                 catch (WebException) { }
                 Thread.Sleep(400);
             }
-            throw new BrainException("Her brain took too long to load.");
+            throw new BrainException("Brain loaded too slowly. Close games, press Refresh.");
         }
+
+        internal static bool Lost(string problem) { return Regex.IsMatch(problem ?? "", @"ErrorDeviceLost|DEVICE_LOST|device lost|vk::", RegexOptions.IgnoreCase); }
 
         internal void Stop()
         {

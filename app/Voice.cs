@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Media;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Security.Cryptography;
@@ -73,7 +75,7 @@ namespace CapriDesktop
 
         internal static string Spoken(string said) { return Regex.Replace(Regex.Replace(said ?? "", @"\[[^\]]*\]", " ").Replace("*", ""), @"\s+", " ").Trim(); }
 
-        private static readonly string[,] Respelled = { { "chooms", "chewms" }, { "choom", "chewm" }, { "preem", "preme" } };
+        private static readonly string[,] Respelled = { { "chooms", "chewms" }, { "choom", "chewm" }, { "preem", "preme" }, { "yezzirrr", "yessirrr" } };
 
         internal static string Sayable(string text) { return Swap(text, 0, 1); }
 
@@ -142,17 +144,17 @@ namespace CapriDesktop
         internal static string Explain(int status, string detail)
         {
             detail = detail ?? "";
-            if (detail.Contains("quota_exceeded")) return "Out of ElevenLabs credits.";
-            if (detail.Contains("missing_permissions")) return "Key needs Text to Speech, Voices, Models and Agents access.";
+            if (detail.Contains("quota_exceeded")) return "Out of ElevenLabs credits. Untick Speak replies to type.";
+            if (detail.Contains("missing_permissions")) return "Key needs Text to Speech, Voices, Models and Agents access. Edit it on ElevenLabs.";
             if (detail.Contains("voice_not_found")) return "Voice not found. Add it to your ElevenLabs voices.";
-            if (detail.Contains("invalid_api_key")) return "ElevenLabs rejected the key.";
+            if (detail.Contains("invalid_api_key")) return "ElevenLabs rejected the key. Press Forget, paste a new one.";
             Match message = Regex.Match(detail, "\"message\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
             if (message.Success)
             {
                 string text = Regex.Unescape(message.Groups[1].Value).Trim();
                 if (text.Length > 0) return Short(text);
             }
-            if (status == 401) return "ElevenLabs rejected the key.";
+            if (status == 401) return "ElevenLabs rejected the key. Press Forget, paste a new one.";
             if (status == 429) return "ElevenLabs is busy. Try again in a moment.";
             return "ElevenLabs error " + status + ".";
         }
@@ -319,5 +321,229 @@ namespace CapriDesktop
             player.Dispose();
             player = null;
         }
+    }
+
+    internal sealed class FreeStyle
+    {
+        internal readonly string Name;
+        internal readonly int Speaker;
+        internal readonly float Speed;
+        internal readonly bool British;
+
+        internal FreeStyle(string name, int speaker, float speed, bool british)
+        {
+            Name = name;
+            Speaker = speaker;
+            Speed = speed;
+            British = british;
+        }
+    }
+
+    internal sealed class LocalVoice : IDisposable
+    {
+        internal const string Pack = "capri-voice-1";
+        internal static string PackUrl = "https://github.com/yerocsin42/capri-desktop/releases/download/voice-pack-1/capri-voice-1.zip";
+        internal static string PackSha = "9fae085696d68a580d6b1a953d7b253129bfe506a2c016421b306b7237d3214c";
+        internal static long PackSize = 316041808;
+        internal static readonly FreeStyle[] Styles =
+        {
+            new FreeStyle("Her own", 53, 1.1f, false),
+            new FreeStyle("Bright", 2, 1.1f, false),
+            new FreeStyle("Sly", 6, 1.08f, false),
+            new FreeStyle("Sharp", 21, 1.1f, true)
+        };
+        internal static readonly string[] Needed = { "sherpa-onnx-c-api.dll", "onnxruntime.dll", "model.onnx", "voices.bin", "tokens.txt", "lexicon-us-en.txt", "lexicon-gb-en.txt", Path.Combine("espeak-ng-data", "phontab") };
+        private static readonly object loading = new object();
+        private static bool loaded;
+        private readonly string folder;
+        private readonly object gate = new object();
+        private IntPtr tts;
+        private bool british;
+        internal volatile FreeStyle Style = Styles[0];
+        internal volatile bool Cancel;
+
+        internal LocalVoice(string data) { folder = Path.Combine(Path.Combine(data, "voice"), Pack); }
+
+        internal static FreeStyle Find(string name)
+        {
+            foreach (FreeStyle style in Styles) if (style.Name == name) return style;
+            return Styles[0];
+        }
+
+        internal bool Installed { get { return Complete(folder); } }
+
+        private static bool Complete(string where)
+        {
+            foreach (string name in Needed) if (!File.Exists(Path.Combine(where, name))) return false;
+            return true;
+        }
+
+        internal void Install(Action<string, long, long> progress)
+        {
+            if (IntPtr.Size != 8) throw new IOException("Her free voice needs 64-bit Windows.");
+            string root = Path.GetDirectoryName(folder);
+            Directory.CreateDirectory(root);
+            long needed = PackSize * 3 + (64L << 20);
+            string drive = Path.GetPathRoot(root);
+            if (new DriveInfo(drive).AvailableFreeSpace < needed) throw new IOException("Her free voice needs " + Engine.Amount(needed) + " free on " + drive.TrimEnd('\\') + ".");
+            string zip = folder + ".zip";
+            Engine.Fetch(PackUrl, zip, PackSize, PackSha, "her free voice", progress, delegate { return Cancel; });
+            progress("Unpacking her free voice", PackSize, PackSize);
+            string staging = folder + ".new";
+            if (Directory.Exists(staging)) Directory.Delete(staging, true);
+            ZipFile.ExtractToDirectory(zip, staging);
+            if (!Complete(staging)) throw new IOException("The voice download is missing files.");
+            lock (gate)
+            {
+                Close();
+                if (Directory.Exists(folder)) Directory.Delete(folder, true);
+                Directory.Move(staging, folder);
+            }
+            File.Delete(zip);
+        }
+
+        internal void Warm()
+        {
+            FreeStyle style = Style;
+            lock (gate) Open(style.British);
+        }
+
+        internal byte[] Speak(string text)
+        {
+            FreeStyle style = Style;
+            lock (gate)
+            {
+                Open(style.British);
+                IntPtr words = Utf8(text);
+                IntPtr audio = IntPtr.Zero;
+                try
+                {
+                    audio = SherpaOnnxOfflineTtsGenerate(tts, words, style.Speaker, style.Speed);
+                    if (audio == IntPtr.Zero) throw new VoiceException("Her free voice glitched.");
+                    Generated made = (Generated)Marshal.PtrToStructure(audio, typeof(Generated));
+                    float[] samples = new float[Math.Max(0, made.Count)];
+                    if (samples.Length > 0) Marshal.Copy(made.Samples, samples, 0, samples.Length);
+                    short[] pcm = new short[samples.Length];
+                    for (int i = 0; i < samples.Length; i++) pcm[i] = (short)Math.Max(-32767, Math.Min(32767, Math.Round(samples[i] * 32767)));
+                    return Voice.Wave(pcm, made.Rate);
+                }
+                finally
+                {
+                    if (audio != IntPtr.Zero) SherpaOnnxDestroyOfflineTtsGeneratedAudio(audio);
+                    Marshal.FreeHGlobal(words);
+                }
+            }
+        }
+
+        private void Open(bool gb)
+        {
+            if (tts != IntPtr.Zero && british == gb) return;
+            if (IntPtr.Size != 8) throw new VoiceException("Her free voice needs 64-bit Windows.");
+            if (!Installed) throw new VoiceException("Set up her free voice in Capri Mainframe.");
+            Load(folder);
+            Close();
+            List<IntPtr> held = new List<IntPtr>();
+            Func<string, IntPtr> keep = delegate(string value) { IntPtr pointer = Utf8(value); held.Add(pointer); return pointer; };
+            try
+            {
+                Config config = new Config();
+                config.Model.Threads = Math.Max(1, Math.Min(6, Environment.ProcessorCount / 2));
+                config.Model.Provider = keep("cpu");
+                config.Model.Kokoro.Model = keep(Path.Combine(folder, "model.onnx"));
+                config.Model.Kokoro.Voices = keep(Path.Combine(folder, "voices.bin"));
+                config.Model.Kokoro.Tokens = keep(Path.Combine(folder, "tokens.txt"));
+                config.Model.Kokoro.Data = keep(Path.Combine(folder, "espeak-ng-data"));
+                config.Model.Kokoro.Lexicon = keep(Path.Combine(folder, gb ? "lexicon-gb-en.txt" : "lexicon-us-en.txt"));
+                config.Model.Kokoro.Lang = keep(gb ? "en" : "en-us");
+                config.MaxSentences = 1;
+                tts = SherpaOnnxCreateOfflineTts(ref config);
+            }
+            finally { foreach (IntPtr pointer in held) Marshal.FreeHGlobal(pointer); }
+            if (tts == IntPtr.Zero) throw new VoiceException("Her free voice wouldn't start.");
+            british = gb;
+        }
+
+        private static void Load(string where)
+        {
+            lock (loading)
+            {
+                if (loaded) return;
+                foreach (string name in new[] { "onnxruntime.dll", "sherpa-onnx-c-api.dll" })
+                    if (LoadLibraryEx(Path.Combine(where, name), IntPtr.Zero, 8) == IntPtr.Zero) throw new VoiceException("Her free voice wouldn't load (error " + Marshal.GetLastWin32Error() + ").");
+                loaded = true;
+            }
+        }
+
+        private void Close()
+        {
+            if (tts == IntPtr.Zero) return;
+            SherpaOnnxDestroyOfflineTts(tts);
+            tts = IntPtr.Zero;
+        }
+
+        public void Dispose() { lock (gate) Close(); }
+
+        private static IntPtr Utf8(string value)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(value ?? "");
+            IntPtr pointer = Marshal.AllocHGlobal(bytes.Length + 1);
+            Marshal.Copy(bytes, 0, pointer, bytes.Length);
+            Marshal.WriteByte(pointer, bytes.Length, 0);
+            return pointer;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern IntPtr LoadLibraryEx(string path, IntPtr file, int flags);
+        [DllImport("sherpa-onnx-c-api.dll", CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr SherpaOnnxCreateOfflineTts(ref Config config);
+        [DllImport("sherpa-onnx-c-api.dll", CallingConvention = CallingConvention.Cdecl)] private static extern void SherpaOnnxDestroyOfflineTts(IntPtr tts);
+        [DllImport("sherpa-onnx-c-api.dll", CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr SherpaOnnxOfflineTtsGenerate(IntPtr tts, IntPtr text, int speaker, float speed);
+        [DllImport("sherpa-onnx-c-api.dll", CallingConvention = CallingConvention.Cdecl)] private static extern void SherpaOnnxDestroyOfflineTtsGeneratedAudio(IntPtr audio);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Vits { internal IntPtr Model, Lexicon, Tokens, Data; internal float Noise, NoiseW, Length; internal IntPtr Dict; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Matcha { internal IntPtr Acoustic, Vocoder, Lexicon, Tokens, Data; internal float Noise, Length; internal IntPtr Dict; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Kokoro { internal IntPtr Model, Voices, Tokens, Data; internal float Length; internal IntPtr Dict, Lexicon, Lang; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Kitten { internal IntPtr Model, Voices, Tokens, Data; internal float Length; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Zipvoice { internal IntPtr Tokens, Encoder, Decoder, Vocoder, Data, Lexicon; internal float Feat, Shift, Rms, Guidance; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Pocket { internal IntPtr Flow, Main, Encoder, Decoder, Conditioner, Vocab, Scores; internal int Cache; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Supertonic { internal IntPtr Duration, Encoder, Estimator, Vocoder, Json, Indexer, Style; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ModelConfig
+        {
+            internal Vits Vits;
+            internal int Threads, Debug;
+            internal IntPtr Provider;
+            internal Matcha Matcha;
+            internal Kokoro Kokoro;
+            internal Kitten Kitten;
+            internal Zipvoice Zipvoice;
+            internal Pocket Pocket;
+            internal Supertonic Supertonic;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Config
+        {
+            internal ModelConfig Model;
+            internal IntPtr Rules;
+            internal int MaxSentences;
+            internal IntPtr Fars;
+            internal float Silence;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Generated { internal IntPtr Samples; internal int Count, Rate; }
     }
 }

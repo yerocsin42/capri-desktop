@@ -23,7 +23,78 @@ namespace CapriDesktop
         internal static readonly Color Ink = Color.FromArgb(232, 236, 240);
         internal static readonly Color Dim = Color.FromArgb(122, 128, 138);
 
+        internal static readonly Color Pink = Color.FromArgb(255, 46, 136);
         private static readonly FontFamily embedded = Embedded("Capri.Font.Mono.ttf");
+        private static Cursor pointer;
+
+        [StructLayout(LayoutKind.Sequential)] private struct IconInfo { internal bool Icon; internal int X; internal int Y; internal IntPtr Mask; internal IntPtr Colour; }
+        [DllImport("user32.dll")] private static extern bool GetIconInfo(IntPtr icon, ref IconInfo info);
+        [DllImport("user32.dll")] private static extern IntPtr CreateIconIndirect(ref IconInfo info);
+        [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr icon);
+        [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr value);
+
+        internal static Cursor Pointer
+        {
+            get
+            {
+                if (pointer != null) return pointer;
+                float scale;
+                using (Graphics screen = Graphics.FromHwnd(IntPtr.Zero)) scale = Math.Max(1f, screen.DpiX / 96f);
+                int size = (int)Math.Round(32 * scale);
+                using (Bitmap art = PointerArt(size))
+                {
+                    IntPtr icon = art.GetHicon();
+                    IconInfo info = new IconInfo();
+                    GetIconInfo(icon, ref info);
+                    info.Icon = false;
+                    info.X = (int)Math.Round(2 * scale);
+                    info.Y = (int)Math.Round(2 * scale);
+                    IntPtr handle = CreateIconIndirect(ref info);
+                    DeleteObject(info.Mask);
+                    DeleteObject(info.Colour);
+                    DestroyIcon(icon);
+                    pointer = handle == IntPtr.Zero ? Cursors.Hand : new Cursor(handle);
+                }
+                return pointer;
+            }
+        }
+
+        internal static Bitmap PointerArt(int size)
+        {
+            float s = size / 32f;
+            PointF[] arrow = { new PointF(2, 2), new PointF(2, 24), new PointF(8, 18.5f), new PointF(12, 27), new PointF(16, 25.2f), new PointF(12, 16.8f), new PointF(19.5f, 16.8f) };
+            Bitmap art = new Bitmap(size, size, PixelFormat.Format32bppArgb);
+            using (Bitmap whole = new Bitmap(size, size, PixelFormat.Format32bppArgb))
+            {
+                using (Graphics graphics = Graphics.FromImage(whole))
+                {
+                    graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    using (Brush cyan = new SolidBrush(Color.FromArgb(200, Cyan))) graphics.FillPolygon(cyan, Shift(arrow, 1.6f, 0.4f, s));
+                    using (Brush red = new SolidBrush(Color.FromArgb(170, Red))) graphics.FillPolygon(red, Shift(arrow, -1.1f, -0.3f, s));
+                    PointF[] body = Shift(arrow, 0, 0, s);
+                    using (Brush pink = new SolidBrush(Pink)) graphics.FillPolygon(pink, body);
+                    using (Pen edge = new Pen(Color.FromArgb(20, 6, 14), 1.3f * s)) { edge.LineJoin = LineJoin.Round; graphics.DrawPolygon(edge, body); }
+                    using (Pen shine = new Pen(Color.FromArgb(150, 255, 214, 236), 1f * s)) graphics.DrawLine(shine, 3.6f * s, 5.5f * s, 3.6f * s, 17 * s);
+                }
+                using (Graphics graphics = Graphics.FromImage(art))
+                {
+                    int cut = (int)Math.Round(11 * s);
+                    int band = Math.Max(2, (int)Math.Round(2.5f * s));
+                    int slip = Math.Max(1, (int)Math.Round(2.5f * s));
+                    graphics.DrawImage(whole, new Rectangle(0, 0, size, cut), new Rectangle(0, 0, size, cut), GraphicsUnit.Pixel);
+                    graphics.DrawImage(whole, new Rectangle(slip, cut, size - slip, band), new Rectangle(0, cut, size - slip, band), GraphicsUnit.Pixel);
+                    graphics.DrawImage(whole, new Rectangle(0, cut + band, size, size - cut - band), new Rectangle(0, cut + band, size, size - cut - band), GraphicsUnit.Pixel);
+                }
+            }
+            return art;
+        }
+
+        private static PointF[] Shift(PointF[] points, float x, float y, float s)
+        {
+            PointF[] moved = new PointF[points.Length];
+            for (int i = 0; i < points.Length; i++) moved[i] = new PointF((points[i].X + x) * s, (points[i].Y + y) * s);
+            return moved;
+        }
 
         [DllImport("gdi32.dll")] private static extern IntPtr AddFontMemResourceEx(IntPtr font, uint length, IntPtr reserved, ref uint count);
 
@@ -121,6 +192,7 @@ namespace CapriDesktop
     internal class Overlay : Form
     {
         private Bitmap shown;
+        internal bool Above = true;
 
         internal Overlay(string name)
         {
@@ -138,7 +210,7 @@ namespace CapriDesktop
             get
             {
                 CreateParams value = base.CreateParams;
-                value.ExStyle |= 0x00080000 | 0x00000080 | 0x08000000 | 0x00000008;
+                value.ExStyle |= 0x00080000 | 0x00000080 | 0x08000000 | (Above ? 0x00000008 : 0);
                 return value;
             }
         }
@@ -190,7 +262,7 @@ namespace CapriDesktop
         private bool muted;
         private int level;
 
-        internal TalkPill() : base("Talk to Capri") { Cursor = Cursors.Hand; }
+        internal TalkPill() : base("Talk to Capri") { Cursor = Look.Pointer; }
 
         internal static Size Measure(float scale) { return new Size((int)Math.Round(100 * scale), (int)Math.Round(40 * scale)); }
 
@@ -387,7 +459,7 @@ namespace CapriDesktop
         private const int Columns = 34;
         private const string Speaker = "CAPRI: ";
 
-        internal SpeechBox() : base("Capri says") { Cursor = Cursors.Hand; }
+        internal SpeechBox() : base("Capri says") { Cursor = Look.Pointer; }
 
         internal Rectangle PanelOnScreen { get { return panelOnScreen; } }
 

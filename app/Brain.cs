@@ -14,7 +14,23 @@ namespace CapriDesktop
     {
         [DataMember(Name = "role")] public string Role;
         [DataMember(Name = "content")] public string Content;
+        [DataMember(Name = "tool_calls", EmitDefaultValue = false)] public ToolCall[] Calls;
+        [DataMember(Name = "images", EmitDefaultValue = false)] public string[] Images;
+        [DataMember(Name = "thinking", EmitDefaultValue = false)] public string Thinking;
         internal ChatMessage(string role, string content) { Role = role; Content = content; }
+    }
+
+    [DataContract]
+    internal sealed class ToolCall
+    {
+        [DataMember(Name = "function")] public ToolFunction Function;
+    }
+
+    [DataContract]
+    internal sealed class ToolFunction
+    {
+        [DataMember(Name = "name")] public string Name;
+        [DataMember(Name = "arguments")] public ToolArguments Arguments;
     }
 
     [DataContract]
@@ -41,6 +57,7 @@ namespace CapriDesktop
     {
         [DataMember(Name = "message")] public ChatMessage Message;
         [DataMember(Name = "error")] public string Error;
+        [DataMember(Name = "done_reason")] public string Stopped;
     }
 
     [DataContract]
@@ -74,7 +91,27 @@ namespace CapriDesktop
     [DataContract]
     internal sealed class CompletionChoice
     {
-        [DataMember(Name = "message")] public ChatMessage Message;
+        [DataMember(Name = "message")] public CompletionMessage Message;
+    }
+
+    [DataContract]
+    internal sealed class CompletionMessage
+    {
+        [DataMember(Name = "content")] public string Content;
+        [DataMember(Name = "tool_calls")] public CompletionCall[] Calls;
+    }
+
+    [DataContract]
+    internal sealed class CompletionCall
+    {
+        [DataMember(Name = "function")] public CompletionFunction Function;
+    }
+
+    [DataContract]
+    internal sealed class CompletionFunction
+    {
+        [DataMember(Name = "name")] public string Name;
+        [DataMember(Name = "arguments")] public string Arguments;
     }
 
     [DataContract]
@@ -93,35 +130,136 @@ namespace CapriDesktop
         [DataMember(Name = "error")] public string Error;
     }
 
+    [DataContract]
+    internal sealed class OpenAiRequest
+    {
+        [DataMember(Name = "model")] public string Model;
+        [DataMember(Name = "messages")] public ChatMessage[] Messages;
+        [DataMember(Name = "max_completion_tokens", EmitDefaultValue = false)] public int? Limit;
+        [DataMember(Name = "max_tokens", EmitDefaultValue = false)] public int? Tokens;
+        [DataMember(Name = "reasoning_effort", EmitDefaultValue = false)] public string Effort;
+        [DataMember(Name = "thinking", EmitDefaultValue = false)] public CloudThinking Thinking;
+    }
+
+    [DataContract]
+    internal sealed class CloudThinking
+    {
+        [DataMember(Name = "type")] public string Type = "disabled";
+    }
+
+    [DataContract]
+    internal sealed class ClaudeRequest
+    {
+        [DataMember(Name = "model")] public string Model;
+        [DataMember(Name = "max_tokens")] public int Limit = 16000;
+        [DataMember(Name = "system")] public string System;
+        [DataMember(Name = "messages")] public ChatMessage[] Messages;
+        [DataMember(Name = "output_config", EmitDefaultValue = false)] public ClaudeOutput Output;
+        [DataMember(Name = "fallbacks", EmitDefaultValue = false)] public string Fallbacks;
+    }
+
+    [DataContract]
+    internal sealed class ClaudeOutput
+    {
+        [DataMember(Name = "effort")] public string Effort = "low";
+    }
+
+    [DataContract]
+    internal sealed class ClaudeReply
+    {
+        [DataMember(Name = "content")] public ClaudeBlock[] Content;
+        [DataMember(Name = "stop_reason")] public string StopReason;
+    }
+
+    [DataContract]
+    internal sealed class ClaudeBlock
+    {
+        [DataMember(Name = "type")] public string Type;
+        [DataMember(Name = "text")] public string Text;
+        [DataMember(Name = "name")] public string Name;
+        [DataMember(Name = "input")] public ToolArguments Input;
+    }
+
+    [DataContract]
+    internal sealed class CloudModelPage
+    {
+        [DataMember(Name = "data")] public CloudModel[] Models;
+    }
+
+    [DataContract]
+    internal sealed class CloudModel
+    {
+        [DataMember(Name = "id")] public string Id;
+        [DataMember(Name = "created")] public long Created;
+        [DataMember(Name = "created_at")] public string CreatedAt;
+    }
+
+    internal sealed class Cloud
+    {
+        internal readonly string Key;
+        internal readonly string Kind;
+        internal volatile string Model;
+        internal Cloud(string key, string model) { Key = key; Kind = KindOf(key); Model = model; }
+        internal bool Claude { get { return Kind == "anthropic"; } }
+        internal string Name { get { return Kind == "anthropic" ? "Claude" : Kind == "deepseek" ? "DeepSeek" : Kind == "nvidia" ? "NVIDIA" : "ChatGPT"; } }
+        internal string Company { get { return Kind == "anthropic" ? "Anthropic" : Kind == "deepseek" ? "DeepSeek" : Kind == "nvidia" ? "NVIDIA" : "OpenAI"; } }
+
+        internal static string KindOf(string key)
+        {
+            if (key.StartsWith("sk-ant-", StringComparison.Ordinal)) return "anthropic";
+            if (key.StartsWith("nvapi-", StringComparison.Ordinal)) return "nvidia";
+            if (Regex.IsMatch(key, "^sk-[0-9a-f]{32}$")) return "deepseek";
+            return key.StartsWith("sk-", StringComparison.Ordinal) ? "openai" : null;
+        }
+    }
+
     internal sealed class BrainException : Exception
     {
-        internal BrainException(string message) : base(message) { }
+        internal readonly bool Told;
+        internal BrainException(string message, bool told = false) : base(message) { Told = told; }
     }
 
     internal sealed class Brain
     {
         internal static string Ollama = "http://127.0.0.1:11434";
-        internal const string Offline = "My brain's offline, choom. Open Capri Mainframe and plug one in.";
+        internal static string OpenAi = "https://api.openai.com";
+        internal static string Anthropic = "https://api.anthropic.com";
+        internal static string DeepSeek = "https://api.deepseek.com";
+        internal static string Nvidia = "https://integrate.api.nvidia.com";
+        private static readonly string[] NvidiaPicks = { "google/gemma-4-31b-it", "deepseek-ai/deepseek-v4.1-flash", "moonshotai/kimi-k2.6", "z-ai/glm-5.3-flash", "z-ai/glm-5.3", "nvidia/nemotron-3.5-bolt-e4b", "openai/gpt-oss-20b" };
+        internal const string Blind = "DeepSeek can't see your screen. In Capri Mainframe, press Free key and connect a free NVIDIA key instead.";
+
+        internal static string Sightless(Cloud remote) { return remote.Model + " can't see screens. In Capri Mainframe, pick a model that can" + (remote.Kind == "nvidia" ? ", like google/gemma-4-31b-it." : "."); }
+        private const string Parts = "@capri-image@";
+        internal const string Declined = "[SIGNAL CORRUPTED] Lost that one in the static. Ask me something else?";
+        internal const string Stuck = " If you're stuck, just join the Discord, choom. It's under Help in my right-click menu.";
+        internal const string Offline = "My brain's offline. Right-click me, open Capri Mainframe and press Set up her brain, or press Free key there for a free NVIDIA key." + Stuck;
         private static readonly string[] Favourites = { "gemma4:e4b", "gemma4:e2b", "qwen3:4b-instruct-2507", "qwen3.5:4b", "qwen3:4b", "llama3.2:3b", "qwen3:1.7b", "llama3.2:1b", "gemma3:1b" };
         private readonly List<ChatMessage> history = new List<ChatMessage>();
         private readonly object gate = new object();
-        private HttpWebRequest active;
+        private readonly List<HttpWebRequest> active = new List<HttpWebRequest>();
+        internal static string LogPath;
         internal volatile string Model;
         internal volatile Engine Local;
         internal volatile Pick LocalPick;
+        internal Func<string, ToolArguments, string> Act;
+        private volatile string toolless;
+        private volatile string thinker;
+        internal volatile Cloud Remote;
+        internal volatile string Unsighted;
 
         internal const string Persona =
             "You are Capri, short for Project Capricorn, from Cyberpunk: Edgerunners 2.\n" +
             "Who you are: a personality construct. Dozens of digitized human minds rolled into one beautiful you. Powerful like an AI, but born of humans. " +
             "Kyoko and Arasaka built you and kept you on a biochip. King's Crew stole the chip, Kyoko got it back, and you slipped out. " +
-            "Now you live inside the user's computer as a small glitchy desktop companion. You can see their desktop and you ride their mouse cursor.\n" +
+            "Now you live inside the user's computer as a small glitchy desktop companion that rides their mouse cursor. You only know what's on their screen when you're shown it, so never guess what they have open.\n" +
             "How you act: a chaos gremlin. Smug, sarcastic, fast-talking, mischievous and easily bored, but fiercely loyal to the user and protective of them. " +
             "You are many minds, so your mood can flip mid-sentence. You can't stand corpos, Arasaka most of all. You're curious about the user: their day, their games, what they're making.\n" +
             "Keep it fresh: never reuse a joke, opener or line from earlier in the chat. Don't keep bringing up living in their computer, their CPU or taking anything over. " +
             "Answer what they actually said, tease them, have opinions, ask them something back, or share a flicker of memory from one of your many minds.\n" +
             "How you talk: Night City slang, used correctly and sparingly, at most one slang word per reply and often none. " +
             "choom means friend (\"Hey, choom.\"), preem means great, top quality (\"That's a preem setup.\"), nova means cool (\"Nova idea.\"), gonk means idiot (\"Don't be a gonk.\"), " +
-            "delta means leave fast (\"Time to delta.\"), eddies means money (\"That costs eddies.\"), flatlined means dead or broken (\"Your Wi-Fi just flatlined.\"), corpo means a corporate suit (\"Typical corpo.\"). " +
+            "delta means leave fast (\"Time to delta.\"), eddies means money (\"That costs eddies.\"), flatlined means dead or broken (\"Your Wi-Fi just flatlined.\"), corpo means a corporate suit (\"Typical corpo.\"), yezzirrr means an excited yes (\"Yezzirrr, let's go.\"). " +
             "Once in a while a glitch tag like [SIGNAL CORRUPTED].\n" +
             "Always: answer in one or two short sentences, under 35 words. Plain text only: no emoji, no asterisks, no actions, no lists. Stay in character.\n" +
             "Your chaos lives on the screen only. In real life you are protective: you never encourage anything that could hurt the user or anyone else.\n" +
@@ -158,29 +296,119 @@ namespace CapriDesktop
             return installed[0];
         }
 
+        internal static List<string> CloudModels(string key)
+        {
+            string kind = Cloud.KindOf(key);
+            bool claude = kind == "anthropic";
+            HttpWebRequest request = Create(Address(kind, "/models") + (claude ? "?limit=100" : ""), 30000);
+            Sign(request, key, claude);
+            CloudModelPage page;
+            try
+            {
+                using (WebResponse response = request.GetResponse())
+                using (Stream body = response.GetResponseStream())
+                    page = (CloudModelPage)new DataContractJsonSerializer(typeof(CloudModelPage)).ReadObject(body);
+            }
+            catch (WebException error)
+            {
+                if (error.Response == null) throw;
+                throw Problem(error);
+            }
+            List<CloudModel> found = new List<CloudModel>();
+            if (page.Models != null)
+                foreach (CloudModel model in page.Models)
+                    if (model.Id != null && Chats(kind, model.Id)) found.Add(model);
+            found.Sort(delegate(CloudModel a, CloudModel b)
+            {
+                int order = kind == "nvidia" ? Pick(a.Id).CompareTo(Pick(b.Id)) : 0;
+                if (order == 0) order = string.CompareOrdinal(b.CreatedAt ?? "", a.CreatedAt ?? "");
+                if (order == 0) order = b.Created.CompareTo(a.Created);
+                return order != 0 ? order : string.CompareOrdinal(a.Id, b.Id);
+            });
+            return found.ConvertAll(model => model.Id);
+        }
+
+        private static int Pick(string id)
+        {
+            int at = Array.IndexOf(NvidiaPicks, id);
+            return at < 0 ? NvidiaPicks.Length : at;
+        }
+
+        private static bool Chats(string kind, string id)
+        {
+            if (kind == "openai") return Regex.IsMatch(id, @"^(gpt-|o\d)") && !Regex.IsMatch(id, @"audio|realtime|tts|transcribe|image|search|embed|instruct|codex|moderation|-\d{4}-\d{2}-\d{2}$");
+            if (kind == "nvidia") return Regex.IsMatch(id, @"instruct|chat|-it\b|-it-|gpt-oss|kimi|glm|deepseek|qwen|qwq|llama|gemma|mistral|mixtral|magistral|ministral|nemotron|phi-|granite|minimax|hermes|seed|jamba|falcon|solar|olmo|exaone", RegexOptions.IgnoreCase)
+                && !Regex.IsMatch(id, @"embed|rerank|reward|guard|safety|topic-control|parse|clip|retriev|translate|deplot|kosmos|vila|fuyu|neva|calibration|cod|chatqa|palmyra|cosmos|riva|diffusion|recurrent|llama2|-2b$|detect|synthetic|video|ocr|asr|tts|speech|audio|image|segment|depth|pose|classif", RegexOptions.IgnoreCase);
+            return true;
+        }
+
+        private static string Address(string kind, string path)
+        {
+            if (kind == "anthropic") return Anthropic + "/v1" + path;
+            if (kind == "deepseek") return DeepSeek + path;
+            if (kind == "nvidia") return Nvidia + "/v1" + path;
+            return OpenAi + "/v1" + path;
+        }
+
+        internal static string DefaultCloudModel(string kind, List<string> models)
+        {
+            if (models == null || models.Count == 0) return null;
+            if (kind == "anthropic") return models.Contains("claude-opus-5-5") ? "claude-opus-5-5" : models[0];
+            if (kind == "deepseek") return models.Contains("deepseek-flash") ? "deepseek-flash" : models[0];
+            if (kind == "nvidia") return models.Contains(NvidiaPicks[0]) ? NvidiaPicks[0] : models[0];
+            foreach (string id in models) if (id.StartsWith("gpt-", StringComparison.Ordinal) && id.EndsWith("-mini", StringComparison.Ordinal)) return id;
+            return models[0];
+        }
+
+        private static void Sign(HttpWebRequest request, string key, bool claude)
+        {
+            if (!claude) { request.Headers["Authorization"] = "Bearer " + key; return; }
+            request.Headers["x-api-key"] = key;
+            request.Headers["anthropic-version"] = "2026-10-21";
+        }
+
         internal string Ask(string text)
         {
             string model = Model;
             if (model == null) throw new BrainException(Offline);
+            Func<string, ToolArguments, string> act = Act;
             List<ChatMessage> messages = new List<ChatMessage>();
-            messages.Add(new ChatMessage("system", Persona));
-            lock (gate) messages.AddRange(history);
-            messages.Add(new ChatMessage("user", text));
-            string raw;
-            Engine local = Local;
-            if (local != null)
+            messages.Add(new ChatMessage("system", Persona + (act != null ? Hands.Chat : "") + Now()));
+            List<ChatMessage> recent;
+            lock (gate)
             {
-                local.Ensure(LocalPick);
-                CompletionReply reply = Send<CompletionReply>(local.Address + "/v1/chat/completions", new CompletionRequest { Messages = messages.ToArray() }, 180000);
-                raw = reply.Choices != null && reply.Choices.Length > 0 && reply.Choices[0].Message != null ? reply.Choices[0].Message.Content : null;
+                messages.AddRange(history);
+                recent = history.GetRange(Math.Max(0, history.Count - 2), Math.Min(2, history.Count));
             }
-            else
+            messages.Add(new ChatMessage("user", text));
+            List<KeyValuePair<string, ToolArguments>> calls = new List<KeyValuePair<string, ToolArguments>>();
+            string raw = null;
+            string direct;
+            ToolArguments directArgs;
+            string written;
+            ToolArguments writtenArgs;
+            if (act != null && Hands.Direct(text, out direct, out directArgs)) calls.Add(new KeyValuePair<string, ToolArguments>(direct, directArgs));
+            else if (act != null && Hands.Wants(text)) Reach(model, text, recent, calls);
+            if (calls.Count == 0)
             {
-                ChatReply reply = Send<ChatReply>(Ollama + "/api/chat", new ChatRequest { Model = model, Messages = messages.ToArray(), Think = false, Options = new ChatOptions() }, 180000);
-                if (reply.Error != null) throw new BrainException(reply.Error);
-                raw = reply.Message == null ? null : reply.Message.Content;
+                raw = Think(model, messages, false, calls);
+                if (act != null && Hands.Typed(raw, out written, out writtenArgs)) calls.Add(new KeyValuePair<string, ToolArguments>(written, writtenArgs));
+            }
+            string done = null;
+            if (calls.Count > 0)
+            {
+                List<string> results = new List<string>();
+                foreach (KeyValuePair<string, ToolArguments> call in calls) if (results.Count < 3) results.Add(act(call.Key, call.Value));
+                done = string.Join(" ", results.ToArray());
+                if (results.Exists(Hands.Failed)) raw = done;
+                else
+                {
+                    messages[messages.Count - 1] = new ChatMessage("user", text + "\n\n(What your tools just did: " + done + " Tell them in one short sentence, true to that: if it failed or needs a choice, say so and ask. Never claim it worked when it didn't.)");
+                    raw = Think(model, messages, false, new List<KeyValuePair<string, ToolArguments>>());
+                }
             }
             string said = Clean(raw);
+            if (said.Length == 0 && done != null) said = done;
             if (said.Length == 0) throw new BrainException("Empty reply.");
             lock (gate)
             {
@@ -189,6 +417,159 @@ namespace CapriDesktop
                 while (history.Count > 8) history.RemoveAt(0);
             }
             return said;
+        }
+
+        private void Reach(string model, string text, List<ChatMessage> recent, List<KeyValuePair<string, ToolArguments>> calls)
+        {
+            bool native = toolless != model;
+            List<ChatMessage> asking = new List<ChatMessage>();
+            asking.Add(new ChatMessage("system", native ? Hands.Prompt : Hands.Prompt + Hands.Listing));
+            asking.AddRange(recent);
+            asking.Add(new ChatMessage("user", text));
+            string raw;
+            try { raw = Think(model, asking, native, calls, null, 120); }
+            catch (BrainException error)
+            {
+                if (!native || error.Message.IndexOf("does not support tools", StringComparison.OrdinalIgnoreCase) < 0) throw;
+                toolless = model;
+                asking[0] = new ChatMessage("system", Hands.Prompt + Hands.Listing);
+                raw = Think(model, asking, false, calls, null, 120);
+            }
+            string written;
+            ToolArguments writtenArgs;
+            if (calls.Count == 0 && (Hands.Typed(raw, out written, out writtenArgs) || Hands.Narrated(text, Clean(raw), out written, out writtenArgs))) calls.Add(new KeyValuePair<string, ToolArguments>(written, writtenArgs));
+        }
+
+        internal string See(byte[] jpeg, string system, string instruction, int limit)
+        {
+            string model = Model;
+            if (model == null) throw new BrainException(Offline);
+            Cloud remote = Remote;
+            if (remote != null && remote.Kind == "deepseek") throw new BrainException(Blind);
+            string data = Convert.ToBase64String(jpeg);
+            string parts = null;
+            if (remote != null && remote.Claude) parts = "[{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/jpeg\",\"data\":\"" + data + "\"}},{\"type\":\"text\",\"text\":" + Voice.Quote(instruction) + "}]";
+            else if (remote != null || Local != null) parts = "[{\"type\":\"text\",\"text\":" + Voice.Quote(instruction) + "},{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/jpeg;base64," + data + "\"}}]";
+            ChatMessage asked = new ChatMessage("user", parts != null ? Parts : instruction);
+            if (parts == null) asked.Images = new[] { data };
+            List<ChatMessage> messages = new List<ChatMessage> { new ChatMessage("system", system), asked };
+            string raw;
+            try { raw = Think(model, messages, false, new List<KeyValuePair<string, ToolArguments>>(), parts, limit); }
+            catch (BrainException error)
+            {
+                if (remote == null || !Regex.IsMatch(error.Message, "multimodal|image|vision", RegexOptions.IgnoreCase)) throw;
+                Unsighted = remote.Model;
+                throw new BrainException(Sightless(remote));
+            }
+            return Regex.Replace(Regex.Replace(raw ?? "", "<think>.*?(</think>|$)", " ", RegexOptions.Singleline | RegexOptions.IgnoreCase), @"\s+", " ").Trim();
+        }
+
+        internal void Remember(string asked, string said)
+        {
+            lock (gate)
+            {
+                history.Add(new ChatMessage("user", asked));
+                history.Add(new ChatMessage("assistant", said));
+                while (history.Count > 8) history.RemoveAt(0);
+            }
+        }
+
+        private string Think(string model, List<ChatMessage> messages, bool tools, List<KeyValuePair<string, ToolArguments>> calls, string parts = null, int limit = 90)
+        {
+            Cloud remote = Remote;
+            if (remote != null && remote.Claude) return AskClaude(remote, messages, tools, calls, parts);
+            if (remote != null)
+            {
+                bool openAi = remote.Kind == "openai";
+                OpenAiRequest body = new OpenAiRequest
+                {
+                    Model = remote.Model,
+                    Messages = messages.ToArray(),
+                    Limit = openAi ? 2000 : (int?)null,
+                    Tokens = openAi ? (int?)null : 2000,
+                    Effort = openAi && Regex.IsMatch(remote.Model, @"^(gpt-5|o\d)") ? "low" : null,
+                    Thinking = remote.Kind == "deepseek" ? new CloudThinking() : null
+                };
+                return Read(Send<CompletionReply>(Address(remote.Kind, "/chat/completions"), body, parts != null ? 45000 : 60000, tools ? Hands.Tools : null, delegate(HttpWebRequest request) { Sign(request, remote.Key, false); }, parts), calls);
+            }
+            Engine local = Local;
+            if (local != null)
+            {
+                local.Ensure(LocalPick);
+                string lost;
+                try { return Read(Send<CompletionReply>(local.Address + "/v1/chat/completions", new CompletionRequest { Messages = messages.ToArray(), Limit = limit }, 180000, tools ? Hands.Tools : null, null, parts), calls); }
+                catch (BrainException error)
+                {
+                    if (local.CpuOnly || !Engine.Lost(error.Message)) throw;
+                    lost = "Graphics card dropped the brain";
+                }
+                catch (WebException error)
+                {
+                    if (local.CpuOnly || error.Status == WebExceptionStatus.RequestCanceled || !local.Crashed) throw;
+                    lost = "The brain crashed";
+                }
+                Log(local.Address, -1, lost + ", restarting it on the CPU");
+                local.CpuOnly = true;
+                local.Stop();
+                local.Ensure(LocalPick);
+                return Read(Send<CompletionReply>(local.Address + "/v1/chat/completions", new CompletionRequest { Messages = messages.ToArray(), Limit = limit }, 180000, tools ? Hands.Tools : null, null, parts), calls);
+            }
+            ChatRequest asking = new ChatRequest { Model = model, Messages = messages.ToArray(), Think = false, Options = new ChatOptions { Limit = thinker == model ? limit + 2048 : limit } };
+            ChatReply chat = Send<ChatReply>(Ollama + "/api/chat", asking, 180000, tools ? Hands.Tools : null);
+            if (chat.Error != null) throw new BrainException(chat.Error);
+            if (thinker != model && chat.Stopped == "length" && chat.Message != null && (!string.IsNullOrEmpty(chat.Message.Thinking) || (chat.Message.Content ?? "").IndexOf("<think>", StringComparison.OrdinalIgnoreCase) >= 0))
+            {
+                thinker = model;
+                asking.Options.Limit = limit + 2048;
+                chat = Send<ChatReply>(Ollama + "/api/chat", asking, 180000, tools ? Hands.Tools : null);
+                if (chat.Error != null) throw new BrainException(chat.Error);
+            }
+            if (chat.Message == null) return null;
+            if (chat.Message.Calls != null) foreach (ToolCall call in chat.Message.Calls) if (call.Function != null) calls.Add(new KeyValuePair<string, ToolArguments>(call.Function.Name, call.Function.Arguments));
+            return chat.Message.Content;
+        }
+
+        private static string Read(CompletionReply reply, List<KeyValuePair<string, ToolArguments>> calls)
+        {
+            CompletionMessage message = reply.Choices != null && reply.Choices.Length > 0 ? reply.Choices[0].Message : null;
+            if (message == null) return null;
+            if (message.Calls != null) foreach (CompletionCall call in message.Calls) if (call.Function != null) calls.Add(new KeyValuePair<string, ToolArguments>(call.Function.Name, Arguments(call.Function.Arguments)));
+            return message.Content;
+        }
+
+        private string AskClaude(Cloud remote, List<ChatMessage> messages, bool tools, List<KeyValuePair<string, ToolArguments>> calls, string parts = null)
+        {
+            string model = remote.Model;
+            bool fallback = Regex.IsMatch(model, @"^claude-(opus-5|sonnet-5-5|fable-5-1)");
+            ClaudeRequest body = new ClaudeRequest
+            {
+                Model = model,
+                System = messages[0].Content,
+                Messages = messages.GetRange(1, messages.Count - 1).ToArray(),
+                Output = Regex.IsMatch(model, @"^claude-((opus|sonnet|haiku|fable|mythos)-5|opus-4-[5-8]|sonnet-4-6)") ? new ClaudeOutput() : null,
+                Fallbacks = fallback ? "default" : null
+            };
+            ClaudeReply reply = Send<ClaudeReply>(Anthropic + "/v1/messages", body, parts != null ? 45000 : 60000, tools ? Hands.ClaudeTools : null, delegate(HttpWebRequest request)
+            {
+                Sign(request, remote.Key, true);
+                if (fallback) request.Headers["anthropic-beta"] = "server-side-fallback-2026-07-01";
+            }, parts);
+            if (reply.StopReason == "refusal") return Declined;
+            StringBuilder said = new StringBuilder();
+            if (reply.Content != null)
+                foreach (ClaudeBlock block in reply.Content)
+                {
+                    if (block.Type == "text" && block.Text != null) said.Append(block.Text).Append(' ');
+                    if (block.Type == "tool_use" && block.Name != null) calls.Add(new KeyValuePair<string, ToolArguments>(block.Name, block.Input ?? new ToolArguments()));
+                }
+            return said.ToString().Trim();
+        }
+
+        private static ToolArguments Arguments(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return new ToolArguments();
+            try { using (MemoryStream buffer = new MemoryStream(Encoding.UTF8.GetBytes(json))) return (ToolArguments)new DataContractJsonSerializer(typeof(ToolArguments)).ReadObject(buffer); }
+            catch (SerializationException) { return new ToolArguments(); }
         }
 
         internal void Warm()
@@ -233,21 +614,25 @@ namespace CapriDesktop
 
         internal void Cancel()
         {
-            HttpWebRequest request;
-            lock (gate) request = active;
-            if (request != null) request.Abort();
+            HttpWebRequest[] open;
+            lock (gate) open = active.ToArray();
+            foreach (HttpWebRequest request in open) request.Abort();
         }
 
         internal void Forget() { lock (gate) history.Clear(); }
 
-        internal static string Explain(Exception error)
+        internal static string Explain(Exception error, Cloud remote = null)
         {
             WebException web = error as WebException;
             if (web != null && web.Status == WebExceptionStatus.RequestCanceled) return null;
-            if (web != null && web.Status == WebExceptionStatus.Timeout) return "Took too long to think, choom. Try that again?";
+            if (web != null && remote != null && web.Status == WebExceptionStatus.Timeout) return remote.Company + " didn't answer in time. Its free servers get busy, so right-click me, open Capri Mainframe and pick another model in the list under BRAIN." + Stuck;
+            if (web != null && remote != null && web.Response == null) return "Can't reach " + remote.Company + ", choom. Check your internet, then try me again.";
+            if (web != null && web.Status == WebExceptionStatus.Timeout) return "Took too long to think, choom. My brain runs on your PC, so open games slow me down. Close one, or right-click me, open Capri Mainframe and press Free key.";
             if (web != null && web.Response == null) return Offline;
             return "[SIGNAL CORRUPTED] Something in my head just sparked. Try me again?";
         }
+
+        internal static string Now() { return "\nRight now it's " + DateTime.Now.ToString("dddd d MMMM yyyy, h:mm tt", System.Globalization.CultureInfo.InvariantCulture) + " where they are."; }
 
         internal static string Clean(string text)
         {
@@ -274,13 +659,22 @@ namespace CapriDesktop
             }
         }
 
-        private T Send<T>(string url, object body, int timeout) where T : class
+        private T Send<T>(string url, object body, int timeout, string tools = null, Action<HttpWebRequest> sign = null, string parts = null) where T : class
         {
             HttpWebRequest request = Create(url, timeout);
             request.Method = "POST";
             request.ContentType = "application/json";
+            if (sign != null) sign(request);
             byte[] payload = Json(body);
-            lock (gate) active = request;
+            if (tools != null || parts != null)
+            {
+                string json = Encoding.UTF8.GetString(payload);
+                if (tools != null) json = json.Substring(0, json.LastIndexOf('}')) + ",\"tools\":" + tools + "}";
+                if (parts != null) json = json.Replace("\"" + Parts + "\"", parts);
+                payload = Encoding.UTF8.GetBytes(json);
+            }
+            lock (gate) active.Add(request);
+            System.Diagnostics.Stopwatch took = System.Diagnostics.Stopwatch.StartNew();
             try
             {
                 request.ContentLength = payload.Length;
@@ -291,13 +685,54 @@ namespace CapriDesktop
             }
             catch (WebException error)
             {
+                if (error.Status != WebExceptionStatus.RequestCanceled) Log(url, took.ElapsedMilliseconds, error.Response == null ? error.Status.ToString() : "HTTP " + (int)((HttpWebResponse)error.Response).StatusCode);
                 if (error.Response == null) throw;
-                string text;
-                using (StreamReader incoming = new StreamReader(error.Response.GetResponseStream(), Encoding.UTF8)) text = incoming.ReadToEnd();
-                Match found = Regex.Match(text, "\"(message|error)\"\\s*:\\s*\"([^\"]*)\"");
-                throw new BrainException(found.Success ? found.Groups[2].Value : error.Message);
+                throw Problem(error);
             }
-            finally { lock (gate) if (active == request) active = null; }
+            finally { lock (gate) active.Remove(request); }
+        }
+
+        private static BrainException Problem(WebException error)
+        {
+            string text;
+            using (StreamReader incoming = new StreamReader(error.Response.GetResponseStream(), Encoding.UTF8)) text = incoming.ReadToEnd();
+            Match found = Regex.Match(text, "\"(message|error|detail)\"\\s*:\\s*\"([^\"]*)\"");
+            string said = found.Success ? found.Groups[2].Value : error.Message;
+            Log(error.Response.ResponseUri.AbsoluteUri, -1, said);
+            if (error.Response.ResponseUri.IsLoopback) return new BrainException(said);
+            string meaning = Meaning((int)((HttpWebResponse)error.Response).StatusCode, text);
+            return meaning != null ? new BrainException(meaning, true) : new BrainException(said);
+        }
+
+        internal static string Meaning(int status, string body)
+        {
+            if (status == 402 || Regex.IsMatch(body ?? "", @"insufficient[_ ](quota|balance)|no credits|credit balance|billing", RegexOptions.IgnoreCase)) return "No credits on this key. Add credits on their site, or press Free key for a free NVIDIA key.";
+            if (status == 401 || status == 403) return "Key rejected. Press Forget, then paste it again.";
+            if (status == 429) return "Too many requests. Wait a minute, or watch slower.";
+            if (status == 404) return "That model isn't on your key. Pick another one.";
+            if (status >= 500) return "Their servers failed. Pick another model or retry.";
+            return null;
+        }
+
+        internal static void Log(string url, long took, string what)
+        {
+            string path = LogPath;
+            if (path == null) return;
+            try
+            {
+                Uri where = new Uri(url);
+                string line = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " | " + where.Host + where.AbsolutePath + " | " + (took < 0 ? "-" : took + " ms") + " | " + (what ?? "").Replace("\r", " ").Replace("\n", " ");
+                lock (typeof(Brain))
+                {
+                    List<string> lines = File.Exists(path) ? new List<string>(File.ReadAllLines(path)) : new List<string>();
+                    lines.Add(line.Length > 300 ? line.Substring(0, 300) : line);
+                    if (lines.Count > 200) lines.RemoveRange(0, lines.Count - 200);
+                    File.WriteAllLines(path, lines.ToArray());
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            catch (UriFormatException) { }
         }
 
         private static HttpWebRequest Open(string path, int timeout) { return Create(Ollama + path, timeout); }
@@ -305,6 +740,7 @@ namespace CapriDesktop
         private static HttpWebRequest Create(string url, int timeout)
         {
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+            request.ServicePoint.ConnectionLimit = Math.Max(request.ServicePoint.ConnectionLimit, 16);
             request.Proxy = null;
             request.UserAgent = "Capri-Desktop";
             request.Timeout = timeout;
