@@ -2,15 +2,14 @@
   const repo = 'yerocsin42/capri-desktop';
   const install = document.querySelector('#install');
   const systems = document.querySelectorAll('.systems a[data-os]');
-  const files = { windows: 'Capri-Setup.exe', linux: 'Capri-linux-x64.tar.gz' };
-  const paused = ['mac', 'intel'];
+  const files = { windows: 'Capri-Setup.exe', mac: 'Capri-mac-apple-silicon.zip', intel: 'Capri-mac-intel.zip', linux: 'Capri-linux-x64.tar.gz' };
   const agent = navigator.userAgent;
   const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || agent;
   let system = /Android|iPhone|iPad|CrOS/.test(agent) ? 'windows' : /mac/i.test(platform) && navigator.maxTouchPoints < 2 ? 'mac' : /linux|x11/i.test(platform) ? 'linux' : 'windows';
   const urls = {};
   systems.forEach(link => { urls[link.dataset.os] = link.href; });
   const point = () => {
-    install.href = urls[system === 'intel' ? 'mac' : system] || urls.windows;
+    install.href = urls[system] || urls.windows;
     systems.forEach(link => {
       link.hidden = !urls[link.dataset.os];
       if (urls[link.dataset.os]) link.href = urls[link.dataset.os];
@@ -54,12 +53,8 @@
     notes.forEach(note => { note.hidden = note.dataset.os !== shown; });
     if (headsUp.showModal && !headsUp.open) headsUp.showModal();
   };
-  const pick = (event, os) => {
-    if (paused.includes(os)) event.preventDefault();
-    warn(os);
-  };
-  install.addEventListener('click', event => pick(event, urls[system === 'intel' ? 'mac' : system] ? system : 'windows'));
-  systems.forEach(link => link.addEventListener('click', event => pick(event, link.dataset.os)));
+  install.addEventListener('click', () => warn(urls[system] ? system : 'windows'));
+  systems.forEach(link => link.addEventListener('click', () => warn(link.dataset.os)));
   headsUp.addEventListener('click', event => { if (event.target === headsUp) headsUp.close(); });
 
   const stage = document.querySelector('#demo');
@@ -423,7 +418,7 @@
     downloadCount.textContent = compact.format(downloads);
   };
   readDownloads().catch(() => {});
-  [install, ...systems].forEach(link => link.addEventListener('click', event => { if (!event.defaultPrevented) readDownloads({ method: 'POST', keepalive: true }).catch(() => {}); }));
+  [install, ...systems].forEach(link => link.addEventListener('click', () => { readDownloads({ method: 'POST', keepalive: true }).catch(() => {}); }));
 
   const changelog = document.querySelector('#changelog');
   const track = changelog.querySelector('.changelog-track');
