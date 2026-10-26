@@ -37,6 +37,18 @@ Beware that Capri may try to take over your human CPU. We take no responsibility
   <img src="assets/readme/mainframe.png" alt="The Capri Mainframe" width="22%">
 </p>
 
+## What you need
+
+- Windows 10 or 11 (64-bit). Nothing else to install.
+- A mic, if you want to voice chat.
+
+| | Brain on your PC | Brain from a key (like the free NVIDIA one) |
+| --- | --- | --- |
+| Memory | 8 GB, 16 GB is better | 4 GB |
+| Graphics card | Optional, but 4 GB or more makes her faster | Not needed |
+| Space | 3 to 5 GB | Under 100 MB |
+| Internet | Only for the download | Always |
+
 ## Getting started
 
 1. Download **Capri-Setup.exe** and run it
@@ -79,6 +91,7 @@ Just ask her for things, like "open Spotify", "play Blinding Lights", "pause", "
 - A free voice that runs on your PC
 - Remembering things about you
 - Looking things up and telling you the answer
+- Her own cursor that she moves around your screen
 - Head pats (smh)
 - Mischief mode: screen glitches, stealing your cursor, "you've been hacked" notes
 - Mac and Linux
