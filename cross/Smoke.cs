@@ -2,6 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
@@ -34,6 +38,9 @@ namespace CapriDesktop
         private int dy;
         private int arrivalsBefore;
         private double outFrom = -1;
+        private TcpListener fakeVoice;
+        private readonly List<string> voiceAsked = new List<string>();
+        private readonly List<byte[]> spoken = new List<byte[]>();
 
         internal Smoke(Pet pet, string folder)
         {
@@ -424,11 +431,145 @@ namespace CapriDesktop
                 if (!Sitting()) throw new Exception("After Show her she didn't sit down again.");
                 if (sounds.Count != 2 || sounds[1].Length != Sfx.Make(Cue.Arrive, 60).Length) throw new Exception("Show her didn't play the arrive sound: " + sounds.Count);
                 checks.Add("PASS show: Show her glitches her back in with its sound and she drops onto a seat");
+                Voice.Host = FakeVoice();
+                Voice.Playback = delegate(byte[] wav) { lock (spoken) spoken.Add(wav); };
+                Voice.Silence = delegate { };
+                pet.Talk.Dismiss();
+                if (pet.VoiceStatus != "no key | no voice | quiet") throw new Exception("She started with a voice: " + pet.VoiceStatus);
+                pet.AskVoiceKey();
+                if (!pet.Talk.Typing || !pet.Talk.Typer.Secret || pet.Talk.Reply == null || pet.Talk.Reply.IndexOf("ElevenLabs API key", StringComparison.Ordinal) < 0) throw new Exception("Add ElevenLabs key didn't ask for the key in a hidden box.");
+                pet.Talk.Submit("bad-key");
+                return true;
+            }
+            if (step == 18)
+            {
+                if (pet.Talk.Reply == null) return false;
+                if (pet.Talk.Reply != Voice.RejectedNew || pet.VoiceStatus != "no key | no voice | quiet" || File.Exists(Path.Combine(folder, "voice-key")) || pet.Talk.Typer.Secret) throw new Exception("A rejected ElevenLabs key wasn't explained, or was kept: " + pet.Talk.Reply + " | " + pet.VoiceStatus);
+                pet.AskVoiceKey();
+                pet.Talk.Submit("good-key-1234");
+                return true;
+            }
+            if (step == 19)
+            {
+                if (pet.Talk.Reply == null) return false;
+                string keyPath = Path.Combine(folder, "voice-key");
+                string[] asked;
+                lock (voiceAsked) asked = voiceAsked.ToArray();
+                int voiced;
+                lock (spoken) voiced = spoken.Count;
+                bool shut = OperatingSystem.IsWindows() || File.GetUnixFileMode(keyPath) == (UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                string last = asked.Length == 0 ? "" : asked[asked.Length - 1];
+                if (pet.Talk.Reply != "Key saved. I'll talk as Capri Test. Change it under Settings > Voice." || !File.Exists(keyPath) || File.ReadAllText(keyPath) != "good-key-1234" || !shut || pet.VoiceStatus != "key 1234 | Capri Test | speaking" || voiced != 1 || !last.StartsWith("POST /v1/text-to-speech/v1?", StringComparison.Ordinal) || last.IndexOf(" good-key-1234 ", StringComparison.Ordinal) < 0) throw new Exception("Saving a good ElevenLabs key went wrong: " + pet.Talk.Reply + " | " + pet.VoiceStatus + " | " + voiced + " | " + string.Join(" / ", asked));
+                string voiceMenu = pet.VoiceMenu;
+                if (voiceMenu != "*Speak replies | - | *Capri Test | Adam | - | New key... | Remove key ending 1234") throw new Exception("The Voice menu listed the wrong things: " + voiceMenu);
+                checks.Add("PASS voice key: Settings > Voice asks for the key in a hidden box, explains and drops a rejected key, keeps a good one in a private file and picks their own voice first");
+                pet.Think = delegate(string words) { return "Preem question, choom."; };
+                pet.Hear("talk to me");
+                return true;
+            }
+            if (step == 20)
+            {
+                if (pet.Talk.Reply == null) return false;
+                string[] asked;
+                lock (voiceAsked) asked = voiceAsked.ToArray();
+                int voiced;
+                lock (spoken) voiced = spoken.Count;
+                string last = asked.Length == 0 ? "" : asked[asked.Length - 1];
+                if (pet.Talk.Reply != "Preem question, choom." || voiced != 2 || last.IndexOf("question", StringComparison.Ordinal) < 0 || Math.Abs(pet.Talk.Pace - 22) > 1.5) throw new Exception("Her reply wasn't spoken at the voice's pace: " + pet.Talk.Reply + " | " + voiced + " | " + pet.Talk.Pace + " | " + last);
+                pet.SetSpeak(false);
+                pet.Hear("again");
+                return true;
+            }
+            if (step == 21)
+            {
+                if (pet.Talk.Reply == null) return false;
+                int voiced;
+                lock (spoken) voiced = spoken.Count;
+                if (voiced != 2 || pet.VoiceStatus != "key 1234 | Capri Test | quiet") throw new Exception("Speak replies off still spoke: " + voiced + " | " + pet.VoiceStatus);
+                pet.ForgetVoice();
+                if (File.Exists(Path.Combine(folder, "voice-key")) || pet.VoiceStatus != "no key | v1 | quiet" || pet.VoiceMenu != "Add ElevenLabs key...") throw new Exception("Remove key didn't remove it: " + pet.VoiceStatus + " | " + pet.VoiceMenu);
+                checks.Add("PASS voice: replies are spoken through ElevenLabs and type out at the voice's pace, Speak replies off keeps her quiet, and Remove key deletes the file");
+                fakeVoice.Stop();
                 Send(shelf, "quit");
                 Finish(null);
                 return true;
             }
             return false;
+        }
+
+        private string FakeVoice()
+        {
+            fakeVoice = new TcpListener(IPAddress.Loopback, 0);
+            fakeVoice.Start();
+            TcpListener listener = fakeVoice;
+            Thread serve = new Thread(delegate()
+            {
+                while (true)
+                {
+                    TcpClient client;
+                    try { client = listener.AcceptTcpClient(); }
+                    catch (Exception) { return; }
+                    try { using (client) Serve(client.GetStream()); }
+                    catch (Exception) { }
+                }
+            });
+            serve.IsBackground = true;
+            serve.Start();
+            return "http://127.0.0.1:" + ((IPEndPoint)fakeVoice.LocalEndpoint).Port;
+        }
+
+        private void Serve(NetworkStream stream)
+        {
+            List<byte> read = new List<byte>();
+            byte[] chunk = new byte[4096];
+            int end = -1;
+            while (end < 0)
+            {
+                int got = stream.Read(chunk, 0, chunk.Length);
+                if (got <= 0) return;
+                for (int i = 0; i < got; i++) read.Add(chunk[i]);
+                for (int i = 3; i < read.Count && end < 0; i++) if (read[i - 3] == 13 && read[i - 2] == 10 && read[i - 1] == 13 && read[i] == 10) end = i + 1;
+            }
+            string head = Encoding.ASCII.GetString(read.ToArray(), 0, end);
+            string[] lines = head.Split(new[] { "\r\n" }, StringSplitOptions.None);
+            string[] first = lines[0].Split(' ');
+            string key = "";
+            int length = 0;
+            foreach (string line in lines)
+            {
+                int colon = line.IndexOf(':');
+                if (colon < 0) continue;
+                string name = line.Substring(0, colon).Trim().ToLowerInvariant();
+                string value = line.Substring(colon + 1).Trim();
+                if (name == "xi-api-key") key = value;
+                if (name == "content-length") length = int.Parse(value);
+            }
+            while (read.Count - end < length)
+            {
+                int got = stream.Read(chunk, 0, chunk.Length);
+                if (got <= 0) break;
+                for (int i = 0; i < got; i++) read.Add(chunk[i]);
+            }
+            string body = Encoding.UTF8.GetString(read.ToArray(), end, read.Count - end);
+            lock (voiceAsked) voiceAsked.Add(first[0] + " " + first[1] + " " + key + " " + body);
+            int status = 200;
+            string type = "application/json";
+            byte[] reply;
+            if (key == "bad-key") { status = 401; reply = Encoding.UTF8.GetBytes("{\"detail\":{\"status\":\"invalid_api_key\",\"message\":\"Invalid API key\"}}"); }
+            else if (first[1].StartsWith("/v2/voices", StringComparison.Ordinal)) reply = Encoding.UTF8.GetBytes("{\"voices\":[{\"voice_id\":\"p1\",\"name\":\"Adam\",\"category\":\"premade\"},{\"voice_id\":\"v1\",\"name\":\"Capri Test\",\"category\":\"cloned\"}],\"has_more\":false}");
+            else if (first[1].StartsWith("/v1/models", StringComparison.Ordinal)) reply = Encoding.UTF8.GetBytes("[]");
+            else if (first[1].StartsWith("/v1/text-to-speech/", StringComparison.Ordinal))
+            {
+                short[] tone = new short[24000];
+                for (int i = 0; i < tone.Length; i++) tone[i] = (short)(Math.Sin(i * 0.05) * 3000);
+                reply = Voice.Wave(tone, 24000);
+                type = "audio/wav";
+            }
+            else { status = 404; reply = Encoding.UTF8.GetBytes("{}"); }
+            byte[] top = Encoding.ASCII.GetBytes("HTTP/1.1 " + status + " " + (status == 200 ? "OK" : "Error") + "\r\nContent-Type: " + type + "\r\nContent-Length: " + reply.Length + "\r\nConnection: close\r\n\r\n");
+            stream.Write(top, 0, top.Length);
+            stream.Write(reply, 0, reply.Length);
+            stream.Flush();
         }
 
         private Process Shelf(PixelRect rect)

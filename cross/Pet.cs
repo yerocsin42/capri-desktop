@@ -31,6 +31,8 @@ namespace CapriDesktop
         [DataMember] internal int Wander;
         [DataMember] internal bool NoDance;
         [DataMember] internal int? Sounds;
+        [DataMember] internal string VoiceId;
+        [DataMember] internal bool Silent;
     }
 
     internal sealed class Clip
@@ -173,6 +175,13 @@ namespace CapriDesktop
         private bool quitting;
         private bool away;
         private bool opened;
+        private readonly Voice voice = new Voice();
+        private VoiceListing voices;
+        private string voiceProblem;
+        private bool listing;
+        private MenuItem voiceMenu;
+        private const int VoiceWait = 8000;
+        private const string KeyHeard = "(voice key)";
         private bool dancing;
         private Action outro;
         private double outroAt;
@@ -218,6 +227,9 @@ namespace CapriDesktop
             if (Program.Smoke == null) Sfx.Out = Limbs.Sound;
             if (Program.Smoke == null) Brain.Load(Path.Combine(folder, "chat.json"));
             Limbs.Attach(Brain);
+            voice.Key = ReadVoiceKey();
+            voice.VoiceId = string.IsNullOrEmpty(Saved.VoiceId) ? null : Saved.VoiceId;
+            if (Program.Smoke == null) { Voice.Playback = Limbs.Speak; Voice.Silence = Limbs.Hush; }
             Title = "Capri";
             SystemDecorations = SystemDecorations.None;
             Background = Brushes.Transparent;
@@ -838,6 +850,8 @@ namespace CapriDesktop
             settings.Items.Add(replies);
             settings.Items.Add(recall);
             settings.Items.Add(sounds);
+            voiceMenu = new MenuItem { Header = "Voice" };
+            settings.Items.Add(voiceMenu);
             settings.Items.Add(notes);
             MenuItem sizes = new MenuItem { Header = "Size" };
             for (int i = 0; i < Sizes.Length; i++)
@@ -860,7 +874,7 @@ namespace CapriDesktop
             menu.Items.Add(discord);
             menu.Items.Add(new Separator());
             menu.Items.Add(quit);
-            menu.Opening += delegate { Sync(); RefreshBrains(); };
+            menu.Opening += delegate { Sync(); RefreshBrains(); RefreshVoice(); };
             return menu;
         }
 
@@ -1159,8 +1173,9 @@ namespace CapriDesktop
             if (text.Length > 240) text = text.Substring(0, 240);
             int ticket = ++asking;
             Brain.Cancel();
+            voice.Stop();
             string blocked = Safety.Screen(text);
-            if (blocked != null) { Talk.Answer(text, blocked); return; }
+            if (blocked != null) { Reply(ticket, text, blocked); return; }
             string tool;
             ToolArguments args;
             bool noted;
@@ -1170,13 +1185,13 @@ namespace CapriDesktop
             {
                 string done = Hands.Do(tool, args);
                 Brain.Remember(text, done);
-                Talk.Answer(text, done);
+                Reply(ticket, text, done);
                 return;
             }
             Func<string, string> think = Think;
             if (think == null)
             {
-                if (Brain.Model == null) { Talk.Answer(text, Offline); FindBrain(); return; }
+                if (Brain.Model == null) { Reply(ticket, text, Offline); FindBrain(); return; }
                 think = Brain.Ask;
             }
             Talk.Thinking(text);
@@ -1187,8 +1202,235 @@ namespace CapriDesktop
                 catch (BrainException error) { said = error.Message == Brain.Offline ? Offline : error.Told ? error.Message : "My brain couldn't answer: " + error.Message; }
                 catch (Exception error) { said = Brain.Explain(error) ?? "That reply was cancelled. Try again."; }
                 if (string.IsNullOrWhiteSpace(said)) said = "My brain sent an empty reply. Try again.";
-                Dispatcher.UIThread.Post(delegate { if (ticket == asking) Talk.Answer(text, said); });
+                Dispatcher.UIThread.Post(delegate { if (ticket == asking) Reply(ticket, text, said); });
             });
+        }
+
+        internal bool Speaks { get { return voice.Ready && !Saved.Silent; } }
+
+        private void Reply(int ticket, string heard, string said)
+        {
+            if (!Speaks || Voice.Spoken(said).Length == 0) { Talk.Answer(heard, said); return; }
+            Talk.Thinking(heard);
+            bool[] shown = { false };
+            DispatcherTimer.RunOnce(delegate
+            {
+                if (ticket != asking || shown[0]) return;
+                shown[0] = true;
+                Talk.Answer(heard, said);
+            }, TimeSpan.FromMilliseconds(VoiceWait));
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                byte[] wav = null;
+                string problem = null;
+                try { wav = voice.Speak(said); }
+                catch (VoiceException error) { problem = Mac(error.Message); }
+                catch (Exception error) { problem = Voice.Short("Voice glitched: " + error.Message); }
+                Dispatcher.UIThread.Post(delegate
+                {
+                    voiceProblem = problem;
+                    if (ticket != asking || shown[0]) return;
+                    shown[0] = true;
+                    double seconds = wav == null ? 0 : Voice.Seconds(wav);
+                    Talk.Answer(heard, said, seconds);
+                    if (seconds >= 0.2) voice.Play(wav);
+                });
+            });
+        }
+
+        private static string Mac(string problem) { return problem == Voice.Rejected ? "ElevenLabs rejected the key. Settings > Voice > New key." : problem; }
+
+        private string KeyFile { get { return Path.Combine(Program.Smoke ?? folder, "voice-key"); } }
+
+        private string ReadVoiceKey()
+        {
+            try
+            {
+                string key = File.ReadAllText(KeyFile).Trim();
+                return key.Length == 0 ? null : key;
+            }
+            catch (Exception) { return null; }
+        }
+
+        private void WriteVoiceKey(string key)
+        {
+            string path = KeyFile;
+            try
+            {
+                if (key == null) { File.Delete(path); return; }
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                FileStreamOptions options = new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write };
+                if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+                using (FileStream stream = new FileStream(path, options))
+                {
+                    if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(stream.SafeFileHandle, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                    using (StreamWriter writer = new StreamWriter(stream)) writer.Write(key);
+                }
+            }
+            catch (Exception error) { Brain.Log(path, -1, "Couldn't save the voice key: " + error.Message); }
+        }
+
+        internal void AskVoiceKey()
+        {
+            ComeBack();
+            Talk.AskKey("Paste your ElevenLabs API key and press Enter. It stays on this computer.");
+        }
+
+        internal void SaveVoiceKey(string key)
+        {
+            key = (key ?? "").Trim();
+            if (key.Length == 0) return;
+            int ticket = ++asking;
+            voice.Stop();
+            Talk.Thinking(KeyHeard);
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                VoiceListing found = null;
+                string problem = null;
+                int status = 0;
+                try { found = Voice.Fetch(key); }
+                catch (VoiceException error) { problem = error.Message; status = error.Status; }
+                catch (Exception error) { problem = Voice.Short("Couldn't read your ElevenLabs voices: " + error.Message); }
+                Dispatcher.UIThread.Post(delegate
+                {
+                    if (status == 401) { if (ticket == asking) Talk.Answer(KeyHeard, Voice.Unsaved(problem)); return; }
+                    voice.Key = key;
+                    WriteVoiceKey(key);
+                    voiceProblem = problem == null ? null : Mac(problem);
+                    if (found != null)
+                    {
+                        voices = found;
+                        if (found.Voices.Count > 0 && (voice.VoiceId == null || !Lists(found, voice.VoiceId))) voice.VoiceId = found.Voices[0].Id;
+                    }
+                    Saved.VoiceId = voice.VoiceId;
+                    Saved.Silent = false;
+                    Save();
+                    if (ticket != asking) return;
+                    if (problem != null) Talk.Answer(KeyHeard, "Key saved, but " + voiceProblem);
+                    else if (voice.VoiceId == null) Talk.Answer(KeyHeard, "Key saved, but your ElevenLabs account has no voices yet. Add one at elevenlabs.io.");
+                    else Reply(ticket, KeyHeard, "Key saved. I'll talk as " + VoiceName() + ". Change it under Settings > Voice.");
+                });
+            });
+        }
+
+        private static bool Lists(VoiceListing found, string id)
+        {
+            foreach (VoiceEntry entry in found.Voices) if (entry.Id == id) return true;
+            return false;
+        }
+
+        private string VoiceName()
+        {
+            if (voice.VoiceId == null) return null;
+            if (voices != null) foreach (VoiceEntry entry in voices.Voices) if (entry.Id == voice.VoiceId && !string.IsNullOrEmpty(entry.Name)) return entry.Name;
+            return voice.VoiceId;
+        }
+
+        internal string VoiceStatus { get { return (voice.Key == null ? "no key" : "key " + Voice.Tail(voice.Key)) + " | " + (VoiceName() ?? "no voice") + " | " + (Speaks ? "speaking" : "quiet"); } }
+
+        internal void SetSpeak(bool on)
+        {
+            Saved.Silent = !on;
+            if (!on) voice.Stop();
+            Save();
+        }
+
+        internal void ChooseVoice(string id)
+        {
+            voice.VoiceId = id;
+            Saved.VoiceId = id;
+            Save();
+        }
+
+        internal void ForgetVoice()
+        {
+            voice.Stop();
+            voice.Key = null;
+            voices = null;
+            voiceProblem = null;
+            WriteVoiceKey(null);
+        }
+
+        private void ListVoices()
+        {
+            string key = voice.Key;
+            if (key == null || listing) return;
+            listing = true;
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                VoiceListing found = null;
+                string problem = null;
+                try { found = Voice.Fetch(key); }
+                catch (VoiceException error) { problem = Mac(error.Message); }
+                catch (Exception error) { problem = Voice.Short("Couldn't read your ElevenLabs voices: " + error.Message); }
+                Dispatcher.UIThread.Post(delegate
+                {
+                    listing = false;
+                    if (voice.Key != key) return;
+                    if (found != null) voices = found;
+                    voiceProblem = problem;
+                    RefreshVoice();
+                });
+            });
+        }
+
+        internal string VoiceMenu
+        {
+            get
+            {
+                RefreshVoice();
+                List<string> shown = new List<string>();
+                foreach (object item in voiceMenu.Items)
+                {
+                    MenuItem entry = item as MenuItem;
+                    if (entry == null) shown.Add("-");
+                    else shown.Add((entry.IsChecked ? "*" : "") + entry.Header + (entry.IsEnabled ? "" : " (off)"));
+                }
+                return string.Join(" | ", shown);
+            }
+        }
+
+        private void RefreshVoice()
+        {
+            if (voiceMenu == null) return;
+            voiceMenu.Items.Clear();
+            if (voice.Key == null)
+            {
+                MenuItem add = new MenuItem { Header = "Add ElevenLabs key..." };
+                add.Click += delegate { AskVoiceKey(); };
+                voiceMenu.Items.Add(add);
+                return;
+            }
+            MenuItem speak = new MenuItem { Header = "Speak replies", ToggleType = MenuItemToggleType.CheckBox, IsChecked = Speaks, IsEnabled = voice.VoiceId != null };
+            speak.Click += delegate { SetSpeak(Saved.Silent); };
+            voiceMenu.Items.Add(speak);
+            voiceMenu.Items.Add(new Separator());
+            if (voices == null)
+            {
+                voiceMenu.Items.Add(new MenuItem { Header = "Loading voices...", IsEnabled = false });
+                ListVoices();
+            }
+            else
+            {
+                int shown = 0;
+                foreach (VoiceEntry entry in voices.Voices)
+                {
+                    if (shown++ >= 30) break;
+                    string id = entry.Id;
+                    MenuItem pick = new MenuItem { Header = string.IsNullOrEmpty(entry.Name) ? id : entry.Name, ToggleType = MenuItemToggleType.Radio, GroupName = "voice", IsChecked = id == voice.VoiceId };
+                    pick.Click += delegate { ChooseVoice(id); };
+                    voiceMenu.Items.Add(pick);
+                }
+                if (voices.Voices.Count == 0) voiceMenu.Items.Add(new MenuItem { Header = "No voices on this key", IsEnabled = false });
+            }
+            voiceMenu.Items.Add(new Separator());
+            MenuItem renew = new MenuItem { Header = "New key..." };
+            renew.Click += delegate { AskVoiceKey(); };
+            MenuItem remove = new MenuItem { Header = "Remove key ending " + Voice.Tail(voice.Key) };
+            remove.Click += delegate { ForgetVoice(); };
+            voiceMenu.Items.Add(renew);
+            voiceMenu.Items.Add(remove);
+            if (voiceProblem != null) voiceMenu.Items.Add(new MenuItem { Header = voiceProblem, IsEnabled = false });
         }
 
         private Settings Load()
@@ -1219,6 +1461,7 @@ namespace CapriDesktop
             if (quitting) return;
             quitting = true;
             Brain.Cancel();
+            voice.Stop();
             Talk.Dismiss();
             GlitchOut(delegate
             {

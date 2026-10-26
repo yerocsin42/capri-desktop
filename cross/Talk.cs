@@ -151,6 +151,7 @@ namespace CapriDesktop
         internal const double Tall = 44;
         internal event Action<string> Submitted;
         private readonly TextBox input = new TextBox();
+        private readonly TextBlock prompt;
 
         internal Typer()
         {
@@ -158,7 +159,7 @@ namespace CapriDesktop
             ShowActivated = true;
             Width = Math.Ceiling(Sheet.PanelWidth());
             Height = Tall;
-            TextBlock prompt = new TextBlock { Text = "> you:", FontFamily = Look.Mono, FontStyle = FontStyle.Italic, FontSize = Sheet.Type, Foreground = new SolidColorBrush(Look.Dim), VerticalAlignment = VerticalAlignment.Center };
+            prompt = new TextBlock { Text = "> you:", FontFamily = Look.Mono, FontStyle = FontStyle.Italic, FontSize = Sheet.Type, Foreground = new SolidColorBrush(Look.Dim), VerticalAlignment = VerticalAlignment.Center };
             input.FontFamily = Look.Mono;
             input.FontSize = Sheet.Type;
             input.MaxLength = 240;
@@ -191,6 +192,18 @@ namespace CapriDesktop
         }
 
         internal string Draft { get { return input.Text; } set { input.Text = value; } }
+
+        internal bool Secret
+        {
+            get { return input.PasswordChar != '\0'; }
+            set
+            {
+                input.PasswordChar = value ? '\u2022' : '\0';
+                input.MaxLength = value ? 200 : 240;
+                prompt.Text = value ? "> key:" : "> you:";
+                if (value) input.Text = "";
+            }
+        }
 
         internal void Open(PixelPoint head, PixelPoint feet, PixelRect area, double scale, PixelRect above)
         {
@@ -347,17 +360,25 @@ namespace CapriDesktop
         private double leaving = -1;
         private double pillUntil;
         private bool thinking;
+        private double pace = LettersPerSecond;
 
         internal Talk(Pet pet)
         {
             this.pet = pet;
-            Typer.Submitted += delegate(string text) { pet.Hear(text); };
+            Typer.Submitted += delegate(string text)
+            {
+                if (!Typer.Secret) { pet.Hear(text); return; }
+                Typer.Secret = false;
+                Typer.Hide();
+                pet.SaveVoiceKey(text);
+            };
             Pill.Typing += delegate { if (Typer.IsVisible) Typer.Hide(); else Open(); };
             Pill.Voice += delegate { pet.NoVoice(); };
             Bubble.Dismissed += delegate { if (leaving < 0) leaving = pet.Now; };
         }
 
         internal string Reply { get { return reply; } }
+        internal double Pace { get { return pace; } }
         internal string Shown { get { return reply == null ? "" : reply.Substring(0, Math.Min(reply.Length, Math.Max(0, Bubble.Sheet.Revealed))); } }
         internal bool Typing { get { return Typer.IsVisible; } }
         internal bool Done { get { return reply != null && replyDone >= 0; } }
@@ -366,24 +387,35 @@ namespace CapriDesktop
 
         internal void Open()
         {
+            if (Typer.Secret) Typer.Secret = false;
             pillUntil = pet.Now + 1.5;
             Typer.Open(pet.Head, pet.FeetPoint, pet.Area, pet.DesktopScaling, Bubble.IsVisible ? Bubble.PanelOnScreen : new PixelRect());
         }
 
         internal void Submit(string text) { Typer.Send(text); }
 
+        internal void AskKey(string ask)
+        {
+            Answer("(voice key)", ask);
+            Typer.Secret = true;
+            pillUntil = pet.Now + 1.5;
+            Typer.Open(pet.Head, pet.FeetPoint, pet.Area, pet.DesktopScaling, Bubble.IsVisible ? Bubble.PanelOnScreen : new PixelRect());
+        }
+
         internal void Thinking(string heard)
         {
             reply = null;
             thinking = true;
+            pace = LettersPerSecond;
             replyDone = -1;
             Start(heard);
         }
 
-        internal void Answer(string heard, string answer)
+        internal void Answer(string heard, string answer, double seconds = 0)
         {
             reply = answer;
             thinking = false;
+            pace = seconds < 0.2 ? LettersPerSecond : Math.Max(8, answer.Length / seconds);
             replyStart = pet.Now;
             replyDone = -1;
             Start(heard);
@@ -417,7 +449,7 @@ namespace CapriDesktop
             Sheet sheet = Bubble.Sheet;
             if (reply != null)
             {
-                sheet.Revealed = Math.Min(reply.Length, (int)((now - replyStart) * LettersPerSecond));
+                sheet.Revealed = Math.Min(reply.Length, (int)((now - replyStart) * pace));
                 if (sheet.Revealed >= reply.Length && replyDone < 0) replyDone = now;
                 if (replyDone >= 0 && leaving < 0 && !Typer.IsVisible && now > replyDone + Math.Min(14, 4 + reply.Length * 0.05)) leaving = now;
             }
@@ -449,7 +481,7 @@ namespace CapriDesktop
         {
             if (reply == null || replyDone >= 0 || replyStart < 0) return -1;
             int step = (int)((now - replyStart) * MouthRate);
-            int letter = (int)((now - replyStart) * LettersPerSecond);
+            int letter = (int)((now - replyStart) * pace);
             return letter < reply.Length ? MouthFor(reply[letter], step) : -1;
         }
 

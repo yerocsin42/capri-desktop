@@ -17,17 +17,18 @@ namespace CapriDesktop
         private static readonly string[] MacPlayers = { "Spotify", "Music" };
 
         private static string soundPlayer;
+        private static Process speaker;
+        private static int speeches;
 
         internal static void Sound(short[] samples)
         {
             ThreadPool.QueueUserWorkItem(delegate
             {
-                if (soundPlayer == null) soundPlayer = OnMac ? "afplay" : Music.Run("sh", new[] { "-c", "command -v paplay" }) != null ? "paplay" : "aplay";
                 string path = Path.Combine(Path.GetTempPath(), "capri-sound-" + Guid.NewGuid().ToString("N") + ".wav");
                 try
                 {
                     File.WriteAllBytes(path, Voice.Wave(samples, Sfx.Rate));
-                    Music.Run(soundPlayer, new[] { path });
+                    Music.Run(Player(), new[] { path });
                 }
                 catch (IOException) { }
                 finally
@@ -36,6 +37,51 @@ namespace CapriDesktop
                     catch (IOException) { }
                 }
             });
+        }
+
+        private static string Player()
+        {
+            if (soundPlayer == null) soundPlayer = OnMac ? "afplay" : Music.Run("sh", new[] { "-c", "command -v paplay" }) != null ? "paplay" : "aplay";
+            return soundPlayer;
+        }
+
+        internal static void Speak(byte[] wav)
+        {
+            Hush();
+            int turn = Interlocked.Increment(ref speeches);
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                string path = Path.Combine(Path.GetTempPath(), "capri-voice-" + Guid.NewGuid().ToString("N") + ".wav");
+                try
+                {
+                    File.WriteAllBytes(path, wav);
+                    ProcessStartInfo start = new ProcessStartInfo(Player()) { UseShellExecute = false, CreateNoWindow = true };
+                    start.ArgumentList.Add(path);
+                    using (Process process = Process.Start(start))
+                    {
+                        if (process == null) return;
+                        speaker = process;
+                        if (turn != speeches) Hush();
+                        process.WaitForExit(120000);
+                        if (speaker == process) speaker = null;
+                    }
+                }
+                catch (Exception) { }
+                finally
+                {
+                    try { File.Delete(path); }
+                    catch (IOException) { }
+                }
+            });
+        }
+
+        internal static void Hush()
+        {
+            Interlocked.Increment(ref speeches);
+            Process playing = speaker;
+            speaker = null;
+            try { if (playing != null && !playing.HasExited) playing.Kill(); }
+            catch (Exception) { }
         }
 
         internal static void Attach(Brain brain)
