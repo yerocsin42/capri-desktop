@@ -119,8 +119,8 @@ namespace CapriDesktop
         private static readonly int[] SoundLevels = { 0, 30, 60, 100 };
         internal const string Offline = "My brain's offline. Install Ollama from ollama.com, then run: ollama pull gemma4:e4b";
         internal const string DiscordPage = "https://discord.gg/F4fDHfGtFk";
-        internal static readonly double[] Sizes = { 170, 240, 320, 440 };
-        private static readonly string[] SizeNames = { "Small", "Medium", "Large", "Huge" };
+        internal static readonly double[] Sizes = { 140, 170, 240, 320, 440, 560 };
+        private static readonly string[] SizeNames = { "Tiny", "Small", "Medium", "Large", "Huge", "Giant" };
         internal readonly Brain Brain = new Brain();
         internal readonly Talk Talk;
         internal Desk Desk = Desk.Make();

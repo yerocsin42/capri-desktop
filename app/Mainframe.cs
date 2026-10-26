@@ -18,11 +18,15 @@ namespace CapriDesktop
         private static readonly int[] Gaps = { 10, 15, 30, 60, 90, 120, 180, 300, 600 };
         private static readonly string[] GapNames = { "10 s", "15 s", "30 s", "1 min", "1.5 min", "2 min", "3 min", "5 min", "10 min" };
         private const int SetupHeight = 118;
-        private const int PageTall = 556;
+        private const int PageTall = 624;
         private const int Far = 30000;
-        private static readonly int[][] PageBars = { new[] { 58, 170 }, new[] { 184, 276 }, new[] { 286, 370 }, new[] { 380, 536 } };
+        private static readonly int[][] PageBars = { new[] { 58, 170 }, new[] { 184, 276 }, new[] { 286, 438 }, new[] { 448, 604 } };
         private static readonly int[] Volumes = { 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 125, 150 };
         private static readonly string[] VolumeNames = { "Mute", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%", "125%", "150%" };
+        private static readonly int[] SizeSteps = { 140, 170, 200, 240, 280, 320, 380, 440, 500, 560 };
+        private static readonly string[] SizeNames = { "Tiny", "Small", "Small+", "Medium", "Medium+", "Large", "Large+", "Huge", "Huge+", "Giant" };
+        private static readonly int[] Sleeps = { 0, 60, 120, 300, 600, 1800 };
+        private static readonly string[] SleepNames = { "Never", "1 min", "2 min", "5 min", "10 min", "30 min" };
         private static readonly string[] SoundNames = { "Off", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%" };
         private static readonly string[] WanderNames = { "Off", "Rarely", "Sometimes", "Often", "Restless" };
         private static readonly string[] Lengths = { "Short", "Medium", "Long" };
@@ -43,7 +47,8 @@ namespace CapriDesktop
         private readonly Label keyNote;
         private readonly Key showHide;
         private readonly Key perch;
-        private readonly Key[] sizes;
+        private readonly Slider sizeSlider;
+        private readonly Label sizeName;
         private readonly Toggle motion;
         private readonly Toggle onTop;
         private readonly Toggle watch;
@@ -87,6 +92,9 @@ namespace CapriDesktop
         private readonly Slider volume;
         private readonly Label volumeName;
         private readonly Slider sounds;
+        private readonly Slider sleepAfter;
+        private readonly Toggle intro;
+        private readonly Label sleepName;
         private readonly Label soundsName;
         private readonly Slider wander;
         private readonly Label wanderName;
@@ -189,15 +197,13 @@ namespace CapriDesktop
             Lower(Make("Bring here", 140, 206 + v, 104, 28, delegate { capri.BringHere(); }));
             perch = Lower(Make("Ride cursor", 252, 206 + v, 104, 28, delegate { capri.TogglePerch(); }));
             Lower(Caption("Size", 28, 251 + v, Font, Look.Dim));
-            sizes = new Key[4];
-            int[] values = { 170, 240, 320, 440 };
-            string[] names = { "Small", "Medium", "Large", "Huge" };
-            for (int i = 0; i < 4; i++)
-            {
-                int size = values[i];
-                sizes[i] = Lower(Make(names[i], 84 + i * 68, 246 + v, 64, 26, delegate { capri.SetCharacterSize(size); }));
-                sizes[i].Tag = size;
-            }
+            sizeSlider = new Slider(SizeNames);
+            sizeSlider.Bounds = new Rectangle(78, 244 + v, 206, 30);
+            Lower(sizeSlider);
+            sizeSlider.AccessibleName = "Her size";
+            sizeSlider.Changed += delegate { if (syncing) return; sizeName.Text = SizeNames[sizeSlider.Value]; capri.SetCharacterSize(SizeSteps[sizeSlider.Value]); };
+            Controls.Add(sizeSlider);
+            sizeName = Lower(Caption("Medium", 292, 251 + v, Font, Look.Ink));
             motion = Lower(Check("Idle motion", 28, 286 + v, 150, delegate { if (!syncing) capri.ToggleMotion(); }));
             onTop = Lower(Check("Always on top", 186, 286 + v, 170, delegate { if (!syncing) capri.ToggleOnTop(); }));
             watch = Lower(Check("Watch my screen", 28, 318 + v, 328, delegate { if (!syncing) capri.ToggleWatch(); }));
@@ -247,24 +253,31 @@ namespace CapriDesktop
             wander = PageSlider(WanderNames, 308, "How much she wanders");
             wanderName = Caption("Off", 292, 315, Font, Look.Ink);
             wander.Changed += delegate { if (syncing) return; wanderName.Text = WanderNames[wander.Value]; capri.SetWanderLevel(wander.Value); };
-            dance = Check("Dance to music", 28, 344, 328, delegate { if (!syncing) capri.ToggleDance(); });
+            Caption("Sleep", 28, 351, Font, Look.Dim);
+            sleepAfter = PageSlider(SleepNames, 344, "How long until she falls asleep");
+            sleepName = Caption("2 min", 292, 351, Font, Look.Ink);
+            sleepAfter.Changed += delegate { if (syncing) return; sleepName.Text = SleepNames[sleepAfter.Value]; capri.SetSleepAfter(Sleeps[sleepAfter.Value]); };
+            dance = Check("Dance to music", 28, 380, 328, delegate { if (!syncing) capri.ToggleDance(); });
             dance.Hint = "When songs play";
             dance.HintFont = Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point);
-            Caption("BRAIN >", 28, 380, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
-            Caption("Replies", 28, 409, Font, Look.Dim);
-            replies = PageSlider(Lengths, 402, "Reply length");
-            repliesName = Caption("Short", 292, 409, Font, Look.Ink);
+            intro = Check("Glitch in at startup", 28, 412, 328, delegate { if (!syncing) capri.ToggleIntro(); });
+            intro.Hint = "Beams + sound";
+            intro.HintFont = Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point);
+            Caption("BRAIN >", 28, 448, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
+            Caption("Replies", 28, 477, Font, Look.Dim);
+            replies = PageSlider(Lengths, 470, "Reply length");
+            repliesName = Caption("Short", 292, 477, Font, Look.Ink);
             replies.Changed += delegate { if (syncing) return; repliesName.Text = Lengths[replies.Value]; capri.SetWordiness(replies.Value); };
-            Caption("Memory", 28, 445, Font, Look.Dim);
-            recall = PageSlider(Lengths, 438, "How much of the chat she keeps");
-            recallName = Caption("Short", 292, 445, Font, Look.Ink);
+            Caption("Memory", 28, 513, Font, Look.Dim);
+            recall = PageSlider(Lengths, 506, "How much of the chat she keeps");
+            recallName = Caption("Short", 292, 513, Font, Look.Ink);
             recall.Changed += delegate { if (syncing) return; recallName.Text = Lengths[recall.Value]; capri.SetRecall(Recalls[recall.Value]); };
-            custom = Input(28, 476, 244);
+            custom = Input(28, 544, 244);
             custom.Cue = "Custom model name";
             custom.Box.AccessibleName = "Custom model name";
             custom.Box.KeyDown += delegate(object sender, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; UseCustom(); } };
-            Make("Use", 280, 476, 76, 28, delegate { UseCustom(); });
-            customNote = Caption("Any Ollama model you've pulled, or a model id on your key.", 28, 512, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
+            Make("Use", 280, 544, 76, 28, delegate { UseCustom(); });
+            customNote = Caption("Any Ollama model you've pulled, or a model id on your key.", 28, 580, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
             customNote.MaximumSize = new Size(328, 0);
             for (int i = first; i < Controls.Count; i++)
             {
@@ -292,7 +305,9 @@ namespace CapriDesktop
 
         internal bool SettingsShown { get { return paged; } }
 
-        internal string SettingsStatus { get { return languages.Text + " | " + volumeName.Text + " | " + soundsName.Text + " | " + wanderName.Text + " | " + (dance.Checked ? "dance" : "-") + " | " + repliesName.Text + " | " + recallName.Text; } }
+        internal string SizeStatus { get { return sizeName.Text; } }
+
+        internal string SettingsStatus { get { return languages.Text + " | " + volumeName.Text + " | " + soundsName.Text + " | " + wanderName.Text + " | " + sleepName.Text + " | " + (dance.Checked ? "dance" : "-") + " | " + (intro.Checked ? "intro" : "-") + " | " + repliesName.Text + " | " + recallName.Text; } }
 
         internal void ShowSettings(bool on)
         {
@@ -473,11 +488,10 @@ namespace CapriDesktop
             syncing = true;
             showHide.Text = capri.IsHidden ? "Show Capri" : "Hide Capri";
             perch.Text = capri.Riding ? "Hop off" : "Ride cursor";
-            foreach (Key option in sizes)
-            {
-                option.Picked = (int)option.Tag == capri.CharacterSize;
-                option.Invalidate();
-            }
+            int near = 0;
+            for (int i = 0; i < SizeSteps.Length; i++) if (Math.Abs(SizeSteps[i] - capri.CharacterSize) < Math.Abs(SizeSteps[near] - capri.CharacterSize)) near = i;
+            sizeSlider.Value = near;
+            sizeName.Text = SizeNames[near];
             motion.Checked = capri.Motion;
             onTop.Checked = capri.OnTop;
             watch.Checked = capri.Watching;
@@ -499,9 +513,12 @@ namespace CapriDesktop
             volumeName.Text = VolumeNames[loud];
             sounds.Value = Math.Max(0, Math.Min(10, (capri.SoundLevel + 5) / 10));
             soundsName.Text = SoundNames[sounds.Value];
+            sleepAfter.Value = Math.Max(0, Array.IndexOf(Sleeps, capri.SleepAfter));
+            sleepName.Text = SleepNames[sleepAfter.Value];
             wander.Value = capri.WanderLevel;
             wanderName.Text = WanderNames[wander.Value];
             dance.Checked = capri.Dancing;
+            intro.Checked = capri.Intro;
             replies.Value = capri.Wordiness;
             repliesName.Text = Lengths[replies.Value];
             recall.Value = Math.Max(0, Array.IndexOf(Recalls, capri.Recall));

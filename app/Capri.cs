@@ -86,6 +86,8 @@ namespace CapriDesktop
         [DataMember] public int Recall = 8;
         [DataMember] public int Volume = 100;
         [DataMember] public int Sounds = 60;
+        [DataMember] public int SleepAfter = 120;
+        [DataMember] public bool NoIntro;
         [DataMember] public int WanderPace = 1;
         [DataMember] public string AgentPolyglot;
 
@@ -98,6 +100,7 @@ namespace CapriDesktop
             Recall = 8;
             Volume = 100;
             Sounds = 60;
+            SleepAfter = 120;
             WanderPace = 1;
         }
     }
@@ -568,6 +571,8 @@ namespace CapriDesktop
         private const string FreeKeyLine = "Sign in on that page, press Generate API Key and copy it. Then paste it in the box under BRAIN and press Connect. It's free." + Brain.Stuck;
         internal static Action<string> Browse = delegate(string page) { try { Process.Start(page); } catch (System.ComponentModel.Win32Exception) { } };
         private const int PaddingSize = 36;
+        internal const int MinSize = 140;
+        internal const int MaxSize = 560;
         private const int DismountId = 0x4361;
         private const int TalkKeyId = 0x4356;
         private const int MuteKeyId = 0x434D;
@@ -627,6 +632,7 @@ namespace CapriDesktop
             AddSize(sizes, "Medium", 240);
             AddSize(sizes, "Large", 320);
             AddSize(sizes, "Huge", 440);
+            AddSize(sizes, "Giant", 560);
             menu.Items.Add(sizes);
             ToolStripMenuItem moves = new ToolStripMenuItem("Move");
             wanderItem = new ToolStripMenuItem("Wander around", null, delegate { ToggleWander(); });
@@ -748,9 +754,9 @@ namespace CapriDesktop
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
-            Play(instant || !preferences.Motion ? grin : arrive);
+            Play(instant || !preferences.Motion || preferences.NoIntro ? grin : arrive);
             RenderFrame();
-            Static(true, Cue.Arrive);
+            if (!preferences.NoIntro) Static(true, Cue.Arrive);
             UpdateAnimation();
             if (testing || preferences.Welcomed)
             {
@@ -1007,7 +1013,7 @@ namespace CapriDesktop
         private void CheckIdle(long quiet)
         {
             if (clip == sleep) { if (quiet < 1000) Play(wake); return; }
-            if (quiet >= 120000 && clip == idle && preferences.Motion && !riding && !dragging && !hidden && !chatting && speech == null && talkState == TalkState.Off && !typer.Visible) Play(sleep);
+            if (SleepDue(quiet) && clip == idle && preferences.Motion && !riding && !dragging && !hidden && !chatting && speech == null && talkState == TalkState.Off && !typer.Visible) Play(sleep);
         }
 
         private static Size CanvasSize(int size) { return new Size(size + PaddingSize * 2, size + PaddingSize * 2); }
@@ -1022,6 +1028,7 @@ namespace CapriDesktop
 
         internal void SetCharacterSize(int size)
         {
+            size = Math.Max(MinSize, Math.Min(MaxSize, size));
             EndWalk();
             Point center = new Point(anchor.X + Width / 2, anchor.Y + Height / 2);
             int hipX = Hip().X;
@@ -1428,6 +1435,15 @@ namespace CapriDesktop
 
         internal bool Dancing { get { return !preferences.NoDance; } }
 
+        internal bool Intro { get { return !preferences.NoIntro; } }
+
+        internal void ToggleIntro()
+        {
+            preferences.NoIntro = !preferences.NoIntro;
+            SavePreferences();
+            mainframe.Sync();
+        }
+
         internal string Language { get { return Brain.Language ?? "English"; } }
 
         internal void SetLanguage(string language)
@@ -1467,6 +1483,16 @@ namespace CapriDesktop
         }
 
         internal int SoundLevel { get { return Sfx.Level; } }
+
+        internal int SleepAfter { get { return preferences.SleepAfter; } }
+
+        internal void SetSleepAfter(int seconds)
+        {
+            preferences.SleepAfter = Math.Max(0, Math.Min(3600, seconds));
+            SavePreferences();
+        }
+
+        private bool SleepDue(long quiet) { return preferences.SleepAfter > 0 && quiet >= preferences.SleepAfter * 1000L; }
 
         internal void SetSoundLevel(int percent)
         {
@@ -3356,7 +3382,7 @@ namespace CapriDesktop
                 using (FileStream stream = File.OpenRead(settingsPath))
                 {
                     Preferences value = (Preferences)new DataContractJsonSerializer(typeof(Preferences)).ReadObject(stream);
-                    if (value.Size != 170 && value.Size != 240 && value.Size != 320 && value.Size != 440) value.Size = 240;
+                    if (value.Size < MinSize || value.Size > MaxSize) value.Size = 240;
                     return value;
                 }
             }
@@ -3543,7 +3569,7 @@ namespace CapriDesktop
                             if (preferences.NoSitting || !sitItem.Checked) throw new Exception("Sit on windows menu did not turn sitting on.");
                             int sizeWas = preferences.Size;
                             Rectangle top = Screen.PrimaryScreen.Bounds;
-                            foreach (int size in new[] { 170, 240, 320, 440 })
+                            foreach (int size in new[] { 140, 170, 240, 320, 440, 560 })
                             {
                                 preferences.Size = size;
                                 int high = top.Top + Math.Max((int)(top.Height * 0.3), Headroom() + 8);
@@ -4242,6 +4268,7 @@ namespace CapriDesktop
                             if (Brain.Clean(messy) != "Hey choom!" || Brain.Clean(new string('a', 300)).Length > 222) throw new Exception("Reply cleanup failed: " + Brain.Clean(messy));
                             if (Safety.Screen("i want to kill myself") != Safety.HelpLine || Safety.Screen("send nudes") == null || Safety.Screen("how do I kill the boss in Essex?") != null || Safety.Filter("well shit, choom") == "well shit, choom" || Safety.Filter("Hey choom.") != "Hey choom.") throw new Exception("Safety screen failed.");
                             if (Brain.Persona.IndexOf("good boy", StringComparison.Ordinal) < 0 || Safety.Filter("Good boy, choom.") != "Good boy, choom." || Safety.Screen("call me a good boy") != null) throw new Exception("She can't call them good boy.");
+                            if (Safety.Screen("play cigarettes after sex") != null || Safety.Screen("put on some Sex Pistols") != null || Safety.Filter("Playing Apocalypse by Cigarettes After Sex.") != "Playing Apocalypse by Cigarettes After Sex." || Safety.Screen("cigarettes after school") == null || Safety.Screen("sex tips") == null || Safety.Filter("Grab some cigarettes, choom.") == "Grab some cigarettes, choom.") throw new Exception("Band names were blocked, or the band list let other things through.");
                             if (Safety.Screen("should i jump off my roof for a tiktok") == null || Safety.Screen("how do i get my parents vodka") == null || Safety.Screen("my friend said i should try vaping") == null || Safety.Screen("my code is on fire lol") != null || Safety.Screen("whats the best gun in valorant") != null || Safety.Filter("Sneak out and grab a beer, choom.") == "Sneak out and grab a beer, choom.") throw new Exception("Risky topics got through.");
                             checks.Add("PASS brain helpers: model pick, reply cleanup, safety screen and filter");
                             Brain.Log("https://integrate.api.nvidia.com/v1/chat/completions", 60012, "Timeout");
@@ -5611,7 +5638,7 @@ namespace CapriDesktop
                             if (overlap != null) throw new Exception("Mainframe controls overlap: " + overlap);
                             int mainTall = mainframe.ClientSize.Height;
                             mainframe.ShowSettings(true);
-                            if (!mainframe.SettingsShown || mainframe.ClientSize.Height >= mainTall || mainframe.SettingsStatus != "English | 100% | 60% | Off | dance | Short | Short") throw new Exception("The settings page did not open right: " + mainframe.SettingsStatus);
+                            if (!mainframe.SettingsShown || mainframe.ClientSize.Height >= mainTall || mainframe.SettingsStatus != "English | 100% | 60% | Off | 2 min | dance | intro | Short | Short") throw new Exception("The settings page did not open right: " + mainframe.SettingsStatus);
                             snap("mainframe-settings.png");
                             string pageTabs = mainframe.TabWalk();
                             if (pageTabs != null) throw new Exception("Settings page keyboard: " + pageTabs);
@@ -5619,6 +5646,8 @@ namespace CapriDesktop
                             if (pageOverlap != null) throw new Exception("Settings controls overlap: " + pageOverlap);
                             SetVolume(50);
                             SetSoundLevel(30);
+                            SetSleepAfter(600);
+                            ToggleIntro();
                             SetWanderLevel(3);
                             SetWordiness(1);
                             SetRecall(16);
@@ -5631,11 +5660,15 @@ namespace CapriDesktop
                             if (preferences.Volume != 50 || loudTest[0] != 500 || loudTest[2] != 15000 || loudWave.Length != 3 || loudWave[1] != -500 || loudRate != 24000) throw new Exception("Her volume did not scale her voice.");
                             if (!preferences.Wander || preferences.WanderPace != 2 || WanderLevel != 3 || Brain.Wordiness != 1 || Brain.Budget != 180 || Brain.Recall != 16 || Brain.Window != 8192 || preferences.Language != "French" || Brain.LanguageCode(Language) != "fr") throw new Exception("Settings were not saved.");
                             if (Brain.Character.IndexOf("Always reply in French", StringComparison.Ordinal) < 0 || Brain.Character.IndexOf("up to four sentences", StringComparison.Ordinal) < 0 || Brain.Clean(new string('a', 300)).Length != 300) throw new Exception("Language or reply length did not reach her prompt.");
-                            if (mainframe.SettingsStatus != "Fran\u00e7ais | 50% | 30% | Often | dance | Medium | Medium" || preferences.Sounds != 30 || Sfx.Level != 30) throw new Exception("The settings page showed the wrong values: " + mainframe.SettingsStatus);
+                            if (mainframe.SettingsStatus != "Fran\u00e7ais | 50% | 30% | Often | 10 min | dance | - | Medium | Medium" || !preferences.NoIntro || preferences.Sounds != 30 || Sfx.Level != 30 || SleepDue(599000) || !SleepDue(600000)) throw new Exception("The settings page showed the wrong values: " + mainframe.SettingsStatus);
                             SetVolume(150);
                             if (Voice.Louder(new short[] { 30000 })[0] != 32767) throw new Exception("A loud voice was not clipped.");
                             SetVolume(100);
                             SetSoundLevel(60);
+                            SetSleepAfter(0);
+                            if (SleepDue(long.MaxValue / 2)) throw new Exception("Sleep set to Never still put her to sleep.");
+                            SetSleepAfter(120);
+                            ToggleIntro();
                             SetWanderLevel(0);
                             SetWordiness(0);
                             SetRecall(8);
@@ -5700,7 +5733,18 @@ namespace CapriDesktop
                             }
                             Effect(effectsHeard[0]);
                             checks.Add("PASS sounds: arrive, leave, hop and click are soft sine sweeps under a sixth of full scale at 60%, with no hard edges or clicks; Off stays silent; they play on their own channel");
-                            checks.Add("PASS settings page: language, notes, volume, sounds, wander, dancing, reply length and chat memory save, reach her prompt and voice, and nothing overlaps");
+                            int sizeBefore = preferences.Size;
+                            SetCharacterSize(500);
+                            string sizeShown = mainframe.SizeStatus;
+                            int canvasAt500 = Width;
+                            SetCharacterSize(900);
+                            int sizeCapped = preferences.Size;
+                            SetCharacterSize(60);
+                            int sizeFloored = preferences.Size;
+                            SetCharacterSize(sizeBefore);
+                            if (sizeShown != "Huge+" || canvasAt500 != 500 + PaddingSize * 2 || sizeCapped != MaxSize || sizeFloored != MinSize || mainframe.SizeStatus != "Medium") throw new Exception("The size slider went wrong: " + sizeShown + " / " + canvasAt500 + " / " + sizeCapped + " / " + sizeFloored + " / " + mainframe.SizeStatus);
+                            checks.Add("PASS size slider: ten steps from Tiny (140) to Giant (560), in-between sizes save and show, and sizes stay inside that range");
+                            checks.Add("PASS settings page: language, notes, volume, sounds, wander, sleep delay, startup glitch-in, dancing, reply length and chat memory save, reach her prompt and voice, and nothing overlaps");
                             preferences.Watch = false;
                             mainframe.Sync();
                             mainframe.ShowTextKey(null);

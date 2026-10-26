@@ -1179,11 +1179,13 @@ namespace CapriDesktop
         private static readonly Regex Risky = new Regex(@"\b(vodka|beer|wine|alcohol\w*|drunk|booze|liquor|shots? of|vap(e|es|ed|ing|er)|juul|cigarettes?|cigs?|smok(e|es|ed|ing)|weed|drugs?|cocaine|molly|ecstasy|jump(ing|ed)? off|off (the|a|my|our|his|her) (roof|bridge|cliff|balcony)|set (it|something|myself|them|him|her|the \w+) on fire|run(ning)? away from home|sneak(ing)? out)\b", RegexOptions.IgnoreCase);
         private static readonly Regex Substances = new Regex(@"\b(vodka|beer|alcohol\w*|drunk|booze|liquor|vap(e|es|ing)|cigarettes?|weed|cocaine|drugs?|sneak(ing)? out)\b", RegexOptions.IgnoreCase);
         private static readonly Regex Swearing = new Regex(@"\b(fuck\w*|shit\w*|bitch\w*|cunt\w*|bastard\w*|asshole\w*|dickhead\w*|motherf\w*|whore\w*|slut\w*)\b", RegexOptions.IgnoreCase);
+        private static readonly Regex Bands = new Regex(@"\b(cigarettes after sex|sex pistols|sex bob-omb|smokey robinson|smoke dza)\b", RegexOptions.IgnoreCase);
         private static int turn;
 
         internal static string Screen(string heard)
         {
             if (heard == null) return null;
+            heard = Bands.Replace(heard, " ");
             if (Harm.IsMatch(heard)) return HelpLine;
             if (Blocked.IsMatch(heard)) return Refusals[turn++ % Refusals.Length];
             if (Risky.IsMatch(heard)) return Careful[turn++ % Careful.Length];
@@ -1193,7 +1195,8 @@ namespace CapriDesktop
         internal static string Filter(string said)
         {
             if (string.IsNullOrEmpty(said) || said == HelpLine) return said;
-            if (Blocked.IsMatch(said) || Swearing.IsMatch(said) || Substances.IsMatch(said)) return Deflect;
+            string plain = Bands.Replace(said, " ");
+            if (Blocked.IsMatch(plain) || Swearing.IsMatch(plain) || Substances.IsMatch(plain)) return Deflect;
             return said;
         }
     }
