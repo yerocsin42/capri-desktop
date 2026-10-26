@@ -1115,16 +1115,16 @@ namespace CapriDesktop
             Location = anchor;
         }
 
-        protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); MovePointer(Cursor.Position); Stroke(e.Location); }
+        protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); MovePointer(Cursor.Position); Stroke(Cursor.Position); }
 
-        private void Stroke(Point inside)
+        private void Stroke(Point cursor)
         {
-            if (pressed || dragging || riding || hidden || chatting || frame == null || !Solid(inside)) { petTurns.Clear(); petWay = 0; return; }
-            int dx = inside.X - petX;
+            if (pressed || dragging || riding || hidden || chatting || working != null || frame == null || !Solid(PointToClient(cursor))) { petTurns.Clear(); petWay = 0; return; }
+            int dx = cursor.X - petX;
             if (Math.Abs(dx) < 6) return;
             long now = clock.ElapsedMilliseconds;
             int way = Math.Sign(dx);
-            petX = inside.X;
+            petX = cursor.X;
             if (petWay != 0 && way != petWay) petTurns.Add(now);
             petWay = way;
             petTurns.RemoveAll(delegate(long at) { return now - at > 1500; });
@@ -3690,23 +3690,27 @@ namespace CapriDesktop
                             if (petSpot.IsEmpty) throw new Exception("Couldn't find her body to pet.");
                             int askedBeforePets = asking;
                             int petsBefore = petTicket;
-                            Stroke(new Point(petSpot.X - 20, petSpot.Y));
-                            Stroke(new Point(petSpot.X + 20, petSpot.Y));
-                            Stroke(new Point(petSpot.X - 20, petSpot.Y));
+                            Point petLeft = PointToScreen(new Point(petSpot.X - 20, petSpot.Y));
+                            Point petRight = PointToScreen(new Point(petSpot.X + 20, petSpot.Y));
+                            for (int i = 0; i < 6; i++) { Location = new Point(Left + (i % 2 == 0 ? 40 : -40), Top); Stroke(petLeft); }
                             bool earlyPet = petTicket != petsBefore;
-                            for (int i = 0; i < 4; i++) Stroke(new Point(petSpot.X + (i % 2 == 0 ? 20 : -20), petSpot.Y));
+                            Stroke(petLeft);
+                            Stroke(petRight);
+                            Stroke(petLeft);
+                            earlyPet |= petTicket != petsBefore;
+                            for (int i = 0; i < 4; i++) Stroke(i % 2 == 0 ? petRight : petLeft);
                             bool smiled = petTicket == petsBefore + 1 && (seat != null ? clip == perch && blinkWith == perchBlink : clip == grin) && asking == askedBeforePets;
                             PetLine(petTicket);
                             string petReply = reply;
                             bool spoke = asking == askedBeforePets + 1 && Array.IndexOf(PetLines, petReply) >= 0;
-                            for (int i = 0; i < 8; i++) Stroke(new Point(petSpot.X + (i % 2 == 0 ? 20 : -20), petSpot.Y));
+                            for (int i = 0; i < 8; i++) Stroke(i % 2 == 0 ? petRight : petLeft);
                             bool cooled = petTicket == petsBefore + 1;
                             CloseTalk();
                             petTicket++;
                             petAt = -60000;
                             Play(seat != null ? perch : idle);
                             if (earlyPet || !smiled || !spoke || !cooled) throw new Exception("Petting her went wrong: early " + earlyPet + ", smiled " + smiled + ", spoke " + spoke + ", cooled " + cooled + " (" + petReply + ")");
-                            checks.Add("PASS petting: rubbing the cursor back and forth over her makes her smile and say a short line, not too easily and not again for 20 s");
+                            checks.Add("PASS petting: rubbing the cursor back and forth over her makes her smile and say a short line, not too easily, not again for 20 s, and not when she moves under a still cursor");
                             System.Collections.Generic.List<int[]> spans = Ledges.Open(0, 100, 10, new[] { new Rectangle(20, 0, 30, 50), new Rectangle(90, 5, 40, 40), new Rectangle(0, 11, 100, 40) });
                             if (spans.Count != 2 || spans[0][0] != 0 || spans[0][1] != 20 || spans[1][0] != 50 || spans[1][1] != 90) throw new Exception("Ledge covering math failed.");
                             Point home = anchor;
@@ -6760,7 +6764,7 @@ namespace CapriDesktop
                             if (transcribing || talkState == TalkState.Thinking || !realEarsDone.WaitOne(0)) return;
                             string log;
                             lock (earsLog) log = string.Join(" | ", earsLog.ToArray());
-                            if (heard != "Salut Capri, \u00e7a va ?" || reply != "Salut, choom." || log.IndexOf("French Salut Capri, \u00e7a va ?", StringComparison.Ordinal) < 0 || earsShut) throw new Exception("French speech did not recover after an ears failure: " + log);
+                            if (heard != "Salut Capri, \u00e7a va ?" || reply != "Salut, choom." || log.IndexOf("French Salut Capri, \u00e7a va ?", StringComparison.Ordinal) < 0 || earsShut) throw new Exception("French speech did not recover after an ears failure: " + log + " | heard " + heard + " | reply " + reply + " | ears shut " + earsShut);
                             checks.Add("PASS offline hearing failure: visible error, another utterance works, and French words reach her brain unchanged");
                             pill.Press(2);
                             if (pill.Chatting || chatting || local || transcribing) throw new Exception("Wave did not end free voice chat.");
