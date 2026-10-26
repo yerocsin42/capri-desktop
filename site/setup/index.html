@@ -57,32 +57,42 @@
 
         <h3>Design her voice</h3>
         <ol class="moves">
-          <li><b>ElevenCreative</b> → <b>Voice Creation</b> → <b>Voice Design</b></li>
+          <li><b>ElevenCreative</b> → <b>Voice Creation</b> → <b>Voice Design</b> → <b>Create new</b></li>
           <li>Paste this prompt, then create the voice
-            <div class="prompt"><p id="voice-prompt">cybernetic hologramic sounding woman playful voice is light, bright, and buoyant, with a lilt that lifts at the ends of her phrases as though she’s teasing or in on a joke only she understands. Her pacing is quick and bouncy, slipping between mock-innocent sweetness and a sly, knowing edge that keeps listeners slightly off balance. She sounds close and airy, almost whispered into the ear, which suits an AI construct who exists only inside the heads of those who plug in her chip, and a faint digital sheen, a flicker of glitch or shimmer, tends to creep in when her mischief sharpens. Beneath the performance, the act can crack, letting a quieter, more vulnerable tone slip through that hints at the Project Capricorn past she can’t quite escape.</p><button class="copy" type="button" data-copy="voice-prompt">Copy</button></div>
+            <div class="prompt"><p id="voice-prompt">Her voice is light, bright, and buoyant, with a playful lilt that rises at phrase endings, as if sharing a secret joke. Quick, bouncy pacing shifts between mock-innocent sweetness and a sly, knowing edge. She sounds close and airy, whispering directly inside the listener’s mind. Her voice has a vivid holographic quality: crystalline synthetic resonance layered beneath her femininity, as though projected through shimmering digital light. A faint electronic halo surrounds each syllable, with metallic overtones, spectral echoes, and flickers of static rippling through her voice like glitches in a translucent projection. When her mischief sharpens, her voice briefly fractures into digital artifacts, subtle pitch warps, and sparkling distortions. Beneath the playful act, her tone occasionally softens into something fragile and haunting, hinting at the Project Capricorn past she cannot escape. She feels enchanting, mischievous, and unmistakably nonhuman.</p><button class="copy" type="button" data-copy="voice-prompt">Copy</button></div>
           </li>
+          <li><b>Voices</b> → <b>My Voices</b> → <b>⋯</b> → <b>Copy Voice ID</b></li>
+        </ol>
+
+        <h3 id="clone">Or clone her real voice <small>paid plan</small></h3>
+        <p class="note">Sounds the most like her. Needs ElevenLabs Starter or above.</p>
+        <ol class="moves">
+          <li>Download <a href="../assets/capri-voice-sample.m4a" download="capri-voice-sample.m4a">her voice clip</a> (3 MB)</li>
+          <li><b>Voice Creation</b> → <b>Instant Voice Clone</b> → <b>Create new</b></li>
+          <li>Upload the clip, then create the voice</li>
           <li><b>Voices</b> → <b>My Voices</b> → <b>⋯</b> → <b>Copy Voice ID</b></li>
         </ol>
 
         <h3>API key</h3>
         <ol class="moves">
-          <li>Bottom left: switch <b>ElevenCreative</b> to <b>ElevenAPI</b></li>
+          <li>Bottom left: <b>Developers</b></li>
           <li><b>API Keys</b> → <b>Create Key</b>, name it Capri</li>
           <li>Permissions:
             <dl class="perms">
-              <dt>Text to Speech</dt><dd>Access</dd>
-              <dt>Voices and Models</dt><dd>Read</dd>
-              <dt>Agents</dt><dd>Write</dd>
+              <dt>Text to Speech, Models</dt><dd>Access</dd>
+              <dt>Voices</dt><dd>Read</dd>
+              <dt>ElevenAgents</dt><dd>Write</dd>
             </dl>
           </li>
           <li><b>Create Key</b>, then copy it before you close the popup</li>
         </ol>
-        <p class="note">No Agents option, or the key fails? Turn <b>Restrict key</b> off.</p>
+        <p class="note">No ElevenAgents option, or the key fails? Turn <b>Restrict key</b> off.</p>
 
         <h3>In the Mainframe</h3>
         <ol class="moves">
           <li>Paste the key → <b>Connect</b></li>
           <li>Clear the Voice ID box, then paste your Voice ID</li>
+          <li>Model menu → <b>v4</b></li>
           <li><b>Test</b></li>
         </ol>
         <img class="shot" src="../assets/guide-voice.png" alt="Capri Mainframe voice section with the API key box, Connect, the Voice ID box, the mic picker and Test" width="380" height="200" loading="lazy">
