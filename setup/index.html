@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#ffffff">
-  <meta name="description" content="Set up Capri on your desktop: install and her voice.">
+  <meta name="description" content="Set up Capri on your desktop: install, her brain, her voice.">
   <title>Set up Capri</title>
   <link rel="icon" type="image/x-icon" href="../assets/chip.ico">
   <link rel="stylesheet" href="../style.css">
@@ -22,7 +22,7 @@
     </header>
     <main class="guide">
       <h1>Set up <em>Capri</em></h1>
-      <nav class="guide-jump" aria-label="Steps"><a href="#install">1 Install</a><a href="#voice">2 Voice</a><a href="#talk">3 Talk</a><a href="#stuck">Stuck?</a></nav>
+      <nav class="guide-jump" aria-label="Steps"><a href="#install">1 Install</a><a href="#brain">2 Brain</a><a href="#voice">3 Voice</a><a href="#talk">4 Talk</a><a href="#stuck">Stuck?</a></nav>
 
       <section id="install" class="step">
         <h2><span class="step-number">1</span>Install <small>Windows only</small></h2>
@@ -35,16 +35,27 @@
         <p class="note">Windows warns because Capri is new and not signed yet. The code is open on <a href="https://github.com/yerocsin42/capri-desktop" target="_blank" rel="noopener noreferrer">GitHub</a>.</p>
       </section>
 
+      <section id="brain" class="step">
+        <h2><span class="step-number">2</span>Her brain <small>free, runs on your PC</small></h2>
+        <ol class="moves">
+          <li>The <b>Capri Mainframe</b> opens by itself</li>
+          <li><b>Set up her brain</b></li>
+          <li>Wait for the download. She says hi when it's done</li>
+        </ol>
+        <p class="note">Already use Ollama? Open it, then press <b>Refresh</b>.</p>
+        <img class="shot" src="../assets/guide-brain.png" alt="Capri Mainframe with the Set up her brain button" width="380" height="290" loading="lazy">
+      </section>
+
       <section id="voice" class="step">
-        <h2><span class="step-number">2</span>Her voice <small>ElevenLabs</small></h2>
-        <p class="note">She talks and listens through ElevenLabs.</p>
+        <h2><span class="step-number">3</span>Her voice <small>optional, ElevenLabs</small></h2>
+        <p class="note">Skip this and she types her replies instead. Voice chat needs it.</p>
 
         <h3>Account</h3>
         <ol class="moves">
           <li>Sign up at <a href="https://elevenlabs.io" target="_blank" rel="noopener noreferrer">elevenlabs.io</a></li>
         </ol>
 
-        <h3>Design her voice <small>optional</small></h3>
+        <h3>Design her voice</h3>
         <ol class="moves">
           <li><b>ElevenCreative</b> → <b>Voice Creation</b> → <b>Voice Design</b></li>
           <li>Paste this prompt, then create the voice
@@ -71,16 +82,17 @@
         <h3>In the Mainframe</h3>
         <ol class="moves">
           <li>Paste the key → <b>Connect</b></li>
-          <li>Paste your Voice ID over the one in the box below it, or keep it</li>
+          <li>Clear the Voice ID box, then paste your Voice ID</li>
           <li><b>Test</b></li>
         </ol>
         <img class="shot" src="../assets/guide-voice.png" alt="Capri Mainframe voice section with the API key box, Connect, the Voice ID box and Test" width="380" height="142" loading="lazy">
       </section>
 
       <section id="talk" class="step">
-        <h2><span class="step-number">3</span>Talk to her</h2>
+        <h2><span class="step-number">4</span>Talk to her</h2>
         <dl class="keys">
-          <dt>Wave</dt><dd>voice chat, just talk</dd>
+          <dt>Pencil</dt><dd>type to her</dd>
+          <dt>Wave</dt><dd>voice chat, needs the key</dd>
           <dt>Mic button</dt><dd>mute your mic while chatting</dd>
           <dt>Drag</dt><dd>sit her on a window</dd>
           <dt>Ctrl + Alt + C</dt><dd>unseat her</dd>
@@ -93,7 +105,7 @@
         <dl class="stuck">
           <dt>“ElevenLabs rejected the key”</dt><dd>That isn't the key. Keys start with <code>sk_</code>. Make a new one and paste it.</dd>
           <dt>“Key needs … access”</dt><dd>Fix the key's permissions, or turn <b>Restrict key</b> off.</dd>
-          <dt>“Voice not found”</dt><dd>Paste the Voice ID from My Voices, not the voice's name.</dd>
+          <dt>“Voice not found”</dt><dd>Paste the Voice ID of the voice you designed, from My Voices, not its name.</dd>
           <dt>“Out of ElevenLabs credits”</dt><dd>Credits refill each month. She uses about one per letter she says.</dd>
           <dt>“Free tier usage disabled”</dt><dd>Turn off your VPN and try again.</dd>
           <dt>She can't hear you</dt><dd>Windows Settings → Privacy &amp; security → Microphone → let desktop apps use it.</dd>
