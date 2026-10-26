@@ -263,11 +263,19 @@ namespace CapriDesktop
             rate = sampleRate;
             if (silent) return;
             WaveFormat format = WaveFormat.Mono(rate);
-            if (waveOutOpen(out device, -1, ref format, IntPtr.Zero, IntPtr.Zero, 0) != 0)
+            int failed = waveOutOpen(out device, -1, ref format, IntPtr.Zero, IntPtr.Zero, 0);
+            if (failed != 0)
             {
                 device = IntPtr.Zero;
-                throw new VoiceException("Can't open your speakers.");
+                throw new VoiceException(Speakers(failed));
             }
+        }
+
+        internal static string Speakers(int failed)
+        {
+            if (failed == 2 || failed == 6) return "Can't open your speakers: Windows has no speakers or headphones on. Pick one in Settings > System > Sound.";
+            if (failed == 4) return "Can't open your speakers: another app has them to itself. Close it, or untick exclusive mode in your speaker's Sound settings.";
+            return "Can't open your speakers (Windows error " + failed + "). Check Settings > System > Sound, then try again.";
         }
 
         internal bool Busy { get { return Stopwatch.GetTimestamp() < Interlocked.Read(ref until) + Stopwatch.Frequency * 35 / 100; } }

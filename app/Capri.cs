@@ -88,7 +88,7 @@ namespace CapriDesktop
         [DataMember] public int Sounds = 60;
         [DataMember] public int SleepAfter = 120;
         [DataMember] public bool NoIntro;
-        [DataMember] public bool NoTyping;
+        [DataMember] public int Typing;
         [DataMember] public int BubbleTime = 1;
         [DataMember] public int TalkMods = 3;
         [DataMember] public int TalkVk = 0x56;
@@ -538,6 +538,7 @@ namespace CapriDesktop
         private readonly Speaker speaker;
         private readonly Speaker effects;
         private readonly Speaker typist;
+        private volatile bool voiceBroken;
         private volatile Agent agent;
         private bool chatting;
         private bool dropping;
@@ -624,7 +625,6 @@ namespace CapriDesktop
             Voice.Loudness = Math.Max(0, Math.Min(150, preferences.Volume));
             Sfx.Level = Math.Max(0, Math.Min(100, preferences.Sounds));
             Sfx.Out = delegate(short[] sound) { Post(delegate { Effect(sound); }); };
-            Sfx.Typing = !preferences.NoTyping;
             Sfx.TypeOut = delegate(short[] sound) { if (IsDisposed) return; try { typist.Open(Sfx.Rate); typist.Play(sound); } catch (Exception) { } };
             Sfx.Untyped = delegate { try { typist.Clear(); } catch (Exception) { } };
             preferences.WanderPace = Math.Max(0, Math.Min(3, preferences.WanderPace));
@@ -1498,15 +1498,16 @@ namespace CapriDesktop
 
         internal bool Intro { get { return !preferences.NoIntro; } }
 
-        internal bool TypingSound { get { return !preferences.NoTyping; } }
+        internal bool VoiceWorking { get { return voice.Ready && !preferences.Quiet && !voiceBroken; } }
+
+        internal bool TypingSound { get { return preferences.Typing == 1 || (preferences.Typing == 0 && !VoiceWorking); } }
 
         internal void ToggleTyping()
         {
-            preferences.NoTyping = !preferences.NoTyping;
-            Sfx.Typing = !preferences.NoTyping;
+            preferences.Typing = TypingSound ? 2 : 1;
             SavePreferences();
             mainframe.Sync();
-            Sfx.Type("click clack", LettersPerSecond, 1);
+            if (TypingSound) Sfx.Type("click clack", LettersPerSecond, 1);
         }
 
         internal void ToggleIntro()
@@ -3355,6 +3356,7 @@ namespace CapriDesktop
                 catch (Exception error) { problem = Voice.Short("Voice glitched: " + error.Message); }
                 Post(delegate
                 {
+                    voiceBroken = problem != null;
                     if (ticket != asking || IsDisposed) return;
                     if (problem != null) mainframe.VoiceNote(problem, true);
                     if (reply == null && talkState == TalkState.Thinking) Begin(ticket, said, state, wav);
@@ -3378,7 +3380,7 @@ namespace CapriDesktop
             pace = seconds < 0.2 ? LettersPerSecond : Math.Max(8, said.Length / seconds);
             Say(said);
             PlayReply(said, wav);
-            if (seconds < 0.2 && state != TalkState.Dormant) Sfx.Type(said, pace, ticket);
+            if (seconds < 0.2 && state != TalkState.Dormant && TypingSound) Sfx.Type(said, pace, ticket);
             else Sfx.Untype();
         }
 
@@ -3749,17 +3751,35 @@ namespace CapriDesktop
                             int untypedOnClose = untypes;
                             short[] longTyping = Sfx.Typed(new string('a', 2000), LettersPerSecond, 100, 3);
                             ToggleTyping();
-                            bool typingOff = !TypingSound && !mainframe.TypingShown && !Sfx.Typing;
+                            bool typingOff = !TypingSound && !mainframe.TypingShown && preferences.Typing == 2;
                             typedHeard.Clear();
                             Answer(++asking, "Quiet line.", TalkState.Talking, true);
                             int typedWhileOff = typedHeard.Count;
                             CloseTalk();
                             ToggleTyping();
+                            bool typingForced = TypingSound && mainframe.TypingShown && preferences.Typing == 1;
+                            preferences.Typing = 0;
+                            string typingKeyWas = voice.Key;
+                            string typingVoiceWas = voice.VoiceId;
+                            bool typingQuietWas = preferences.Quiet;
+                            voice.Key = "test-key";
+                            voice.VoiceId = "v1";
+                            preferences.Quiet = false;
+                            bool autoOffWithVoice = !TypingSound;
+                            voiceBroken = true;
+                            bool autoOnWhenBroken = TypingSound;
+                            voiceBroken = false;
+                            preferences.Quiet = true;
+                            bool autoOnWhenQuiet = TypingSound;
+                            voice.Key = typingKeyWas;
+                            voice.VoiceId = typingVoiceWas;
+                            preferences.Quiet = typingQuietWas;
+                            mainframe.Sync();
                             Sfx.TypeOut = realTypeOut;
                             Sfx.Untyped = realUntyped;
                             Sfx.Level = typingLevel;
-                            if (typedLine == null || Math.Abs(typedSeconds - (35.0 / LettersPerSecond + 0.05)) > 0.02 || typedPeak == 0 || typedPeak > 0.09 * 0.6 * 32767 || untypedOnClose < 2 || longTyping.Length > (Sfx.TypeLimit + 0.06) * Sfx.Rate || !typingOff || typedWhileOff != 0 || !TypingSound || !Sfx.Typing) throw new Exception("Typing sound went wrong: " + typedHeard.Count + " | " + typedSeconds + " s | peak " + typedPeak + " | untypes " + untypedOnClose + " | off " + typingOff + " | " + typedWhileOff);
-                            checks.Add("PASS typing sound: a soft tick per two letters while a text-only reply types out, capped at 6 s, stops when the bubble closes, and Settings > Typing sound turns it off");
+                            if (typedLine == null || Math.Abs(typedSeconds - (35.0 / LettersPerSecond + 0.05)) > 0.02 || typedPeak == 0 || typedPeak > 0.09 * 0.6 * 32767 || untypedOnClose < 2 || longTyping.Length > (Sfx.TypeLimit + 0.06) * Sfx.Rate || !typingOff || typedWhileOff != 0 || !typingForced || !autoOffWithVoice || !autoOnWhenBroken || !autoOnWhenQuiet) throw new Exception("Typing sound went wrong: " + typedHeard.Count + " | " + typedSeconds + " s | peak " + typedPeak + " | untypes " + untypedOnClose + " | off " + typingOff + " | " + typedWhileOff);
+                            checks.Add("PASS typing sound: a soft tick per two letters while a text-only reply types out, capped at 6 s, stops when the bubble closes; on by default, off by default while ElevenLabs is speaking her replies, and Settings > Typing sound forces it on or off");
                             System.Collections.Generic.List<int[]> spans = Ledges.Open(0, 100, 10, new[] { new Rectangle(20, 0, 30, 50), new Rectangle(90, 5, 40, 40), new Rectangle(0, 11, 100, 40) });
                             if (spans.Count != 2 || spans[0][0] != 0 || spans[0][1] != 20 || spans[1][0] != 50 || spans[1][1] != 90) throw new Exception("Ledge covering math failed.");
                             Point home = anchor;
@@ -4916,8 +4936,22 @@ namespace CapriDesktop
                                     Func<string, string> fetchWas = Hands.Fetch;
                                     Hands.Fetch = delegate { throw new Exception("A song she already knows was searched for."); };
                                     string loved = Hands.Do("play_music", new ToolArguments { Song = "in love with myself" });
+                                    string lovedRun = ran[ran.Count - 1];
+                                    Func<string> nowWas = Hands.NowPlaying;
+                                    Func<string, bool> pressWas = Hands.PressPlay;
+                                    int nowAsked = 0;
+                                    Hands.NowPlaying = delegate { nowAsked++; return "Track " + nowAsked; };
+                                    Hands.PressPlay = delegate { return true; };
+                                    string stay = Hands.Do("play_music", new ToolArguments { Song = "I Really Want to Stay at Your House by Rosa Walton" });
+                                    string stayRun = ran[ran.Count - 1];
+                                    string stayShort = Hands.Do("play_music", new ToolArguments { Song = "irwtsayh" });
+                                    string stayShortRun = ran[ran.Count - 1];
+                                    Hands.NowPlaying = nowWas;
+                                    Hands.PressPlay = pressWas;
                                     Hands.Fetch = fetchWas;
-                                    if (loved != "Playing In Love With Myself on Spotify." || ran[ran.Count - 1] != "spotify:track:2iyaHQlYrR8Eyr4wOmOT5D") throw new Exception("In Love With Myself didn't play the Edgerunners 2 track: " + loved);
+                                    if (loved != "Playing In Love With Myself on Spotify." || lovedRun != "spotify:track:2iyaHQlYrR8Eyr4wOmOT5D") throw new Exception("In Love With Myself didn't play the Edgerunners 2 track: " + loved);
+                                    if (!Speaker.Speakers(2).Contains("no speakers or headphones") || !Speaker.Speakers(4).Contains("another app") || !Speaker.Speakers(32).Contains("error 32")) throw new Exception("Speaker errors read wrong: " + Speaker.Speakers(4));
+                                    if (stay != "Playing I Really Want to Stay at Your House on Spotify." || stayRun != "spotify:track:42W7fJXB7razFefTxMSyYp" || stayShort != stay || stayShortRun != stayRun) throw new Exception("I Really Want to Stay at Your House didn't play the Rosa Walton track: " + stay + " / " + stayShort);
                                     checks.Add("PASS Spotify discovery: Store names and IDs, classic shortcuts, French paths, and an executable without a shortcut all open and play with no running window");
                                     Hands.Run = delegate(string id) { ran.Add(id); };
                                     Hands.Exists = delegate { return false; };
@@ -5047,6 +5081,9 @@ namespace CapriDesktop
                                         { "Play Roblox", "open_app|Roblox||", "true" },
                                         { "play Elden Ring", "play_music|Elden Ring|song|", "true" },
                                         { "play Blinding Lights", "play_music|Blinding Lights|song|", "true" },
+                                        { "I wish we could go to the moon", "play_music|I Really Want to Stay at Your House|song|", "false" },
+                                        { "Capri, wish we could go to the moon together...", "play_music|I Really Want to Stay at Your House|song|", "false" },
+                                        { "play irwtsayh", "play_music|irwtsayh|song|", "true" },
                                         { "play Blinding Lights by The Weeknd on YouTube.", "play_music|Blinding Lights by The Weeknd|song|youtube", "true" },
                                         { "play my lofi beats playlist", "play_music|lofi beats|playlist|", "true" },
                                         { "play something by Drake", "play_music|Drake|artist|", "true" },

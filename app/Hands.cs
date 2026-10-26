@@ -330,6 +330,7 @@ namespace CapriDesktop
         {
             tool = null;
             args = new ToolArguments();
+            if (Moon.IsMatch(said ?? "")) { tool = "play_music"; args.Song = MoonSong; args.Kind = "song"; return true; }
             string text = Asked(said);
             if (Chatter.IsMatch(text) || Regex.IsMatch(text, @"\b(if|unless|until|after|before|when) (i|you|we|it|the)\b", RegexOptions.IgnoreCase)) return false;
             string lower = text.ToLowerInvariant();
@@ -786,8 +787,12 @@ namespace CapriDesktop
 
         private static readonly string[,] KnownSongs =
         {
-            { @"^in love with myself(\s+(by|from)\s+(petite meller|kalman chodakiewitz|eli shiffman|(cyberpunk:?\s+)?edgerunners)\b.*)?$", "2iyaHQlYrR8Eyr4wOmOT5D", "In Love With Myself", "In Love With Myself Petite Meller" }
+            { @"^in love with myself(\s+(by|from)\s+(petite meller|kalman chodakiewitz|eli shiffman|(cyberpunk:?\s+)?edgerunners)\b.*)?$", "2iyaHQlYrR8Eyr4wOmOT5D", "In Love With Myself", "In Love With Myself Petite Meller" },
+            { @"^(i really want to stay at your house|irwtsayh)(\s+(by|from)\s+(rosa walton|hallie coggins|(cyberpunk:?\s+)?edgerunners)\b.*)?$", "42W7fJXB7razFefTxMSyYp", "I Really Want to Stay at Your House", "I Really Want to Stay at Your House Rosa Walton" }
         };
+
+        private static readonly Regex Moon = new Regex(@"\bwish\s+(?:we|i|you\s+and\s+i|me\s+and\s+you)\s+could\s+(?:go|fly|get|run\s+away)\s+to\s+the\s+moon\b", RegexOptions.IgnoreCase);
+        internal const string MoonSong = "I Really Want to Stay at Your House";
 
         internal const string Home = "yerocsin42.github.io/capri-desktop";
 

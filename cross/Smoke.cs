@@ -269,9 +269,10 @@ namespace CapriDesktop
                 pet.Hear("forget about silksong");
                 int typedOff = typedHeard.Count;
                 pet.SetTyping(true);
+                pet.AutoTyping();
                 Sfx.TypeOut = null;
                 Sfx.Untyped = null;
-                if (typedOn != 1 || Math.Abs(typedSeconds - typedWanted) > 0.02 || !typingOff || typedOff != 1 || typedHeard.Count != 2 || !pet.TypingSound || Brain.Notes() != "") throw new Exception("Typing sound went wrong: " + typedOn + " | " + typedSeconds + " | " + typingOff + " | " + typedOff + " | " + typedHeard.Count);
+                if (typedOn != 1 || Math.Abs(typedSeconds - typedWanted) > 0.02 || !typingOff || typedOff != 1 || typedHeard.Count != 2 || !pet.TypingSound || Brain.Notes() != "" || !Sfx.Typing) throw new Exception("Typing sound went wrong: " + typedOn + " | " + typedSeconds + " | " + typingOff + " | " + typedOff + " | " + typedHeard.Count);
                 checks.Add("PASS typing sound: a text-only reply plays soft typing ticks, Settings > Sounds > Typing sound turns them off");
                 pet.Talk.Dismiss();
                 pet.Think = null;
@@ -479,6 +480,7 @@ namespace CapriDesktop
                 string voiceMenu = pet.VoiceMenu;
                 if (voiceMenu != "*Speak replies | - | *Capri Test | Adam | - | New key... | Remove key ending 1234") throw new Exception("The Voice menu listed the wrong things: " + voiceMenu);
                 checks.Add("PASS voice key: Settings > Voice asks for the key in a hidden box, explains and drops a rejected key, keeps a good one in a private file and picks their own voice first");
+                if (pet.TypingSound) throw new Exception("Typing sound stayed on while her ElevenLabs voice works.");
                 pet.Think = delegate(string words) { return "Preem question, choom."; };
                 pet.Hear("talk to me");
                 return true;
@@ -501,7 +503,7 @@ namespace CapriDesktop
                 if (pet.Talk.Reply == null) return false;
                 int voiced;
                 lock (spoken) voiced = spoken.Count;
-                if (voiced != 2 || pet.VoiceStatus != "key 1234 | Capri Test | quiet") throw new Exception("Speak replies off still spoke: " + voiced + " | " + pet.VoiceStatus);
+                if (voiced != 2 || pet.VoiceStatus != "key 1234 | Capri Test | quiet" || !pet.TypingSound) throw new Exception("Speak replies off still spoke, or typing stayed off: " + voiced + " | " + pet.VoiceStatus);
                 pet.ForgetVoice();
                 if (File.Exists(Path.Combine(folder, "voice-key")) || pet.VoiceStatus != "no key | v1 | quiet" || pet.VoiceMenu != "Add ElevenLabs key...") throw new Exception("Remove key didn't remove it: " + pet.VoiceStatus + " | " + pet.VoiceMenu);
                 checks.Add("PASS voice: replies are spoken through ElevenLabs and type out at the voice's pace, Speak replies off keeps her quiet, and Remove key deletes the file");

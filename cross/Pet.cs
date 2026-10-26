@@ -33,7 +33,7 @@ namespace CapriDesktop
         [DataMember] internal int? Sounds;
         [DataMember] internal string VoiceId;
         [DataMember] internal bool Silent;
-        [DataMember] internal bool NoTyping;
+        [DataMember] internal int Typing;
     }
 
     internal sealed class Clip
@@ -232,7 +232,6 @@ namespace CapriDesktop
             voice.Key = ReadVoiceKey();
             voice.VoiceId = string.IsNullOrEmpty(Saved.VoiceId) ? null : Saved.VoiceId;
             if (Program.Smoke == null) { Voice.Playback = Limbs.Speak; Voice.Silence = Limbs.Hush; }
-            Sfx.Typing = !Saved.NoTyping;
             if (Program.Smoke == null)
             {
                 Sfx.TypeOut = delegate(short[] samples) { Limbs.Speak(Voice.Wave(samples, Sfx.Rate)); };
@@ -736,7 +735,7 @@ namespace CapriDesktop
             if (clip == grin) Play(idle);
             string line = PetLines[petLine++ % PetLines.Length];
             Talk.Answer("pets you", line);
-            Sfx.Type(line, Talk.Pace, ticket);
+            TypeAlong(line, ticket);
         }
 
         internal void ForgetPets()
@@ -856,7 +855,7 @@ namespace CapriDesktop
             }
             sounds.Items.Add(new Separator());
             typingItem = new MenuItem { Header = "Typing sound", ToggleType = MenuItemToggleType.CheckBox };
-            typingItem.Click += delegate { SetTyping(Saved.NoTyping); };
+            typingItem.Click += delegate { SetTyping(!TypingSound); };
             sounds.Items.Add(typingItem);
             MenuItem notes = new MenuItem { Header = "Open her notes (me.md)" };
             notes.Click += delegate { OpenNotes(); };
@@ -903,7 +902,7 @@ namespace CapriDesktop
             for (int i = 0; i < replyPicks.Count; i++) replyPicks[i].IsChecked = i == Brain.Wordiness;
             for (int i = 0; i < recallPicks.Count; i++) recallPicks[i].IsChecked = Recalls[i] == Brain.Recall;
             for (int i = 0; i < soundPicks.Count; i++) soundPicks[i].IsChecked = SoundLevels[i] == Sfx.Level;
-            typingItem.IsChecked = !Saved.NoTyping;
+            typingItem.IsChecked = TypingSound;
         }
 
         internal string Picked
@@ -1225,7 +1224,7 @@ namespace CapriDesktop
 
         private void Reply(int ticket, string heard, string said)
         {
-            if (!Speaks || Voice.Spoken(said).Length == 0) { Talk.Answer(heard, said); Sfx.Type(said, Talk.Pace, ticket); return; }
+            if (!Speaks || Voice.Spoken(said).Length == 0) { Talk.Answer(heard, said); TypeAlong(said, ticket); return; }
             Talk.Thinking(heard);
             bool[] shown = { false };
             DispatcherTimer.RunOnce(delegate
@@ -1233,7 +1232,7 @@ namespace CapriDesktop
                 if (ticket != asking || shown[0]) return;
                 shown[0] = true;
                 Talk.Answer(heard, said);
-                Sfx.Type(said, Talk.Pace, ticket);
+                TypeAlong(said, ticket);
             }, TimeSpan.FromMilliseconds(VoiceWait));
             ThreadPool.QueueUserWorkItem(delegate
             {
@@ -1250,7 +1249,7 @@ namespace CapriDesktop
                     double seconds = wav == null ? 0 : Voice.Seconds(wav);
                     Talk.Answer(heard, said, seconds);
                     if (seconds >= 0.2) voice.Play(wav);
-                    else Sfx.Type(said, Talk.Pace, ticket);
+                    else TypeAlong(said, ticket);
                 });
             });
         }
@@ -1345,14 +1344,24 @@ namespace CapriDesktop
 
         internal string VoiceStatus { get { return (voice.Key == null ? "no key" : "key " + Voice.Tail(voice.Key)) + " | " + (VoiceName() ?? "no voice") + " | " + (Speaks ? "speaking" : "quiet"); } }
 
-        internal bool TypingSound { get { return !Saved.NoTyping; } }
+        internal bool VoiceWorking { get { return Speaks && voiceProblem == null; } }
+
+        internal bool TypingSound { get { return Saved.Typing == 1 || (Saved.Typing == 0 && !VoiceWorking); } }
 
         internal void SetTyping(bool on)
         {
-            Saved.NoTyping = !on;
+            Saved.Typing = on ? 1 : 2;
             Sfx.Typing = on;
             Save();
             Sfx.Type("click clack", Talk.LettersPerSecond, 1);
+        }
+
+        internal void AutoTyping() { Saved.Typing = 0; }
+
+        private void TypeAlong(string said, int ticket)
+        {
+            Sfx.Typing = TypingSound;
+            Sfx.Type(said, Talk.Pace, ticket);
         }
 
         internal void SetSpeak(bool on)
