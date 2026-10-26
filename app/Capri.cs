@@ -401,6 +401,8 @@ namespace CapriDesktop
         private double nextGlitch;
         private int clicks;
         private bool riding;
+        private Job job;
+        private string working;
         private bool pendingClick;
         private Point pendingPoint;
         private long pendingTime;
@@ -476,11 +478,10 @@ namespace CapriDesktop
         private System.Collections.Generic.List<short[]> backlog;
         private bool resting;
         private int loudRun;
-        private readonly Whisper whisper;
+        private Dictation dictation;
         private volatile bool local;
         private volatile bool earsShut;
         private volatile bool transcribing;
-        private volatile bool fetchingEars;
         private volatile bool earsReady;
         private int earsNotice = -1;
         private string earsLead = "";
@@ -516,7 +517,7 @@ namespace CapriDesktop
         private const string FreeKeyPage = "https://build.nvidia.com/settings/api-keys";
         private const string GuidePage = "https://yerocsin42.github.io/capri-desktop/setup/#voice";
         private const string DiscordPage = "https://discord.gg/F4fDHfGtFk";
-        private const string GuideLine = "Follow the guide I just opened. Then paste your ElevenLabs key in the box under VOICE, press Connect and pick my voice in the Voice ID box." + Brain.Stuck;
+        private const string GuideLine = "Follow the guide I just opened. Make your ElevenLabs key with Restrict key turned off, paste it in the box under VOICE, press Connect and pick my voice in the Voice ID box." + Brain.Stuck;
         private const string FreeKeyLine = "Sign in on that page, press Generate API Key and copy it. Then paste it in the box under BRAIN and press Connect. It's free." + Brain.Stuck;
         internal static Action<string> Browse = delegate(string page) { try { Process.Start(page); } catch (System.ComponentModel.Win32Exception) { } };
         private const int PaddingSize = 36;
@@ -538,7 +539,6 @@ namespace CapriDesktop
             updateExit = Close;
             Brain.LogPath = Path.Combine(data, "errors.txt");
             engine = new Engine(data);
-            whisper = new Whisper(data);
             preferences = smoke ? new Preferences() : LoadPreferences();
             ears.Chosen = preferences.Mic;
             clip = idle;
@@ -574,7 +574,7 @@ namespace CapriDesktop
             wanderItem = new ToolStripMenuItem("Wander around", null, delegate { ToggleWander(); });
             wanderItem.Checked = preferences.Wander;
             moves.DropDownItems.Add(wanderItem);
-            rideItem = new ToolStripMenuItem("Perch on cursor", null, delegate { if (riding) StopRide(); else StartRide(); });
+            rideItem = new ToolStripMenuItem("Ride cursor", null, delegate { if (riding) StopRide(); else StartRide(); });
             moves.DropDownItems.Add(rideItem);
             sitItem = new ToolStripMenuItem("Sit on windows", null, delegate { ToggleSitting(); });
             sitItem.Checked = !preferences.NoSitting;
@@ -620,6 +620,8 @@ namespace CapriDesktop
             mainframe = new Mainframe(this, tray.Icon, Assembly.GetExecutingAssembly().GetName().Version.ToString(3));
             voice.Key = Voice.Unprotect(preferences.VoiceKey);
             Hands.Look = LookAt;
+            Hands.Work = RunJob;
+            Hands.Resume = ResumeJob;
             string textKey = Voice.Unprotect(preferences.TextKey);
             if (textKey != null) brain.Remote = new Cloud(textKey, preferences.TextModel);
             mainframe.ShowTextKey(textKey == null ? null : Voice.Tail(textKey));
@@ -698,6 +700,7 @@ namespace CapriDesktop
             bool muteFree = !testing && Native.RegisterHotKey(Handle, MuteKeyId, 0x0001 | 0x0002 | 0x4000, 0x4E) && Native.UnregisterHotKey(Handle, MuteKeyId);
             mainframe.ShowShortcut(talkKey, muteFree);
             RefreshIcons();
+            if (!testing && !hidden) Drop();
         }
 
         internal static Bitmap LoadArt(string name)
@@ -1090,7 +1093,7 @@ namespace CapriDesktop
             leanAngle = 0;
             Play(grin);
             if (IsHandleCreated) Native.SetWindowLong(Handle, -20, Native.GetWindowLong(Handle, -20) & ~0x20);
-            if (rideItem != null) rideItem.Text = "Perch on cursor";
+            if (rideItem != null) rideItem.Text = "Ride cursor";
             if (tray != null) tray.Text = "Capri · Double-click to restore";
             if (!IsDisposed) { Location = anchor; UpdateAnimation(); SavePreferences(); mainframe.Sync(); }
         }
@@ -1363,7 +1366,7 @@ namespace CapriDesktop
             Rectangle area = Screen.FromPoint(Cursor.Position).WorkingArea;
             anchor = new Point(area.Right - Width - 28, area.Bottom - Height - 12);
             SetHidden(false);
-            SavePreferences();
+            if (!Drop()) SavePreferences();
         }
 
         internal bool IsHidden { get { return hidden; } }
@@ -1382,7 +1385,7 @@ namespace CapriDesktop
         }
 
         internal static bool FreeChatOn;
-        internal const string NeedsVoiceKey = "Voice chat needs an ElevenLabs key, choom. Right-click me, open Capri Mainframe and paste one under VOICE. Type to me for now.";
+        internal const string NeedsVoiceKey = "Voice chat needs an ElevenLabs key, choom. Make one with Restrict key turned off, then paste it under VOICE in Capri Mainframe. Type to me for now.";
         internal const string NoVoiceCredits = "Out of ElevenLabs credits, so voice chat is off. Type to me for now, choom.";
 
         internal bool FreeVoice { get { return preferences.FreeVoice; } }
@@ -1397,7 +1400,7 @@ namespace CapriDesktop
 
         private void CheckSlow(double now)
         {
-            if (slowWarned || talkState != TalkState.Thinking || (chatting && !local) || double.IsNaN(thinkingSince)) return;
+            if (slowWarned || working != null || talkState != TalkState.Thinking || (chatting && !local) || double.IsNaN(thinkingSince)) return;
             Cloud remote = brain.Remote;
             if (remote == null && localWarned) return;
             if (now - thinkingSince < (remote != null ? 8 : 25)) return;
@@ -1772,6 +1775,44 @@ namespace CapriDesktop
             try { if (!IsDisposed) BeginInvoke(action); } catch (InvalidOperationException) { }
         }
 
+        private string RunJob(string task) { return Work(new Job(task)); }
+
+        private string ResumeJob(string text)
+        {
+            Job waiting = job;
+            if (waiting == null || !waiting.Asking) return null;
+            string said = text.Trim();
+            if (Regex.IsMatch(said, @"^(yes|yeah|yep|yup|ya|yea|sure|ok|okay|do it|go ahead|go for it|send it|press it|oui)\b[\s.!,]*(please|pls|plz|choom)?[\s.!]*$", RegexOptions.IgnoreCase)) return Work(waiting);
+            job = null;
+            if (Regex.IsMatch(said, @"^(no|nah|nope|don't|do not|stop|cancel|never mind|nevermind|leave it|non)\b", RegexOptions.IgnoreCase)) return "Okay, I left it alone.";
+            return null;
+        }
+
+        private string Work(Job running)
+        {
+            job = running;
+            running.Think = delegate(string system, string user, System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, ToolArguments>> calls) { return brain.Step(system, user, Computer.Tools, Computer.ClaudeTools, Computer.Listing, calls); };
+            running.Progress = delegate(string status) { Post(delegate { working = status + " Esc stops me."; UpdateTalk(clock.Elapsed.TotalSeconds); }); };
+            Post(delegate { working = "On it. Esc stops me."; if (typer.Visible) typer.Hide(); PassThrough(true); UpdateTalk(clock.Elapsed.TotalSeconds); });
+            try { return running.Run(); }
+            finally
+            {
+                if (job == running && !running.Asking) job = null;
+                Post(delegate { working = null; PassThrough(false); });
+            }
+        }
+
+        private void PassThrough(bool on)
+        {
+            foreach (Form form in new Form[] { this, pill, box })
+            {
+                if (!form.IsHandleCreated) continue;
+                int style = Native.GetWindowLong(form.Handle, -20);
+                if ((style & 0x80000) == 0) continue;
+                Native.SetWindowLong(form.Handle, -20, on || (form == this && riding) ? style | 0x20 : style & ~0x20);
+            }
+        }
+
         private void UseBrain(string[] installed, Machine found, Pick local)
         {
             machine = found;
@@ -2025,7 +2066,7 @@ namespace CapriDesktop
                 catch (Exception error) { problem = Voice.Short("Couldn't read your ElevenLabs voices: " + error.Message); }
                 Post(delegate
                 {
-                    if (connecting && status == 401) { mainframe.VoiceNote(problem, true); return; }
+                    if (connecting && status == 401) { mainframe.VoiceNote(Voice.Unsaved(problem), true); return; }
                     if (connecting) { voice.Key = key; preferences.VoiceKey = Voice.Protect(key); SavePreferences(); }
                     if (voice.Key != key) return;
                     if (found != null) voices = found;
@@ -2159,18 +2200,7 @@ namespace CapriDesktop
             pillUntil = clock.Elapsed.TotalSeconds + 1.5;
             brain.Cancel();
             CloseTalk();
-            if (!fetchingEars && whisper.Ready) { ListenLocally(); return; }
-            EarsNote(earsLead + "Downloading my ears (" + whisper.Download + ") before I can listen.", false);
-            if (fetchingEars) return;
-            fetchingEars = true;
-            whisper.Cancel = false;
-            ThreadPool.QueueUserWorkItem(delegate
-            {
-                string problem = null;
-                try { whisper.Install(delegate(string what, long have, long size) { Post(delegate { EarsProgress(what, have, size); }); }); }
-                catch (Exception error) { problem = error.Message; }
-                Post(delegate { EarsDone(problem); });
-            });
+            ListenLocally();
         }
 
         private void EarsNote(string text, bool problem)
@@ -2183,31 +2213,51 @@ namespace CapriDesktop
             Begin(earsNotice, text, TalkState.Talking, null);
         }
 
-        private void EarsProgress(string what, long have, long size)
+        private void OnUi(Action action)
         {
-            if (!local || !chatting || !fetchingEars || earsReady) return;
-            string text = earsLead + what + " " + Math.Max(0, Math.Min(100, (int)(100.0 * have / Math.Max(1, size)))) + "%; the mic starts when this finishes.";
-            mainframe.VoiceNote(text, false);
-            if (asking != earsNotice) return;
-            Begin(earsNotice, text, TalkState.Talking, null);
-            replyStart -= text.Length / LettersPerSecond;
-        }
-
-        private void EarsDone(string problem)
-        {
-            if (!fetchingEars) return;
-            fetchingEars = false;
-            if (!chatting || !local) return;
-            if (problem == null && whisper.Ready) { ListenLocally(); return; }
-            StopChat();
-            EarsNote("Couldn't get my ears. Click the wave to retry, or type to me.", true);
-            mainframe.VoiceNote(Voice.Short(problem ?? "The ears download is incomplete.") + " Click the wave to retry.", true);
+            if (InvokeRequired) Post(action);
+            else action();
         }
 
         private void ListenLocally()
         {
             lock (waking) { utterance = null; quietRun = 0; loudRun = 0; noiseHold = false; preroll.Clear(); }
-            try { if (!testing) ears.Start(); }
+            Dictation opened;
+            try { opened = Dictation.Make(); }
+            catch (Exception error) { ListenOffline("Windows speech recognition isn't on this PC: " + Voice.Short(error.Message)); return; }
+            dictation = opened;
+            opened.Heard = delegate(string text) { OnUi(delegate { if (dictation == opened) HeardDictation(text); }); };
+            opened.Lost = delegate(string problem) { OnUi(delegate { if (dictation == opened) DictationLost(problem); }); };
+            EarsNote(earsLead + "One sec, opening my ears.", false);
+            opened.Start(delegate(string problem) { OnUi(delegate { if (dictation == opened) Dictated(problem); }); });
+        }
+
+        private void Dictated(string problem)
+        {
+            if (!chatting || !local) return;
+            if (problem != null) { DictationLost(problem); return; }
+            try { if (!testing && !ears.Listening) ears.Start(); }
+            catch (VoiceException) { }
+            earsReady = true;
+            dictation.Hold(ears.Muted);
+            CheckEars(clock.Elapsed.TotalSeconds);
+            EarsNote(ears.Muted ? earsLead + "Free voice chat is ready; your mic is muted." : earsLead.Length > 0 ? earsLead + "Free voice chat is on; talk and I'll type back." : "Free voice chat on. Talk and I'll type back.", false);
+        }
+
+        private void DictationLost(string problem)
+        {
+            Dictation closing = dictation;
+            dictation = null;
+            if (closing != null) closing.Dispose();
+            if (!chatting || !local) return;
+            earsReady = false;
+            ListenOffline(problem);
+        }
+
+        private void ListenOffline(string why)
+        {
+            lock (waking) { utterance = null; quietRun = 0; loudRun = 0; noiseHold = false; preroll.Clear(); }
+            try { if (!testing && !ears.Listening) ears.Start(); }
             catch (VoiceException error)
             {
                 StopChat();
@@ -2216,7 +2266,18 @@ namespace CapriDesktop
             }
             earsReady = true;
             CheckEars(clock.Elapsed.TotalSeconds);
-            EarsNote(ears.Muted ? earsLead + "Free voice chat is ready; your mic is muted." : earsLead.Length > 0 ? earsLead + "Free voice chat is on; talk and I'll type back." : "Free voice chat on. Talk and I'll type back.", false);
+            EarsNote(earsLead + (ears.Muted ? "Free voice chat is ready with offline hearing; your mic is muted. " : "Free voice chat on, but I'm hearing offline, so I'll miss some words. ") + (why == Dictation.PrivacyOff ? "Turn on Online speech recognition in Windows Settings > Privacy & security > Speech." : "The reason is under VOICE in the Mainframe."), false);
+            mainframe.VoiceNote(why, true);
+        }
+
+        private void HeardDictation(string text)
+        {
+            if (!chatting || !local || !earsReady) return;
+            CheckEars(clock.Elapsed.TotalSeconds);
+            text = Hearing.Clean(text);
+            if (earsShut || text.Length == 0) return;
+            mainframe.VoiceNote("Free voice chat on. Talk and I'll type back.", false);
+            Hear(text, text, "> you: ");
         }
 
         private void CheckEars(double now)
@@ -2241,7 +2302,7 @@ namespace CapriDesktop
             bool loud = Speaker.Loudness(chunk, 0, chunk.Length) >= WakeLevel;
             lock (waking)
             {
-                if (!local || !earsReady || ears.Muted || earsShut || transcribing) { utterance = null; preroll.Clear(); loudRun = 0; quietRun = 0; return; }
+                if (!local || !earsReady || dictation != null || ears.Muted || earsShut || transcribing) { utterance = null; preroll.Clear(); loudRun = 0; quietRun = 0; return; }
                 if (noiseHold)
                 {
                     quietRun = loud ? 0 : quietRun + 1;
@@ -2318,7 +2379,7 @@ namespace CapriDesktop
             {
                 string text = null;
                 string problem = null;
-                try { text = whisper.Text(samples); }
+                try { text = Hearing.Text(samples); }
                 catch (Exception error) { problem = Voice.Short(error.Message); }
                 Post(delegate { HeardLocally(ticket, request, text, problem); });
             });
@@ -2494,6 +2555,9 @@ namespace CapriDesktop
             Agent closing = agent;
             agent = null;
             if (closing != null) closing.Stop();
+            Dictation hearing = dictation;
+            dictation = null;
+            if (hearing != null) hearing.Dispose();
             ears.Stop();
             ears.Muted = false;
             speaker.Clear();
@@ -2546,6 +2610,7 @@ namespace CapriDesktop
         {
             if (!chatting) return;
             ears.Muted = !ears.Muted;
+            if (dictation != null && earsReady) dictation.Hold(ears.Muted);
             pill.SetChat(true, ears.Muted);
             CheckEars(clock.Elapsed.TotalSeconds);
             if (local && earsReady) mainframe.VoiceNote(ears.Muted ? "Mic muted. Click the mic to unmute." : transcribing ? "Hearing you..." : "Free voice chat on. Talk and I'll type back.", false);
@@ -2746,7 +2811,7 @@ namespace CapriDesktop
             if (!box.Visible && box.Opened < 0) box.Opened = now;
             box.State = talkState;
             box.Heard = heard;
-            box.Reply = talkState == TalkState.Thinking ? (slowWarned ? (brain.Remote != null ? "Still thinking. Waiting for " + brain.Remote.Company + "." : SlowLocal) : null) : reply;
+            box.Reply = talkState == TalkState.Thinking ? (working ?? (slowWarned ? (brain.Remote != null ? "Still thinking. Waiting for " + brain.Remote.Company + "." : SlowLocal) : null)) : reply;
             box.Revealed = revealed;
             float s = TalkScale();
             Point head = Head();
@@ -2878,7 +2943,6 @@ namespace CapriDesktop
             speaker.Close();
             voice.Stop();
             engine.Cancel = true;
-            whisper.Cancel = true;
             engine.Stop();
             mainframe.Quitting = true;
             mainframe.Close();
@@ -2930,8 +2994,11 @@ namespace CapriDesktop
                 Action<string> handsRun = null;
                 Func<System.Collections.Generic.List<InstalledApp>> handsCatalog = null;
                 Form backdrop = null;
-                System.Collections.Generic.List<string> whispered = new System.Collections.Generic.List<string>();
-                Func<string, string, string, string> realWhisper = null;
+                System.Collections.Generic.List<string> earsLog = new System.Collections.Generic.List<string>();
+                Func<short[], string> realHearing = null;
+                Func<Dictation> realMake = null;
+                string[] realEars = null;
+                ManualResetEvent realEarsDone = new ManualResetEvent(false);
                 Func<string, string> realThink = null;
                 System.Collections.Generic.List<string> glanceAsked = new System.Collections.Generic.List<string>();
                 System.Net.Sockets.TcpListener glanceFake = null;
@@ -2997,7 +3064,7 @@ namespace CapriDesktop
                             if (!riding || rideItem.Text != "Hop off") throw new Exception("Menu perch failed.");
                             rideItem.PerformClick();
                             if (riding || (Native.GetWindowLong(Handle, -20) & 0x20) != 0) throw new Exception("Hop off menu did not clean up.");
-                            checks.Add("PASS tray Perch on cursor and Hop off");
+                            checks.Add("PASS tray Ride cursor and Hop off");
                             System.Collections.Generic.List<int[]> spans = Ledges.Open(0, 100, 10, new[] { new Rectangle(20, 0, 30, 50), new Rectangle(90, 5, 40, 40), new Rectangle(0, 11, 100, 40) });
                             if (spans.Count != 2 || spans[0][0] != 0 || spans[0][1] != 20 || spans[1][0] != 50 || spans[1][1] != 90) throw new Exception("Ledge covering math failed.");
                             Point home = anchor;
@@ -3697,6 +3764,41 @@ namespace CapriDesktop
                                 if (brainSent[2].IndexOf("\"tools\":", StringComparison.Ordinal) < 0 || brainSent[3].IndexOf("\"tools\":", StringComparison.Ordinal) >= 0 || brainSent[3].IndexOf("To use one, reply with only the call", StringComparison.Ordinal) < 0 || brainSent[3].IndexOf("media{\\\"action\\\": \\\"play_pause|next|previous|volume_up|volume_down|mute|now_playing\\\"}", StringComparison.Ordinal) < 0) throw new Exception("A model without tools did not get its tools as text: " + brainSent[3]);
                                 if (brainSent[4].IndexOf("\"tools\":", StringComparison.Ordinal) >= 0 || brainSent[4].IndexOf("Project Capricorn", StringComparison.Ordinal) < 0 || brainSent[5].IndexOf("\"tools\":", StringComparison.Ordinal) >= 0 || brainSent[5].IndexOf("You are the hands", StringComparison.Ordinal) >= 0) throw new Exception("Plain chat still went through the tool prompt.");
                                 if (!Hands.Wants("can you see what im doing?") || !Hands.Wants("play me some music") || !Hands.Wants("open notepad") || !Hands.Wants("go to youtube.com") || Hands.Wants("hey") || Hands.Wants("how was your day?") || Hands.Wants("still there?") || Hands.Wants("out of five playtesters, who's the best?")) throw new Exception("Requests and chat were told apart wrong.");
+                                if (!Hands.Wants("click the search bar") || !Hands.Wants("make a song in suno") || Hands.Wants("make a joke") || !Hands.Promised("Opening Comet now, choom!") || !Hands.Promised("Bet, I'll open it for you.") || Hands.Promised("I'll play a game with you anytime.") || Hands.Promised("Sure, I love that song.")) throw new Exception("Computer jobs or false promises were spotted wrong.");
+                                ToolArguments lookedUp = Hands.Lookup("when does the new GTA come out?", "I don't have live info on that, choom.");
+                                if (!Hands.Wants("what's the weather in sydney?") || !Hands.Wants("can you check the weather") || !Hands.Wants("who won the game last night") || Hands.Wants("i love rainy weather") || lookedUp == null || lookedUp.Site != "google" || lookedUp.Search != "when does the new GTA come out" || Hands.Lookup("what's the weather near me?", "I'll look it up for you, choom!") == null || Hands.Lookup("what's my name?", "I don't have a way to know your name.") != null || Hands.Lookup("how are you?", "Can't complain, choom.") != null || Hands.Lookup("what do you see?", "I can't see your screen right now.") != null || Hands.Lookup("what's the capital of france?", "Paris, choom.") != null || !Hands.Wants("is it gonna rain tomorrow?") || Hands.Lookup("when does gta 6 come out?", "I gotta check that for you, choom. You might need to look that up somewhere else.") == null || Hands.Lookup("is it hot in perth?", "Check a proper weather feed, choom; I ain't got crystal ball optics.") == null || Hands.Lookup("when's the next gta out?", "You gotta check a search engine for that, choom.") == null || Hands.Pulled("Searched google.com for weather in sydney.") != "Pulled up \"weather in sydney\" on Google for you, choom." || Hands.Pulled("Searched youtube.com for lofi beats.") != null) throw new Exception("Look-ups that need Google were spotted wrong.");
+                                Func<Sight> oldLook = Computer.Look;
+                                Func<string, ToolArguments, Sight, string> oldAct = Computer.Act;
+                                Func<IntPtr> oldFront = Computer.Front;
+                                try
+                                {
+                                    Sight shopSight = new Sight { Window = new IntPtr(7), Title = "Shop", Program = "shop" };
+                                    shopSight.Targets.Add(new Target { Number = 1, Role = "box", Name = "Search the shop", Line = true, Box = new Rectangle(10, 10, 100, 20) });
+                                    shopSight.Targets.Add(new Target { Number = 2, Role = "button", Name = "Send", Box = new Rectangle(10, 40, 60, 20) });
+                                    System.Collections.Generic.List<string> jobActs = new System.Collections.Generic.List<string>();
+                                    Computer.Look = delegate { return shopSight; };
+                                    Computer.Front = delegate { return new IntPtr(7); };
+                                    Computer.Act = delegate(string name, ToolArguments a, Sight s) { jobActs.Add(name + ":" + (a.Target ?? "") + ":" + (a.Text ?? "")); return "Did it."; };
+                                    string[] script = { "type{\"target\": \"1\", \"text\": \"cats\", \"enter\": \"yes\"}", "click{\"target\": \"2\"}", "done{\"text\": \"Searched for cats and pressed Send.\"}" };
+                                    int jobLine = 0;
+                                    Job scripted = new Job("search cats then press send");
+                                    scripted.Think = delegate(string system, string user, System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, ToolArguments>> calls) { return script[Math.Min(jobLine++, script.Length - 1)]; };
+                                    string firstRun = scripted.Run();
+                                    if (firstRun != "Should I press \"Send\"?" || !scripted.Asking || jobActs.Count != 1 || jobActs[0] != "type:1:cats") throw new Exception("A job did not stop to ask before pressing Send: " + firstRun + " / " + string.Join(",", jobActs.ToArray()));
+                                    string secondRun = scripted.Run();
+                                    if (secondRun != "Searched for cats and pressed Send." || scripted.Asking || jobActs.Count != 2 || jobActs[1] != "click:2:") throw new Exception("A job did not carry on after yes: " + secondRun);
+                                    Computer.Front = delegate { return new IntPtr(8); };
+                                    Job switched = new Job("search dogs");
+                                    switched.Think = delegate(string system, string user, System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, ToolArguments>> calls) { return "type{\"target\": \"1\", \"text\": \"dogs\"}"; };
+                                    if (switched.Run() != "You switched windows, so I stopped." || jobActs.Count != 2) throw new Exception("A job kept going after the window changed.");
+                                    if (Computer.Risk("type", new ToolArguments { Target = "1", Text = "hi", Enter = "yes" }, new Sight { Window = new IntPtr(7), Title = "#general - Discord", Program = "Discord" }) != "send") throw new Exception("Enter in a chat app was not treated as sending.");
+                                }
+                                finally
+                                {
+                                    Computer.Look = oldLook;
+                                    Computer.Act = oldAct;
+                                    Computer.Front = oldFront;
+                                }
                                 if (brainSent[6].IndexOf("\"tools\":", StringComparison.Ordinal) >= 0 || brainSent[6].IndexOf("To use one, reply with only the call", StringComparison.Ordinal) < 0 || brainSent[7].IndexOf("Searched youtube.com for parkour.", StringComparison.Ordinal) < 0) throw new Exception("The cached text path did not run its Listing call.");
                                 if (ran.Count != 7 || ran[5] != "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify" || ran[6] != "https://www.youtube.com/results?search_query=parkour") throw new Exception("The brain's tool calls opened the wrong targets.");
                                 System.Collections.Generic.List<string> thinkAsked = new System.Collections.Generic.List<string>();
@@ -4770,7 +4872,8 @@ namespace CapriDesktop
                             string sealedKey = Voice.Protect("sk_test_capri_1234");
                             if (Voice.Unprotect(sealedKey) != "sk_test_capri_1234" || sealedKey.Contains("sk_test") || Voice.Unprotect("not a key") != null || Voice.Tail("sk_test_capri_1234") != "1234") throw new Exception("Key storage failed.");
                             if (Voice.Spoken("[GLITCH] Hey *choom*, [static] ready?") != "Hey choom, ready?" || Voice.Spoken("[STATIC]") != "") throw new Exception("Spoken text kept her tags: " + Voice.Spoken("[GLITCH] Hey *choom*, [static] ready?"));
-                            if (Voice.Explain(401, "") != "ElevenLabs rejected the key. Press Forget, paste a new one." || Voice.Explain(401, "{\"detail\":{\"status\":\"quota_exceeded\"}}") != "Out of ElevenLabs credits. Untick Speak replies to type." || Voice.Explain(400, "{\"detail\":{\"status\":\"invalid\",\"message\":\"Text is \\\"too\\\" long\"}}") != "Text is \"too\" long" || Voice.Explain(500, "oops") != "ElevenLabs error 500.") throw new Exception("ElevenLabs errors read wrong.");
+                            if (Voice.Explain(401, "") != "ElevenLabs rejected the key. Press Forget, paste a new one." || Voice.Explain(401, "{\"detail\":{\"status\":\"quota_exceeded\"}}") != "Out of ElevenLabs credits. Untick Speak replies to type." || Voice.Explain(400, "{\"detail\":{\"status\":\"invalid\",\"message\":\"Text is \\\"too\\\" long\"}}") != "Text is \"too\" long" + Voice.RestrictHint || Voice.Explain(500, "oops") != "ElevenLabs error 500." + Voice.RestrictHint
+                                || Voice.Explain(400, "{\"detail\":{\"message\":\"Input at position 0 has empty text. All inputs must include non-empty text.\"}}") != Voice.Silent || Voice.Explain(403, "{\"detail\":{\"message\":\"nope\"}}").IndexOf("Restrict key turned off", StringComparison.Ordinal) < 0 || Voice.Spoken("...") != "" || Voice.Spoken("[sighs] ...") != "") throw new Exception("ElevenLabs errors read wrong.");
                             using (MemoryStream raw = new MemoryStream())
                             using (BinaryWriter writer = new BinaryWriter(raw))
                             {
@@ -4799,6 +4902,7 @@ namespace CapriDesktop
                             for (int i = 7; i < shapes.Length; i++) widest = Math.Max(widest, shapes[i]);
                             if (shapes.Length != 12 || shapes[0] != -1 || shapes[4] != -1 || widest < 3) throw new Exception("Mouth envelope failed: " + string.Join(",", shapes));
                             if (Voice.Explain(401, "{\"detail\":{\"status\":\"invalid_api_key\",\"message\":\"Invalid API key\"}}") != "ElevenLabs rejected the key. Press Forget, paste a new one." || Voice.Explain(401, "{\"detail\":{\"status\":\"detected_unusual_activity\",\"message\":\"Unusual activity detected.\"}}") != "Unusual activity detected.") throw new Exception("ElevenLabs messages read wrong.");
+                            if (Voice.Explain(401, "{\"detail\":{\"status\":\"missing_permissions\"}}").IndexOf("Restrict key turned off", StringComparison.Ordinal) < 0 || Voice.Unsaved(Voice.Explain(401, "{\"detail\":{\"status\":\"invalid_api_key\"}}")) != Voice.RejectedNew || Voice.RejectedNew.IndexOf("Forget", StringComparison.Ordinal) >= 0 || Voice.Unsaved("Can't reach ElevenLabs. Check your internet.") != "Can't reach ElevenLabs. Check your internet.") throw new Exception("A pasted key ElevenLabs rejected said to press Forget, but it was never saved.");
                             System.Net.Sockets.TcpListener fake = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
                             fake.Start();
                             string[] fakeHeads = { "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json", "HTTP/1.1 200 OK\r\nContent-Type: audio/wav" };
@@ -4888,16 +4992,43 @@ namespace CapriDesktop
                             if (!mainframe.MicStatus.EndsWith("| help | - | mute", StringComparison.Ordinal)) throw new Exception("Without a key the Mainframe should offer Get a key, not the shortcut: " + mainframe.MicStatus);
                             mainframe.ShowShortcut(false, false);
                             if (!mainframe.MicStatus.EndsWith("| help | - | -", StringComparison.Ordinal)) throw new Exception("The Ctrl + Alt + N hint showed while the key was taken: " + mainframe.MicStatus);
-                            if (FreeChatOn || mainframe.FreeVoiceOffered) throw new Exception("Free voice chat is offered in the Mainframe while it's switched off.");
-                            CloseTalk();
-                            pill.Press(2);
-                            if (pill.Chatting || chatting || local || reply != NeedsVoiceKey) throw new Exception("The wave without a key did not ask for one while free voice chat is off: " + reply);
-                            CloseTalk();
-                            ChatFailed("quota_exceeded");
-                            if (chatting || local || preferences.FreeVoice || reply != NoVoiceCredits) throw new Exception("Running out of ElevenLabs credits switched to free voice chat while it's off: " + reply);
-                            CloseTalk();
-                            checks.Add("PASS free voice chat is off for now: no box in the Mainframe, the wave without a key asks for one, and running out of credits says so");
+                            if (!FreeChatOn)
+                            {
+                                if (mainframe.FreeVoiceOffered) throw new Exception("Free voice chat is offered in the Mainframe while it's switched off.");
+                                CloseTalk();
+                                pill.Press(2);
+                                if (pill.Chatting || chatting || local || reply != NeedsVoiceKey) throw new Exception("The wave without a key did not ask for one while free voice chat is off: " + reply);
+                                CloseTalk();
+                                ChatFailed("quota_exceeded");
+                                if (chatting || local || preferences.FreeVoice || reply != NoVoiceCredits) throw new Exception("Running out of ElevenLabs credits switched to free voice chat while it's off: " + reply);
+                                CloseTalk();
+                                checks.Add("PASS free voice chat is off for now: no box in the Mainframe, the wave without a key asks for one, and running out of credits says so");
+                            }
                             FreeChatOn = true;
+                            realHearing = Hearing.Run;
+                            realMake = Dictation.Make;
+                            Dictation.Make = delegate { return new StandInDictation(); };
+                            ThreadPool.QueueUserWorkItem(delegate
+                            {
+                                string loads = WindowsDictation.Probe();
+                                string offline;
+                                try
+                                {
+                                    using (System.Speech.Synthesis.SpeechSynthesizer synth = new System.Speech.Synthesis.SpeechSynthesizer())
+                                    using (MemoryStream pcm = new MemoryStream())
+                                    {
+                                        synth.SetOutputToAudioStream(pcm, new System.Speech.AudioFormat.SpeechAudioFormatInfo(Ears.Rate, System.Speech.AudioFormat.AudioBitsPerSample.Sixteen, System.Speech.AudioFormat.AudioChannel.Mono));
+                                        synth.Speak("What do you think of this game?");
+                                        byte[] bytes = pcm.ToArray();
+                                        short[] samples = new short[bytes.Length / 2];
+                                        Buffer.BlockCopy(bytes, 0, samples, 0, samples.Length * 2);
+                                        offline = "heard " + Hearing.Clean(realHearing(samples));
+                                    }
+                                }
+                                catch (Exception error) { offline = "failed " + error.Message; }
+                                realEars = new[] { loads, offline };
+                                realEarsDone.Set();
+                            });
                             System.Collections.Generic.List<Mic> found = Ears.List();
                             ChooseMic("{0.0.1.00000000}.{missing}");
                             if (preferences.Mic != "{0.0.1.00000000}.{missing}" || ears.Chosen != preferences.Mic || mainframe.MicStatus.IndexOf("| Mic: default |", StringComparison.Ordinal) < 0) throw new Exception("Missing mic did not fall back to the default label: " + mainframe.MicStatus);
@@ -5093,83 +5224,77 @@ namespace CapriDesktop
                             checks.Add("PASS bubbles follow Always on top: with it off her reply bubble, pill and typing box sit with her behind other windows");
                             Speak = null;
                             CloseTalk();
-                            Directory.CreateDirectory(Path.GetDirectoryName(whisper.Exe));
-                            File.WriteAllText(whisper.Exe, "");
-                            File.WriteAllText(whisper.Model, "");
-                            if (whisper.Ready) throw new Exception("Empty ears files counted as ready.");
-                            whisper.Cancel = true;
-                            bool cancelledEars = false;
-                            try { whisper.Install(delegate(string what, long have, long size) { throw new Exception("Cancelled ears started downloading."); }); }
-                            catch (OperationCanceledException) { cancelledEars = true; }
-                            if (!cancelledEars) throw new Exception("Ears setup ignored cancellation.");
-                            whisper.Cancel = false;
-                            using (FileStream model = File.Create(whisper.Model)) model.SetLength(Whisper.ModelSize);
-                            if (whisper.Ready) throw new Exception("An empty whisper CLI counted as ready with a complete model.");
-                            File.WriteAllText(whisper.Exe, "fake");
-                            File.WriteAllText(whisper.Model, "partial");
-                            if (whisper.Ready || whisper.Download != Engine.Amount(Whisper.ModelSize)) throw new Exception("A partial model counted as ready or the existing CLI was counted twice.");
-                            File.Delete(whisper.Model);
-                            string oldEars = Path.Combine(Path.GetDirectoryName(whisper.Model), Whisper.English ? "ggml-base-q5_1.bin" : "ggml-base.en-q5_1.bin");
-                            File.WriteAllText(oldEars, "other language model");
-                            if (whisper.Ready) throw new Exception("The other language's ears model counted as ready.");
-                            fetchingEars = true;
+                            StandInDictation lateStart = new StandInDictation();
+                            lateStart.Late = true;
+                            Dictation.Make = delegate { return lateStart; };
                             StartLocal();
                             CheckEars(clock.Elapsed.TotalSeconds);
-                            if (!chatting || !local || earsReady || !earsShut || ears.Listening || reply.IndexOf("before I can listen", StringComparison.Ordinal) < 0) throw new Exception("Downloading ears looked ready to listen.");
-                            EarsProgress("Downloading her ears' model", 1, 2);
-                            if (reply.IndexOf("50%", StringComparison.Ordinal) < 0 || mainframe.VoiceStatus.IndexOf("50%", StringComparison.Ordinal) < 0) throw new Exception("Download progress did not show beside Capri and under VOICE.");
+                            if (!chatting || !local || earsReady || !earsShut || !lateStart.Started || reply != "One sec, opening my ears.") throw new Exception("Opening Windows speech looked ready to listen: " + reply);
                             replyDone = clock.Elapsed.TotalSeconds - 120;
                             UpdateTalk(clock.Elapsed.TotalSeconds);
-                            if (box.Leaving >= 0) throw new Exception("The ears download message faded before setup finished.");
+                            if (box.Leaving >= 0) throw new Exception("The opening-ears message faded before Windows speech started.");
                             short[] setupNoise = new short[Ears.Chunk];
                             for (int i = 0; i < setupNoise.Length; i++) setupNoise[i] = 9000;
                             for (int i = 0; i < 20; i++) ears.Feed(setupNoise);
-                            if (utterance != null || transcribing) throw new Exception("She gathered words before the download finished.");
+                            if (utterance != null || transcribing) throw new Exception("She gathered sound before Windows speech started.");
+                            lateStart.Pending(null);
+                            if (!earsReady || earsShut || lateStart.Held || reply != "Free voice chat on. Talk and I'll type back.") throw new Exception("Windows speech starting did not say the mic was ready: " + reply);
+                            for (int i = 0; i < 20; i++) ears.Feed(setupNoise);
+                            if (utterance != null || transcribing) throw new Exception("The offline ears gathered sound while Windows speech was listening.");
+                            int heardBefore = asking;
+                            ToggleMic();
+                            lateStart.Heard("muted words");
+                            if (!lateStart.Held || !earsShut || asking != heardBefore || heard == "muted words") throw new Exception("Muting did not hold Windows speech or drop what it heard.");
+                            ToggleMic();
+                            if (lateStart.Held || earsShut) throw new Exception("Unmuting did not resume Windows speech.");
+                            TalkState wasTalking = talkState;
+                            talkState = TalkState.Thinking;
+                            lateStart.Heard("words while thinking");
+                            talkState = wasTalking;
+                            CheckEars(clock.Elapsed.TotalSeconds);
+                            lateStart.Heard("  ");
+                            if (asking != heardBefore || heard == "words while thinking" || earsShut) throw new Exception("Windows speech words reached her while she was thinking, or a blank result started a turn.");
                             StopChat();
-                            string stoppedEars = mainframe.VoiceStatus;
-                            EarsProgress("Downloading her ears", 3, 4);
-                            EarsDone("Old failure");
-                            if (chatting || local || reply != null || mainframe.VoiceStatus != stoppedEars) throw new Exception("A stopped download reopened chat or replaced its status.");
-                            fetchingEars = true;
+                            lateStart.Heard("after the chat");
+                            if (!lateStart.Disposed || dictation != null || chatting || heard == "after the chat") throw new Exception("Ending free voice chat left Windows speech open.");
+                            StandInDictation staleStart = new StandInDictation();
+                            staleStart.Late = true;
+                            Dictation.Make = delegate { return staleStart; };
                             StartLocal();
-                            Begin(++asking, "Typed during setup.", TalkState.Talking, null);
-                            EarsProgress("Downloading her ears' model", 3, 4);
-                            if (reply != "Typed during setup.") throw new Exception("Download progress replaced a typed reply.");
-                            CloseTalk();
-                            EarsDone("Test connection failed.");
-                            if (fetchingEars || chatting || local || pill.Chatting || reply.IndexOf("Click the wave to retry", StringComparison.Ordinal) < 0 || mainframe.VoiceStatus.IndexOf("Test connection failed.", StringComparison.Ordinal) < 0) throw new Exception("Failed ears setup did not show a reason and a retry.");
-                            fetchingEars = true;
-                            pill.Press(2);
-                            if (!local || !chatting || earsReady) throw new Exception("The wave did not retry ears setup.");
-                            using (FileStream model = File.Create(whisper.Model)) model.SetLength(Whisper.ModelSize);
-                            EarsDone(null);
-                            if (!earsReady || earsShut || !local || reply != "Free voice chat on. Talk and I'll type back.") throw new Exception("Finished setup did not say the mic was ready.");
-                            whisper.Install(delegate(string what, long have, long size) { throw new Exception("Ready ears downloaded again."); });
-                            File.Delete(oldEars);
                             StopChat();
-                            fetchingEars = true;
-                            EarsDone(null);
-                            if (chatting || local || earsReady || pill.Chatting) throw new Exception("Finishing an ears download restarted a stopped chat.");
-                            fetchingEars = true;
+                            staleStart.Pending(null);
+                            if (chatting || local || earsReady || !staleStart.Disposed) throw new Exception("Windows speech starting after the chat ended reopened it.");
+                            StandInDictation mutedStart = new StandInDictation();
+                            mutedStart.Late = true;
+                            Dictation.Make = delegate { return mutedStart; };
                             StartLocal();
                             ToggleMic();
-                            EarsDone(null);
-                            if (!earsReady || !ears.Muted || !pill.Muted || !earsShut || reply != "Free voice chat is ready; your mic is muted.") throw new Exception("Finishing ears setup unmuted the mic or claimed it was listening.");
+                            mutedStart.Pending(null);
+                            if (!earsReady || !ears.Muted || !pill.Muted || !earsShut || !mutedStart.Held || reply != "Free voice chat is ready; your mic is muted.") throw new Exception("Windows speech starting unmuted the mic or claimed it was listening.");
                             ToggleMic();
-                            if (earsShut || mainframe.VoiceStatus.IndexOf("Free voice chat on.", StringComparison.Ordinal) != 0) throw new Exception("Unmuting did not restore the ready status.");
+                            if (earsShut || mutedStart.Held || mainframe.VoiceStatus.IndexOf("Free voice chat on.", StringComparison.Ordinal) != 0) throw new Exception("Unmuting did not restore the ready status.");
+                            mutedStart.Lost("Windows speech recognition lost its internet connection.");
+                            if (!mutedStart.Disposed || dictation != null || !local || !earsReady || earsShut || reply.IndexOf("Free voice chat on, but I'm hearing offline", StringComparison.Ordinal) != 0 || reply.IndexOf("under VOICE", StringComparison.Ordinal) < 0 || mainframe.VoiceStatus.IndexOf("Windows speech recognition lost its internet connection.", StringComparison.Ordinal) != 0) throw new Exception("Losing Windows speech did not fall back to offline hearing: " + reply + " / " + mainframe.VoiceStatus);
+                            for (int i = 0; i < 3; i++) ears.Feed(setupNoise);
+                            if (utterance == null) throw new Exception("Offline hearing did not gather sound after Windows speech was lost.");
                             StopChat();
-                            File.WriteAllText(whisper.Model, "partial");
-                            fetchingEars = true;
-                            ChatFailed("quota_exceeded");
-                            if (!preferences.FreeVoice || !mainframe.FreeVoiceShown || !local || earsReady || reply.IndexOf("Out of ElevenLabs credits.", StringComparison.Ordinal) != 0 || reply.IndexOf("Downloading", StringComparison.Ordinal) < 0) throw new Exception("The credit fallback hid why it was downloading ears.");
-                            EarsDone("Test download failed.");
-                            if (local || reply.IndexOf("Couldn't get my ears.", StringComparison.Ordinal) != 0) throw new Exception("The credit fallback overwrote the setup failure.");
-                            using (FileStream model = File.Create(whisper.Model)) model.SetLength(Whisper.ModelSize);
+                            StandInDictation privacyOff = new StandInDictation();
+                            privacyOff.Problem = Dictation.PrivacyOff;
+                            Dictation.Make = delegate { return privacyOff; };
+                            StartLocal();
+                            if (!privacyOff.Disposed || dictation != null || !local || !earsReady || reply.IndexOf("Turn on Online speech recognition in Windows Settings", StringComparison.Ordinal) < 0 || mainframe.VoiceStatus.IndexOf(Dictation.PrivacyOff, StringComparison.Ordinal) != 0) throw new Exception("Online speech recognition being off did not explain the switch: " + reply);
+                            StopChat();
+                            Dictation.Make = delegate { throw new TypeLoadException("Test missing WinRT."); };
+                            StartLocal();
+                            if (!local || !earsReady || mainframe.VoiceStatus.IndexOf("Windows speech recognition isn't on this PC", StringComparison.Ordinal) != 0) throw new Exception("A PC without Windows speech did not fall back to offline hearing: " + mainframe.VoiceStatus);
+                            StopChat();
+                            if (Dictation.Explain(new AggregateException(new COMException("Test privacy.", unchecked((int)0x80045509)))) != Dictation.PrivacyOff || Dictation.Explain(new UnauthorizedAccessException()) != Dictation.MicBlocked || Dictation.Explain(new COMException("Test no mic.", unchecked((int)0xC00DABE0))) != Dictation.NoMic || Dictation.Explain(new IOException("Test other.")) != "Windows speech recognition didn't start: Test other.") throw new Exception("Windows speech errors were not explained.");
+                            Dictation.Make = delegate { return new StandInDictation(); };
                             ChatFailed("run out of credits");
-                            if (!local || !earsReady || reply != "Out of ElevenLabs credits. Free voice chat is on; talk and I'll type back.") throw new Exception("The ready credit fallback did not explain free chat.");
+                            if (!preferences.FreeVoice || !mainframe.FreeVoiceShown || !local || !earsReady || reply != "Out of ElevenLabs credits. Free voice chat is on; talk and I'll type back.") throw new Exception("The credit fallback did not explain free chat: " + reply);
                             StopChat();
                             ToggleFreeVoice();
-                            checks.Add("PASS ears setup: missing and partial files need setup, cancellation stops it, progress stays visible, the mic waits, failures offer a retry, stopped callbacks stay stopped, readiness is announced, and credit fallback explains the switch");
+                            checks.Add("PASS free voice ears: Windows speech opens before the mic counts as ready, the offline ears stay out of its way, mute holds it and drops its words, words while she thinks are dropped, stopping closes it and ignores late results, and Online speech recognition being off, a lost session or a PC without it falls back to offline hearing with the reason; privacy, mic and no-mic errors are explained; the credit fallback explains the switch");
                             pill.Press(2);
                             if (!pill.Chatting || !chatting || !local) throw new Exception("Wave without a key did not start free voice chat.");
                             pill.Press(2);
@@ -5367,9 +5492,9 @@ namespace CapriDesktop
                             if (heard != "hi" || reply != "Loud and clear, choom." || (talkState != TalkState.Talking && talkState != TalkState.Online) || !speaker.Busy) throw new Exception("Voice chat did not hear and answer: " + heard + " / " + reply + " / " + talkState + " / " + log);
                             Play(idle);
                             if (MouthCell(clock.Elapsed.TotalSeconds, idle) < 0) throw new Exception("Her mouth did not follow the agent's audio.");
-                            string[] wanted = { "http POST /v1/convai/agents/create sk_test_capri_1234 {\"name\":\"Capri\"", "\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45}", "http PATCH /v1/convai/agents/agent_old sk_test_capri_1234 {\"conversation_config\":{\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45},\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "\"tool_ids\":[\"tool_kept\",\"tool_1\",\"tool_2\",\"tool_3\",\"tool_4\",\"tool_5\"]", "\"tool_ids\":[\"tool_kept\",\"tool_6\",\"tool_7\",\"tool_8\",\"tool_9\",\"tool_10\"]}}}}", "\"name\":\"play_music\"", "\"name\":\"app_window\"", "\"name\":\"look_at_screen\"", "http GET /v1/convai/tools sk_test_capri_1234", "http POST /v1/convai/tools sk_test_capri_1234 {\"tool_config\":{\"type\":\"client\",\"name\":\"open_website\"", "\"name\":\"media\",\"description\":\"Control the music", "\"expects_response\":true,\"response_timeout_secs\":20}}", "You have tools for their PC", "tool {\"type\":\"client_tool_result\",\"tool_call_id\":\"call_1\",\"result\":\"Opened Spotify.\",\"is_error\":false}", "ran SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", "check in once", "Don\u0027t beg them to talk", "\"prompt\":{\"prompt\":\"You are Capri", "\"llm\":\"gemini-2.5-flash\"", "\"tts\":{\"voice_id\":\"abc\"}", "\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true}},\"tts\":{\"voice_id\":true}}}", "http GET /v1/convai/conversation/get-signed-url?agent_id=agent_old sk_test_capri_1234", "init {\"type\":\"conversation_initiation_client_data\",\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "pong {\"type\":\"pong\",\"event_id\":7}", "chunk silent | chunk loud | chunk loud" };
+                            string[] wanted = { "http POST /v1/convai/agents/create sk_test_capri_1234 {\"name\":\"Capri\"", "\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45}", "http PATCH /v1/convai/agents/agent_old sk_test_capri_1234 {\"conversation_config\":{\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45},\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "\"tool_ids\":[\"tool_kept\",\"tool_1\",\"tool_2\",\"tool_3\",\"tool_4\",\"tool_5\",\"tool_6\"]", "\"tool_ids\":[\"tool_kept\",\"tool_7\",\"tool_8\",\"tool_9\",\"tool_10\",\"tool_11\",\"tool_12\"]}}}}", "\"name\":\"play_music\"", "\"name\":\"app_window\"", "\"name\":\"look_at_screen\"", "http GET /v1/convai/tools sk_test_capri_1234", "http POST /v1/convai/tools sk_test_capri_1234 {\"tool_config\":{\"type\":\"client\",\"name\":\"open_website\"", "\"name\":\"media\",\"description\":\"Control the music", "\"expects_response\":true,\"response_timeout_secs\":20}}", "You have tools for their PC", "tool {\"type\":\"client_tool_result\",\"tool_call_id\":\"call_1\",\"result\":\"Opened Spotify.\",\"is_error\":false}", "ran SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", "check in once", "Don\u0027t beg them to talk", "\"prompt\":{\"prompt\":\"You are Capri", "\"llm\":\"gemini-2.5-flash\"", "\"tts\":{\"voice_id\":\"abc\"}", "\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true}},\"tts\":{\"voice_id\":true}}}", "http GET /v1/convai/conversation/get-signed-url?agent_id=agent_old sk_test_capri_1234", "init {\"type\":\"conversation_initiation_client_data\",\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "pong {\"type\":\"pong\",\"event_id\":7}", "chunk silent | chunk loud | chunk loud" };
                             foreach (string piece in wanted) if (log.IndexOf(piece, StringComparison.Ordinal) < 0) throw new Exception("Agent traffic was missing " + piece + ": " + log);
-                            if (log.IndexOf("tool_stale", StringComparison.Ordinal) >= 0 || System.Text.RegularExpressions.Regex.Matches(log, "http POST /v1/convai/tools").Count != 10) throw new Exception("Voice chat reused a stale tool or remade a kept one: " + log);
+                            if (log.IndexOf("tool_stale", StringComparison.Ordinal) >= 0 || System.Text.RegularExpressions.Regex.Matches(log, "http POST /v1/convai/tools").Count != 12) throw new Exception("Voice chat reused a stale tool or remade a kept one: " + log);
                             Hands.Run = handsRun;
                             Hands.Catalog = handsCatalog;
                             Hands.Forget();
@@ -5424,40 +5549,29 @@ namespace CapriDesktop
                             ShowVoice();
                             checks.Add("PASS voice chat: makes an ElevenLabs agent with her persona, voice and app/web/music tools (reusing ones already saved) that checks in once after 15 s of quiet, patches an older agent once, opens a signed live link, answers pings, runs the agent's tool calls and sends back the result, streams the mic, mic button sits apart on the right only while it's on and mutes the mic, her mouth follows the agent's audio, the mic goes quiet while she talks, blocked lines and rude replies are caught, one check-in then she hangs up and rests, talking wakes her and replays the first words, a clean hang-up from ElevenLabs rests too, wave ends it");
                             Speak = null;
-                            realWhisper = Whisper.Run;
                             realThink = Think;
-                            Whisper.Run = delegate(string exe, string model, string wav) { lock (whispered) whispered.Add(exe == whisper.Exe && model == whisper.Model ? "wav " + new FileInfo(wav).Length : "wrong files"); return " [BLANK_AUDIO] What's up, choom? (wind blowing)"; };
-                            Think = delegate(string words) { lock (whispered) whispered.Add("think " + words); return "Just vibing, choom."; };
+                            Think = delegate(string words) { lock (earsLog) earsLog.Add("think " + words); return "Just vibing, choom."; };
+                            StandInDictation talking = new StandInDictation();
+                            Dictation.Make = delegate { return talking; };
                             pill.Press(2);
-                            if (!pill.Chatting || !chatting || !local || mainframe.VoiceStatus.IndexOf("Free voice chat on.", StringComparison.Ordinal) != 0) throw new Exception("Wave without a key did not start free voice chat: " + mainframe.VoiceStatus);
-                            short[] hush = new short[Ears.Chunk];
-                            short[] talk = new short[Ears.Chunk];
-                            short[] soft = new short[Ears.Chunk];
-                            for (int i = 0; i < talk.Length; i++) talk[i] = (short)(Math.Sin(i * 0.3) * 9000);
-                            for (int i = 0; i < soft.Length; i++) soft[i] = (short)(Math.Sin(i * 0.3) * 3500);
-                            ears.Feed(hush);
-                            ears.Feed(talk);
-                            for (int i = 0; i < 12; i++) ears.Feed(hush);
-                            if (transcribing) throw new Exception("One loud blip was sent to her ears.");
-                            for (int i = 0; i < 8; i++) ears.Feed(i % 2 == 0 ? talk : soft);
-                            for (int i = 0; i < 9; i++) ears.Feed(hush);
-                            if (!transcribing) throw new Exception("A finished line was not sent to her ears.");
-                            for (int i = 0; i < 3; i++) ears.Feed(talk);
-                            lock (waking) if (utterance != null) throw new Exception("She kept listening while still hearing the last line.");
+                            if (!pill.Chatting || !chatting || !local || !talking.Started || mainframe.VoiceStatus.IndexOf("Free voice chat on.", StringComparison.Ordinal) != 0) throw new Exception("Wave without a key did not start free voice chat: " + mainframe.VoiceStatus);
+                            talking.Heard(" What's up,  choom? ");
+                            if (talkState != TalkState.Thinking || !earsShut) throw new Exception("Windows speech words did not reach her brain.");
                         }
                         else if (step == 10)
                         {
-                            string[] whisperLog;
-                            lock (whispered) whisperLog = whispered.ToArray();
-                            if (string.Join(" | ", whisperLog) != "wav 60844 | think What's up, choom?") throw new Exception("Free voice chat heard wrong: " + string.Join(" | ", whisperLog));
+                            string[] heardLog;
+                            lock (earsLog) heardLog = earsLog.ToArray();
+                            if (string.Join(" | ", heardLog) != "think What's up, choom?") throw new Exception("Free voice chat heard wrong: " + string.Join(" | ", heardLog));
                             if (heard != "What's up, choom?" || reply != "Just vibing, choom." || mainframe.VoiceStatus.IndexOf("Free voice chat on.", StringComparison.Ordinal) != 0) throw new Exception("Free voice chat did not answer in text: " + heard + " / " + reply + " / " + mainframe.VoiceStatus);
-                            if (Whisper.Clean(null) != "" || Whisper.Clean("[BLANK_AUDIO]") != "" || Whisper.Clean(" (music) \u266a \u266b ") != "" || Whisper.Clean("*laughs* okay then") != "okay then") throw new Exception("Whisper's noise tags were not dropped.");
-                            foreach (string noise in new[] { "Thanks for watching!", "Thanks for watching. Thanks for watching.", "Merci d'avoir regard\u00e9.", "Merci beaucoup d\u2019avoir regard\u00e9 !", "Sous-titrage ST' 501", "Sous-titres par la communaut\u00e9 Amara.org", "Sous-titres r\u00e9alis\u00e9s par la communaut\u00e9 d'Amara.org", "Sous-titrage Soci\u00e9t\u00e9 Radio-Canada", " Thank you. ", "you", "Bye!", "Merci.", "Merci beaucoup !", "Subscribe" }) if (Whisper.Clean(noise) != "") throw new Exception("Whisper kept an outro or subtitle credit: " + noise);
-                            foreach (string words in new[] { "Thank you, Capri, that was nova.", "Bye Capri, see you tomorrow.", "Sous-titres en fran\u00e7ais, s'il te pla\u00eet.", "Ouvre amara.org" }) if (Whisper.Clean(words) != words) throw new Exception("Whisper dropped a normal reply: " + words);
-                            if (Whisper.Clean(" Salut Capri, \u00e7a va ? ") != "Salut Capri, \u00e7a va ?" || Whisper.Clean("\u3053\u3093\u306b\u3061\u306f") != "\u3053\u3093\u306b\u3061\u306f") throw new Exception("Whisper dropped words that aren't English.");
-                            string earArgs = Whisper.Arguments(whisper.Model, Path.Combine(output, "heard words.wav"));
-                            if (Path.GetFileName(whisper.Model) != (Whisper.English ? "ggml-base.en-q5_1.bin" : "ggml-base-q5_1.bin") || earArgs.IndexOf(" -l " + (Whisper.English ? "en" : "auto") + " -nt -np -sns -nf -t ", StringComparison.Ordinal) < 0 || earArgs.IndexOf(" -tr ", StringComparison.Ordinal) >= 0 || earArgs.IndexOf("-f \"" + Path.Combine(output, "heard words.wav") + "\"", StringComparison.Ordinal) < 0) throw new Exception("Ears language or CLI arguments were wrong: " + earArgs);
-                            checks.Add("PASS free voice languages: " + (Whisper.English ? "English Windows uses the English model with -l en" : "this Windows uses the multilingual model with -l auto") + ", with -sns and -nf; lone Thank you / you / Merci and outro or subtitle-credit lines are dropped, real sentences and French words stay");
+                            StandInDictation lostEars = dictation as StandInDictation;
+                            if (lostEars == null) throw new Exception("Free voice chat lost its Windows speech session.");
+                            Dictation.Make = delegate { StandInDictation off = new StandInDictation(); off.Problem = Dictation.PrivacyOff; return off; };
+                            lostEars.Lost("Windows speech recognition lost its internet connection.");
+                            if (dictation != null || !local || !earsReady) throw new Exception("Losing Windows speech did not fall back to offline hearing.");
+                            if (Hearing.Clean(null) != "" || Hearing.Clean("  ") != "" || Hearing.Clean(" ... ") != "" || Hearing.Clean(" Salut  Capri, \u00e7a va ? ") != "Salut Capri, \u00e7a va ?" || Hearing.Clean("\u3053\u3093\u306b\u3061\u306f") != "\u3053\u3093\u306b\u3061\u306f" || Hearing.Clean("Thank you.") != "Thank you.") throw new Exception("Hearing dropped real words or kept empty ones.");
+                            if (Hearing.Pick(new[] { "en-US", "ja-JP" }, "en-AU") != "en-US" || Hearing.Pick(new[] { "en-US", "en-GB" }, "en-GB") != "en-GB" || Hearing.Pick(new[] { "ja-JP", "en-US" }, "fr-FR") != "en-US" || Hearing.Pick(new[] { "ja-JP" }, "fr-FR") != "ja-JP" || Hearing.Pick(new string[0], "en-US") != null) throw new Exception("Offline hearing picked the wrong language.");
+                            checks.Add("PASS free voice languages: words from Windows speech reach her brain with spaces tidied, real words in any language stay, blank results are dropped, and offline hearing picks your Windows language, then the same language, then US English");
                             short[] hush = new short[Ears.Chunk];
                             short[] talk = new short[Ears.Chunk];
                             short[] soft = new short[Ears.Chunk];
@@ -5485,7 +5599,7 @@ namespace CapriDesktop
                             if (!earsShut || utterance != null || transcribing) throw new Exception("Muting did not discard the partial utterance.");
                             ToggleMic();
                             for (int i = 0; i < 150; i++) ears.Feed(talk);
-                            if (!noiseHold || utterance != null || transcribing) throw new Exception("The 15-second cap sent continuous noise to Whisper.");
+                            if (!noiseHold || utterance != null || transcribing) throw new Exception("The 15-second cap sent continuous noise to her ears.");
                             for (int i = 0; i < 300; i++) ears.Feed(talk);
                             for (int i = 0; i < 8; i++) ears.Feed(hush);
                             if (!noiseHold || transcribing) throw new Exception("Continuous noise rearmed without a full pause.");
@@ -5513,69 +5627,70 @@ namespace CapriDesktop
                             CheckEars(clock.Elapsed.TotalSeconds);
                             if (earsShut) throw new Exception("The mic did not reopen after a stale transcript finished.");
                             checks.Add("PASS local capture: real voiced duration, steady-noise rejection, a bounded utterance with a pause before retry, immediate thinking and mute gates, typed replies without paid speech, and stale session results ignored");
-                            string outerWav = null;
-                            string innerWav = null;
-                            Whisper.Run = delegate(string exe, string model, string wav)
-                            {
-                                if (outerWav != null) { innerWav = wav; return "Salut"; }
-                                outerWav = wav;
-                                byte[] bytes = File.ReadAllBytes(wav);
-                                if (System.Text.Encoding.ASCII.GetString(bytes, 0, 4) != "RIFF" || BitConverter.ToInt32(bytes, 24) != Ears.Rate || BitConverter.ToInt16(bytes, 22) != 1 || BitConverter.ToInt16(bytes, 34) != 16) throw new Exception("Whisper was not given mono 16 kHz PCM.");
-                                if (whisper.Text(hush) != "Salut" || innerWav == outerWav || !File.Exists(outerWav) || File.Exists(innerWav)) throw new Exception("Overlapping transcriptions shared or removed the wrong WAV.");
-                                return "Merci Capri, \u00e7a va ?";
-                            };
-                            if (whisper.Text(talk) != "Merci Capri, \u00e7a va ?" || File.Exists(outerWav)) throw new Exception("Whisper did not return French text and remove its WAV.");
-                            string failedWav = null;
-                            Whisper.Run = delegate(string exe, string model, string wav) { failedWav = wav; throw new IOException("Test ears failure."); };
+                            Hearing.Run = delegate(short[] samples) { return samples.Length == talk.Length && samples[1] == talk[1] ? " Merci Capri,  \u00e7a va ? " : "wrong samples"; };
+                            if (Hearing.Text(talk) != "Merci Capri, \u00e7a va ?") throw new Exception("Offline hearing was not given the mic's raw samples, or dropped French words.");
+                            Hearing.Run = delegate(short[] samples) { throw new IOException("Test ears failure."); };
                             bool failedEars = false;
-                            try { whisper.Text(talk); } catch (IOException) { failedEars = true; }
-                            if (!failedEars || failedWav == null || File.Exists(failedWav)) throw new Exception("A failed transcription left its WAV behind.");
-                            checks.Add("PASS Whisper files: each call owns a mono 16 kHz WAV and removes it after success or failure");
-                            Whisper.Run = delegate(string exe, string model, string wav) { lock (whispered) whispered.Add("empty"); return " [BLANK_AUDIO] (music) "; };
+                            try { Hearing.Text(talk); } catch (IOException) { failedEars = true; }
+                            if (!failedEars) throw new Exception("An offline hearing failure was swallowed.");
+                            checks.Add("PASS offline hearing: it gets the mic's raw 16 kHz samples and passes failures on");
+                            Hearing.Run = delegate(short[] samples) { lock (earsLog) earsLog.Add("empty " + samples.Length / Ears.Chunk); return "  "; };
                             earsWarned = -10;
+                            ears.Feed(hush);
+                            ears.Feed(talk);
+                            for (int i = 0; i < 12; i++) ears.Feed(hush);
+                            if (transcribing) throw new Exception("One loud blip was sent to her ears.");
                             foreach (short[] piece in earLine) ears.Feed(piece);
-                            if (!transcribing) throw new Exception("The empty-transcript check did not reach Whisper.");
+                            if (!transcribing) throw new Exception("The empty-result check did not reach her ears.");
+                            for (int i = 0; i < 3; i++) ears.Feed(talk);
+                            lock (waking) if (utterance != null) throw new Exception("She kept listening while still hearing the last line.");
                         }
                         else if (step == 11)
                         {
                             if (transcribing) return;
                             string log;
-                            lock (whispered) log = string.Join(" | ", whispered.ToArray());
-                            if (log != "wav 60844 | think What's up, choom? | empty" || !local || earsShut || reply != "I couldn't make out any words. Try again closer to the mic." || mainframe.VoiceStatus.IndexOf("I couldn't make out any words.", StringComparison.Ordinal) != 0) throw new Exception("An empty transcript vanished or reached her brain: " + log);
+                            lock (earsLog) log = string.Join(" | ", earsLog.ToArray());
+                            if (log != "think What's up, choom? | empty 15" || !local || earsShut || reply != "I couldn't make out any words. Try again closer to the mic." || mainframe.VoiceStatus.IndexOf("I couldn't make out any words.", StringComparison.Ordinal) != 0) throw new Exception("An empty transcript vanished or reached her brain: " + log);
                             int notice = asking;
                             Missed("I couldn't make out any words. Try again closer to the mic.", false);
                             if (asking != notice) throw new Exception("Repeated noise kept restarting her warning bubble.");
                             checks.Add("PASS empty transcription: a visible retry, no brain call, the mic stays open, and repeated warnings do not spam the bubble");
-                            Whisper.Run = delegate(string exe, string model, string wav) { throw new IOException("Test ears failure."); };
+                            Hearing.Run = delegate(short[] samples) { throw new IOException("Test ears failure."); };
                             earsWarned = -10;
                             foreach (short[] piece in earLine) ears.Feed(piece);
                         }
                         else if (step == 12)
                         {
                             if (transcribing) return;
-                            if (!local || earsShut || reply != "I couldn't hear that. Try again, or check your mic under VOICE." || mainframe.VoiceStatus.IndexOf("Test ears failure.", StringComparison.Ordinal) != 0) throw new Exception("Whisper failure did not show a retry and keep free chat listening.");
-                            Whisper.Run = delegate(string exe, string model, string wav) { return " Salut Capri, \u00e7a va ? "; };
-                            Think = delegate(string words) { lock (whispered) whispered.Add("French " + words); return "Salut, choom."; };
+                            if (!local || earsShut || reply != "I couldn't hear that. Try again, or check your mic under VOICE." || mainframe.VoiceStatus.IndexOf("Test ears failure.", StringComparison.Ordinal) != 0) throw new Exception("An offline hearing failure did not show a retry and keep free chat listening.");
+                            Hearing.Run = delegate(short[] samples) { return " Salut Capri, \u00e7a va ? "; };
+                            Think = delegate(string words) { lock (earsLog) earsLog.Add("French " + words); return "Salut, choom."; };
                             foreach (short[] piece in earLine) ears.Feed(piece);
                         }
                         else if (step == 13)
                         {
-                            if (transcribing || talkState == TalkState.Thinking) return;
+                            if (transcribing || talkState == TalkState.Thinking || !realEarsDone.WaitOne(0)) return;
                             string log;
-                            lock (whispered) log = string.Join(" | ", whispered.ToArray());
+                            lock (earsLog) log = string.Join(" | ", earsLog.ToArray());
                             if (heard != "Salut Capri, \u00e7a va ?" || reply != "Salut, choom." || log.IndexOf("French Salut Capri, \u00e7a va ?", StringComparison.Ordinal) < 0 || earsShut) throw new Exception("French speech did not recover after an ears failure: " + log);
-                            checks.Add("PASS Whisper failure: visible error, another utterance works, and French words reach her brain unchanged");
+                            checks.Add("PASS offline hearing failure: visible error, another utterance works, and French words reach her brain unchanged");
                             pill.Press(2);
                             if (pill.Chatting || chatting || local || transcribing) throw new Exception("Wave did not end free voice chat.");
                             ToggleFreeVoice();
                             bool freeOn = preferences.FreeVoice && mainframe.FreeVoiceShown;
                             ToggleFreeVoice();
                             if (!freeOn || preferences.FreeVoice || mainframe.FreeVoiceShown) throw new Exception("The Free voice chat box did not toggle.");
-                            Whisper.Run = realWhisper;
+                            Hearing.Run = realHearing;
+                            Dictation.Make = realMake;
                             Think = realThink;
                             Speak = null;
-                            checks.Add("PASS free voice chat: with no ElevenLabs key (or Free voice chat ticked) the wave and Ctrl + Alt + V listen on the PC, a blip is ignored, a finished line goes to whisper as a 16 kHz WAV, noise tags are dropped, the words go to her brain and she types back, the mic is ignored while she's still hearing, wave ends it");
-                            checks.Add("LIMIT free voice chat used a stand-in for whisper-cli; the real download and transcription need a manual check");
+                            checks.Add("PASS free voice chat: with no ElevenLabs key (or Free voice chat ticked) the wave and Ctrl + Alt + V listen through Windows speech recognition, its words go to her brain and she types back; offline hearing ignores a blip, sends a finished line and ignores the mic while still hearing; wave ends it");
+                            if (realEars[0] == null) checks.Add("PASS Windows online dictation loads in this build and its dictation grammar compiles on this PC");
+                            else checks.Add("LIMIT Windows online dictation did not load on this PC: " + realEars[0]);
+                            if (realEars[1].StartsWith("heard ", StringComparison.Ordinal) && realEars[1].IndexOf("game", StringComparison.OrdinalIgnoreCase) >= 0) checks.Add("PASS offline Windows hearing turned a spoken test line into \"" + realEars[1].Substring(6) + "\"");
+                            else if (realEars[1].IndexOf(Hearing.NoRecognizer, StringComparison.Ordinal) >= 0) checks.Add("LIMIT this PC has no offline Windows recognizer");
+                            else throw new Exception("Offline Windows hearing missed a spoken test line: " + realEars[1]);
+                            checks.Add("LIMIT free voice chat used a stand-in for Windows online dictation; hearing a real voice through the mic needs a manual check");
                             heard = "Hello Capri.";
                             Answer(++asking, "Hey choom! Net's been quiet, too quiet. Time to stir up some trouble.", TalkState.Talking);
                             replyStart -= 10;

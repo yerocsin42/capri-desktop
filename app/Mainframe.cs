@@ -156,7 +156,7 @@ namespace CapriDesktop
             Lower(Caption("CAPRI >", 28, 184 + v, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow));
             showHide = Lower(Make("Hide Capri", 28, 206 + v, 104, 28, delegate { capri.ToggleHidden(); }));
             Lower(Make("Bring here", 140, 206 + v, 104, 28, delegate { capri.BringHere(); }));
-            perch = Lower(Make("Perch", 252, 206 + v, 104, 28, delegate { capri.TogglePerch(); }));
+            perch = Lower(Make("Ride cursor", 252, 206 + v, 104, 28, delegate { capri.TogglePerch(); }));
             Lower(Caption("Size", 28, 251 + v, Font, Look.Dim));
             sizes = new Key[4];
             int[] values = { 170, 240, 320, 440 };
@@ -315,7 +315,7 @@ namespace CapriDesktop
         {
             syncing = true;
             showHide.Text = capri.IsHidden ? "Show Capri" : "Hide Capri";
-            perch.Text = capri.Riding ? "Hop off" : "Perch";
+            perch.Text = capri.Riding ? "Hop off" : "Ride cursor";
             foreach (Key option in sizes)
             {
                 option.Picked = (int)option.Tag == capri.CharacterSize;
