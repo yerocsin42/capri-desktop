@@ -14,9 +14,9 @@ namespace CapriDesktop
         private static readonly Color Edge = Color.FromArgb(52, 60, 74);
         private static readonly Color Track = Color.FromArgb(30, 36, 46);
         private const int Wide = 380;
-        private const int Tall = 514;
+        private const int Tall = 570;
         private const int SetupHeight = 118;
-        private const int VoiceHeight = 140;
+        private const int VoiceHeight = 196;
         private readonly Companion capri;
         private readonly Label brainName;
         private readonly Label brainNote;
@@ -39,6 +39,12 @@ namespace CapriDesktop
         private readonly Key speechModels;
         private readonly ContextMenuStrip speechModelMenu;
         private readonly Label voiceNote;
+        private readonly Key keyHelp;
+        private readonly Label shortcut;
+        private bool shortcutReady;
+        private readonly Label muteShortcut;
+        private readonly Key mics;
+        private readonly ContextMenuStrip micMenu;
         private bool keySaved;
         private readonly List<KeyValuePair<Control, int>> lower = new List<KeyValuePair<Control, int>>();
         private string[] lastInstalled;
@@ -87,6 +93,12 @@ namespace CapriDesktop
             setup.Loud = true;
             hint = Caption("Have Ollama? Open it, then press Refresh.", 28, 264, Look.Mono(9f, FontStyle.Italic, GraphicsUnit.Point), Look.Dim);
             Lower(Caption("VOICE >", 28, 184, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow));
+            keyHelp = Lower(Make("Get a key", 256, 180, 100, 22, delegate { capri.OpenKeyPage(); }));
+            shortcut = Caption("Ctrl + Alt + V to talk", 156, 182, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
+            shortcut.AutoSize = false;
+            shortcut.TextAlign = ContentAlignment.MiddleRight;
+            shortcut.Bounds = new Rectangle(156, 182, 200, 20);
+            Lower(shortcut);
             keyEntry = Lower(Input(28, 206, 244));
             keyEntry.Box.UseSystemPasswordChar = true;
             keyEntry.Box.AccessibleName = "ElevenLabs API key";
@@ -104,8 +116,13 @@ namespace CapriDesktop
             speechModelMenu = Dropdown();
             speechModels = Lower(Make("Default model", 232, 242, 124, 28, delegate { speechModelMenu.Show(speechModels, new Point(0, speechModels.Height)); }));
             speechModels.Chevron = true;
-            voiceNote = Lower(Caption("", 28, 281, Font, Look.Dim));
-            Lower(Make("Test", 280, 276, 76, 26, delegate { capri.TestVoice(); }));
+            micMenu = Dropdown();
+            mics = Lower(Make("Mic: default", 28, 278, 244, 28, delegate { ShowMics(); }));
+            mics.Chevron = true;
+            mics.AccessibleName = "Microphone";
+            Lower(Make("Test", 280, 278, 76, 28, delegate { capri.TestVoice(); }));
+            muteShortcut = Lower(Caption("Ctrl + Alt + N mutes your mic", 28, 313, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim));
+            voiceNote = Lower(Caption("", 28, 337, Font, Look.Dim));
             int v = VoiceHeight;
             Lower(Caption("CAPRI >", 28, 184 + v, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow));
             showHide = Lower(Make("Hide Capri", 28, 206 + v, 104, 28, delegate { capri.ToggleHidden(); }));
@@ -180,7 +197,7 @@ namespace CapriDesktop
             using (Brush red = new SolidBrush(Look.Red))
             {
                 graphics.FillRectangle(red, 13 * s, 58 * s, 3 * s, ((expanded ? 280 : 162) - 58) * s);
-                graphics.FillRectangle(red, 13 * s, (184 + shift) * s, 3 * s, (312 - 184) * s);
+                graphics.FillRectangle(red, 13 * s, (184 + shift) * s, 3 * s, (368 - 184) * s);
                 graphics.FillRectangle(red, 13 * s, (184 + VoiceHeight + shift) * s, 3 * s, (308 - 184) * s);
             }
             if (expanded)
@@ -224,7 +241,7 @@ namespace CapriDesktop
             setup.Visible = setupShown;
             refresh.Top = Scaled(setupShown ? 226 : 134);
             brainNote.MaximumSize = new Size(Scaled(328), 0);
-            voiceNote.MaximumSize = new Size(Scaled(244), 0);
+            voiceNote.MaximumSize = new Size(Scaled(328), 0);
             ClientSize = new Size(Scaled(Wide), Scaled(Tall + shift));
             Invalidate(true);
         }
@@ -237,7 +254,7 @@ namespace CapriDesktop
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { modelMenu.Dispose(); voiceMenu.Dispose(); speechModelMenu.Dispose(); }
+            if (disposing) { modelMenu.Dispose(); voiceMenu.Dispose(); speechModelMenu.Dispose(); micMenu.Dispose(); }
             base.Dispose(disposing);
         }
 
@@ -338,15 +355,16 @@ namespace CapriDesktop
             keySaved = tail != null;
             keyEntry.Cue = keySaved ? "Key saved, ends " + tail : "Paste ElevenLabs API key";
             Relabel();
+            keyHelp.Visible = !keySaved;
+            shortcut.Visible = keySaved && shortcutReady;
             if (!voiceEntry.Box.Focused || voiceEntry.Box.Text.Trim().Length == 0) voiceEntry.Box.Text = voiceId;
             voiceMenu.Items.Clear();
-            voiceMenu.Items.Add(Choice("Default voice", voiceId == Voice.Default, delegate { voiceEntry.Box.Text = Voice.Default; capri.ChooseVoice(Voice.Default); }));
+            voiceEntry.Chevron = listing != null && listing.Voices.Count > 0;
             speechModelMenu.Items.Clear();
             speechModelMenu.Items.Add(Choice("Default model", string.IsNullOrEmpty(model), delegate { capri.ChooseVoiceModel(null); }));
             speechModels.Text = string.IsNullOrEmpty(model) ? "Default model" : model;
             if (listing != null)
             {
-                if (listing.Voices.Count > 0) voiceMenu.Items.Add(new ToolStripSeparator());
                 foreach (VoiceEntry entry in listing.Voices)
                 {
                     string id = entry.Id;
@@ -362,6 +380,36 @@ namespace CapriDesktop
             }
             speechModels.Invalidate();
         }
+
+        internal void ShowShortcut(bool talk, bool mute)
+        {
+            shortcutReady = talk;
+            shortcut.Visible = keySaved && talk;
+            muteShortcut.Visible = mute;
+        }
+
+        internal void ShowMic(string name)
+        {
+            mics.Text = "Mic: " + (name ?? "default");
+            mics.Invalidate();
+        }
+
+        private void ShowMics()
+        {
+            string chosen = capri.MicId;
+            List<Mic> found = Ears.List();
+            micMenu.Items.Clear();
+            micMenu.Items.Add(Choice("Windows default", string.IsNullOrEmpty(chosen), delegate { capri.ChooseMic(null); }));
+            if (found.Count > 0) micMenu.Items.Add(new ToolStripSeparator());
+            foreach (Mic mic in found)
+            {
+                string id = mic.Id;
+                micMenu.Items.Add(Choice(mic.Name, id == chosen, delegate { capri.ChooseMic(id); }));
+            }
+            micMenu.Show(mics, new Point(0, mics.Height));
+        }
+
+        internal string MicStatus { get { return "mic | " + mics.Text + " | " + (keyHelp.Visible ? "help" : "-") + " | " + (shortcut.Visible ? "keys" : "-") + " | " + (muteShortcut.Visible ? "mute" : "-"); } }
 
         internal void VoiceNote(string text, bool problem)
         {

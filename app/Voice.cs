@@ -51,7 +51,6 @@ namespace CapriDesktop
     internal sealed class Voice
     {
         internal static string Host = "https://api.elevenlabs.io";
-        internal const string Default = "MkTSSXNgnBULS6ek4pon";
         private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("Capri.ElevenLabs");
         internal volatile string Key;
         internal volatile string VoiceId;
@@ -73,6 +72,28 @@ namespace CapriDesktop
         internal static string Tail(string key) { return key == null || key.Length < 4 ? "" : key.Substring(key.Length - 4); }
 
         internal static string Spoken(string said) { return Regex.Replace(Regex.Replace(said ?? "", @"\[[^\]]*\]", " ").Replace("*", ""), @"\s+", " ").Trim(); }
+
+        private static readonly string[,] Respelled = { { "chooms", "chewms" }, { "choom", "chewm" }, { "preem", "preme" } };
+
+        internal static string Sayable(string text) { return Swap(text, 0, 1); }
+
+        internal static string Unsaid(string text) { return Swap(text, 1, 0); }
+
+        private static string Swap(string text, int from, int to)
+        {
+            text = text ?? "";
+            for (int i = 0; i < Respelled.GetLength(0); i++)
+            {
+                string target = Respelled[i, to];
+                text = Regex.Replace(text, @"\b" + Respelled[i, from] + @"\b", delegate(Match found)
+                {
+                    string word = found.Value;
+                    if (word.ToUpperInvariant() == word) return target.ToUpperInvariant();
+                    return char.IsUpper(word[0]) ? char.ToUpperInvariant(target[0]) + target.Substring(1) : target;
+                }, RegexOptions.IgnoreCase);
+            }
+            return text;
+        }
 
         internal static HttpWebRequest Open(string path, string key, string method)
         {
@@ -122,7 +143,7 @@ namespace CapriDesktop
         {
             detail = detail ?? "";
             if (detail.Contains("quota_exceeded")) return "Out of ElevenLabs credits.";
-            if (detail.Contains("missing_permissions")) return "Key needs Voices and Text to Speech access.";
+            if (detail.Contains("missing_permissions")) return "Key needs Text to Speech, Voices, Models and Agents access.";
             if (detail.Contains("voice_not_found")) return "Voice not found. Add it to your ElevenLabs voices.";
             if (detail.Contains("invalid_api_key")) return "ElevenLabs rejected the key.";
             Match message = Regex.Match(detail, "\"message\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
@@ -174,7 +195,7 @@ namespace CapriDesktop
             string model = Model;
             if (key == null || id == null) throw new VoiceException("No voice picked.");
             StringBuilder body = new StringBuilder("{\"text\":");
-            body.Append(Quote(text));
+            body.Append(Quote(Sayable(text)));
             if (!string.IsNullOrEmpty(model)) body.Append(",\"model_id\":").Append(Quote(model));
             body.Append('}');
             return Clean(Send(Open("/v1/text-to-speech/" + Uri.EscapeDataString(id) + "?output_format=wav_24000", key, "POST"), Encoding.UTF8.GetBytes(body.ToString())));

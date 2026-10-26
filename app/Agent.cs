@@ -78,7 +78,7 @@ namespace CapriDesktop
         private Thread worker;
         private volatile bool ready;
 
-        internal static string Prompt { get { return Brain.Persona + "\nYou are talking out loud in a live voice chat: keep every reply to one or two short spoken sentences, and never write tags in square brackets.\nIf the user goes quiet, that's fine: they're probably busy or gaming. Don't beg them to talk or say they left you hanging. If they stay quiet, check in once with one short line, then let them be."; } }
+        internal static string Prompt { get { return Brain.Persona + "\nYou are talking out loud in a live voice chat: keep every reply to one or two short spoken sentences, and never write tags in square brackets.\nIf the user goes quiet, that's fine: they're probably busy or gaming. Don't beg them to talk or say they left you hanging. If they stay quiet, check in once with one short line, then let them be.\nSo the voice says your slang right, always spell choom as chewm and preem as preme."; } }
 
         internal static string Create(string key, string voiceId)
         {
@@ -191,7 +191,7 @@ namespace CapriDesktop
                 if (opened != null) opened(rate);
             }
             else if (item.Type == "user_transcript" && item.Heard != null && !string.IsNullOrEmpty(item.Heard.Text)) { Action<string> heard = Heard; if (heard != null) heard(item.Heard.Text); }
-            else if (item.Type == "agent_response" && item.Reply != null && !string.IsNullOrEmpty(item.Reply.Text)) { Action<string> replied = Replied; if (replied != null) replied(item.Reply.Text); }
+            else if (item.Type == "agent_response" && item.Reply != null && !string.IsNullOrEmpty(item.Reply.Text)) { Action<string> replied = Replied; if (replied != null) replied(Voice.Unsaid(item.Reply.Text)); }
             else if (item.Type == "audio" && item.Audio != null && item.Audio.Data != null)
             {
                 byte[] bytes = Convert.FromBase64String(item.Audio.Data);

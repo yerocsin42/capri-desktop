@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
+using Microsoft.Win32;
 
 namespace CapriDesktop
 {
@@ -26,6 +28,18 @@ namespace CapriDesktop
         internal IntPtr Next, Reserved;
     }
 
+    internal sealed class Mic
+    {
+        internal readonly string Id;
+        internal readonly string Name;
+
+        internal Mic(string id, string name)
+        {
+            Id = id;
+            Name = name;
+        }
+    }
+
     internal sealed class Ears : IDisposable
     {
         internal const int Rate = 16000;
@@ -34,6 +48,7 @@ namespace CapriDesktop
         internal event Action<short[]> Heard;
         internal event Action<double> Level;
         internal volatile bool Muted;
+        internal volatile string Chosen;
         private IntPtr device;
         private IntPtr[] headers;
         private Thread worker;
@@ -47,8 +62,72 @@ namespace CapriDesktop
         [DllImport("winmm.dll")] private static extern int waveInStart(IntPtr device);
         [DllImport("winmm.dll")] private static extern int waveInReset(IntPtr device);
         [DllImport("winmm.dll")] private static extern int waveInClose(IntPtr device);
+        [DllImport("winmm.dll")] private static extern int waveInGetNumDevs();
+        [DllImport("winmm.dll", CharSet = CharSet.Unicode)] private static extern int waveInGetDevCaps(IntPtr id, ref MicCaps caps, int size);
+        [DllImport("winmm.dll")] private static extern int waveInMessage(IntPtr device, int message, out int size, IntPtr unused);
+        [DllImport("winmm.dll", CharSet = CharSet.Unicode)] private static extern int waveInMessage(IntPtr device, int message, StringBuilder text, IntPtr size);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct MicCaps
+        {
+            internal short Maker, Product;
+            internal int Driver;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] internal string Name;
+            internal int Formats;
+            internal short Channels, Reserved;
+        }
 
         internal bool Listening { get { return running; } }
+
+        internal static List<Mic> List()
+        {
+            List<Mic> found = new List<Mic>();
+            int count = waveInGetNumDevs();
+            for (int i = 0; i < count; i++)
+            {
+                MicCaps caps = new MicCaps();
+                if (waveInGetDevCaps(new IntPtr(i), ref caps, Marshal.SizeOf(typeof(MicCaps))) != 0) continue;
+                string id = Endpoint(i);
+                found.Add(new Mic(id ?? caps.Name, FullName(id) ?? caps.Name));
+            }
+            return found;
+        }
+
+        private static string Endpoint(int index)
+        {
+            int size;
+            if (waveInMessage(new IntPtr(index), 0x0812, out size, IntPtr.Zero) != 0 || size <= 0) return null;
+            StringBuilder text = new StringBuilder(size / 2 + 1);
+            if (waveInMessage(new IntPtr(index), 0x0811, text, new IntPtr(size)) != 0) return null;
+            return text.Length == 0 ? null : text.ToString();
+        }
+
+        private static string FullName(string id)
+        {
+            if (id == null) return null;
+            int cut = id.LastIndexOf("}.{", StringComparison.Ordinal);
+            if (cut < 0) return null;
+            try
+            {
+                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture\" + id.Substring(cut + 2) + @"\Properties"))
+                {
+                    if (key == null) return null;
+                    string kind = key.GetValue("{a45c254e-df1c-4efd-8020-67d146a850e0},2") as string;
+                    string name = key.GetValue("{b3f8fa53-0004-438e-9003-51a46e139bfc},6") as string;
+                    if (string.IsNullOrEmpty(kind)) return string.IsNullOrEmpty(name) ? null : name;
+                    return string.IsNullOrEmpty(name) ? kind : kind == "Microphone" ? name : kind + " (" + name + ")";
+                }
+            }
+            catch (Exception) { return null; }
+        }
+
+        private static int Pick(string chosen)
+        {
+            if (string.IsNullOrEmpty(chosen)) return -1;
+            List<Mic> mics = List();
+            for (int i = 0; i < mics.Count; i++) if (mics[i].Id == chosen) return i;
+            return -1;
+        }
 
         internal void Start()
         {
@@ -56,7 +135,9 @@ namespace CapriDesktop
             WaveFormat format = WaveFormat.Mono(Rate);
             signal = new AutoResetEvent(false);
             int size = Marshal.SizeOf(typeof(WaveHeader));
-            if (waveInOpen(out device, -1, ref format, signal.SafeWaitHandle.DangerousGetHandle(), IntPtr.Zero, 0x00050000) != 0)
+            int id = Pick(Chosen);
+            IntPtr wake = signal.SafeWaitHandle.DangerousGetHandle();
+            if (waveInOpen(out device, id, ref format, wake, IntPtr.Zero, 0x00050000) != 0 && (id == -1 || waveInOpen(out device, -1, ref format, wake, IntPtr.Zero, 0x00050000) != 0))
             {
                 signal.Dispose();
                 signal = null;

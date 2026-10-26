@@ -68,6 +68,7 @@ namespace CapriDesktop
         [DataMember] public string VoiceModel;
         [DataMember] public string AgentId;
         [DataMember] public int AgentVersion;
+        [DataMember] public string Mic;
     }
 
     [DataContract]
@@ -157,6 +158,8 @@ namespace CapriDesktop
         private double iconsAt = -10;
         private const float SitX = 0.30f;
         private const float SitY = 0.79f;
+        private static readonly RectangleF Body = RectangleF.FromLTRB(0.25f, 0f, 0.76f, 1f);
+        private static readonly RectangleF PerchedBody = RectangleF.FromLTRB(0.21f, 0.17f, 0.69f, 0.98f);
         private readonly System.Windows.Forms.Timer clickDelay;
         private readonly ToolStripMenuItem rideItem;
         private readonly ToolStripMenuItem sitItem;
@@ -210,8 +213,13 @@ namespace CapriDesktop
         private double pace = LettersPerSecond;
         private const string ReleasesPage = "https://github.com/yerocsin42/capri-desktop/releases/";
         private const string OllamaPage = "https://ollama.com/download";
+        private const string KeysPage = "https://elevenlabs.io/app/settings/api-keys";
         private const int PaddingSize = 36;
         private const int DismountId = 0x4361;
+        private const int TalkKeyId = 0x4356;
+        private const int MuteKeyId = 0x434D;
+        private bool talkKey;
+        private bool muteKey;
         private const int BlinkFrom = 9;
         internal bool TestFailed;
 
@@ -223,6 +231,7 @@ namespace CapriDesktop
             settingsPath = Path.Combine(data, "settings.json");
             engine = new Engine(data);
             preferences = smoke ? new Preferences() : LoadPreferences();
+            ears.Chosen = preferences.Mic;
             clip = idle;
             nextGlitch = 30 + random.NextDouble() * 30;
             Text = "Capri";
@@ -281,9 +290,10 @@ namespace CapriDesktop
             tray.Visible = !testing;
             mainframe = new Mainframe(this, tray.Icon, Assembly.GetExecutingAssembly().GetName().Version.ToString(3));
             voice.Key = Voice.Unprotect(preferences.VoiceKey);
-            voice.VoiceId = string.IsNullOrEmpty(preferences.VoiceId) ? Voice.Default : preferences.VoiceId;
+            voice.VoiceId = string.IsNullOrEmpty(preferences.VoiceId) ? null : preferences.VoiceId;
             voice.Model = string.IsNullOrEmpty(preferences.VoiceModel) ? null : preferences.VoiceModel;
             ShowVoice();
+            mainframe.ShowMic(MicName(preferences.Mic));
             pill.Typing += OpenTyper;
             pill.Voice += ToggleChat;
             pill.Mute += ToggleMic;
@@ -347,6 +357,9 @@ namespace CapriDesktop
             }
             if (!testing) FindBrain();
             if (!testing && voice.Key != null) ListVoices(voice.Key, false);
+            if (!testing) talkKey = Native.RegisterHotKey(Handle, TalkKeyId, 0x0001 | 0x0002 | 0x4000, 0x56);
+            bool muteFree = !testing && Native.RegisterHotKey(Handle, MuteKeyId, 0x0001 | 0x0002 | 0x4000, 0x4E) && Native.UnregisterHotKey(Handle, MuteKeyId);
+            mainframe.ShowShortcut(talkKey, muteFree);
             RefreshIcons();
         }
 
@@ -470,7 +483,7 @@ namespace CapriDesktop
 
         private static void OpenPage(string page)
         {
-            if (!page.StartsWith(ReleasesPage, StringComparison.Ordinal) && page != OllamaPage) return;
+            if (!page.StartsWith(ReleasesPage, StringComparison.Ordinal) && page != OllamaPage && page != KeysPage) return;
             try { Process.Start(page); } catch (System.ComponentModel.Win32Exception) { }
         }
 
@@ -509,10 +522,22 @@ namespace CapriDesktop
             mainframe.Sync();
         }
 
-        private Point KeepOnScreen(Point point)
+        private Point KeepOnScreen(Point point) { return Within(point, Screen.FromPoint(new Point(point.X + Width / 2, point.Y + Height / 2)).WorkingArea, Body); }
+
+        private Point Within(Point point, Rectangle area, RectangleF body)
         {
-            Rectangle area = Screen.FromPoint(new Point(point.X + Width / 2, point.Y + Height / 2)).WorkingArea;
-            return new Point(Math.Max(area.Left, Math.Min(point.X, area.Right - Width)), Math.Max(area.Top, Math.Min(point.Y, area.Bottom - Height)));
+            int size = preferences.Size;
+            int left = area.Left - PaddingSize - (int)(size * body.Left);
+            int right = area.Right - PaddingSize - (int)Math.Ceiling(size * body.Right);
+            int top = area.Top - PaddingSize - (int)(size * body.Top);
+            int bottom = area.Bottom - PaddingSize - (int)Math.Ceiling(size * body.Bottom);
+            return new Point(Math.Max(left, Math.Min(point.X, right)), Math.Max(top, Math.Min(point.Y, bottom)));
+        }
+
+        private Rectangle BodyOnScreen(Point point, RectangleF body)
+        {
+            int size = preferences.Size;
+            return Rectangle.FromLTRB(point.X + PaddingSize + (int)(size * body.Left), point.Y + PaddingSize + (int)(size * body.Top), point.X + PaddingSize + (int)Math.Ceiling(size * body.Right), point.Y + PaddingSize + (int)Math.Ceiling(size * body.Bottom));
         }
 
         private void DisplaysChanged(object sender, EventArgs e)
@@ -576,6 +601,8 @@ namespace CapriDesktop
                 }
             }
             if (message.Msg == 0x0312 && message.WParam.ToInt32() == DismountId) { StopRide(); return; }
+            if (message.Msg == 0x0312 && message.WParam.ToInt32() == TalkKeyId) { if (hidden) SetHidden(false); ToggleChat(); return; }
+            if (message.Msg == 0x0312 && message.WParam.ToInt32() == MuteKeyId) { ToggleMic(); return; }
             if (message.Msg == 0x02E0) { anchor = KeepOnScreen(anchor); Location = anchor; RenderFrame(); }
             base.WndProc(ref message);
         }
@@ -649,13 +676,12 @@ namespace CapriDesktop
             Rectangle area = Screen.FromPoint(cursor).WorkingArea;
             int seatX = PaddingSize + (int)(preferences.Size * 0.267f) - 12;
             int seatY = PaddingSize + (int)(preferences.Size * 0.73f) + 12;
-            int tx = Math.Max(area.Left, Math.Min(cursor.X - seatX, area.Right - Width));
-            int ty = Math.Max(area.Top, Math.Min(cursor.Y - seatY, area.Bottom - Height));
-            int nx = anchor.X + (int)Math.Round((tx - anchor.X) * 0.25);
-            int ny = anchor.Y + (int)Math.Round((ty - anchor.Y) * 0.25);
+            Point target = Within(new Point(cursor.X - seatX, cursor.Y - seatY), area, PerchedBody);
+            int nx = anchor.X + (int)Math.Round((target.X - anchor.X) * 0.25);
+            int ny = anchor.Y + (int)Math.Round((target.Y - anchor.Y) * 0.25);
             double velocity = Math.Max(-8, Math.Min(8, (nx - anchor.X) * 0.4));
             leanAngle = leanAngle * 0.8 + velocity * 0.2;
-            anchor = new Point(Math.Max(area.Left, Math.Min(nx, area.Right - Width)), Math.Max(area.Top, Math.Min(ny, area.Bottom - Height)));
+            anchor = Within(new Point(nx, ny), area, PerchedBody);
         }
 
         private Point Hip() { return new Point(anchor.X + PaddingSize + (int)(preferences.Size * SitX), anchor.Y + PaddingSize + (int)(preferences.Size * SitY)); }
@@ -720,6 +746,10 @@ namespace CapriDesktop
             coveredSince = -1;
             seatLost = -1;
             int x = ledge.Icon.IsEmpty ? Math.Max(ledge.Left + 8, Math.Min(Hip().X, ledge.Right - 8)) : ledge.Icon.Left + ledge.Icon.Width / 2;
+            Rectangle area = Screen.FromPoint(new Point(x, ledge.Y - 1)).WorkingArea;
+            int rightmost = area.Right - (int)Math.Ceiling(preferences.Size * (PerchedBody.Right - SitX));
+            if (ledge.Icon.IsEmpty && ledge.Right >= area.Right - 8 && BodyOnScreen(anchor, Body).Right >= area.Right - 2) x = rightmost;
+            x = Math.Max(area.Left + (int)Math.Ceiling(preferences.Size * (SitX - PerchedBody.Left)), Math.Min(x, rightmost));
             seat = ledge;
             leanAngle = 0;
             anchor = Seated(x, ledge.Y);
@@ -967,10 +997,10 @@ namespace CapriDesktop
         internal void ChooseVoice(string id)
         {
             id = (id ?? "").Trim();
-            if (id.Length == 0) id = Voice.Default;
+            if (id.Length == 0) id = null;
             if (id == voice.VoiceId) { ShowVoice(false); return; }
             voice.VoiceId = id;
-            preferences.VoiceId = id == Voice.Default ? null : id;
+            preferences.VoiceId = id;
             SavePreferences();
             ShowVoice();
         }
@@ -983,9 +1013,33 @@ namespace CapriDesktop
             ShowVoice();
         }
 
+        internal string MicId { get { return preferences.Mic; } }
+
+        private static string MicName(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return null;
+            foreach (Mic mic in Ears.List()) if (mic.Id == id) return mic.Name;
+            return null;
+        }
+
+        internal void ChooseMic(string id)
+        {
+            preferences.Mic = string.IsNullOrEmpty(id) ? null : id;
+            ears.Chosen = preferences.Mic;
+            SavePreferences();
+            mainframe.ShowMic(MicName(preferences.Mic));
+            if (!ears.Listening) return;
+            ears.Stop();
+            try { ears.Start(); }
+            catch (VoiceException error) { mainframe.VoiceNote(error.Message, true); StopChat(); }
+        }
+
+        internal void OpenKeyPage() { OpenPage(KeysPage); }
+
         internal void TestVoice()
         {
             if (voice.Key == null && Speak == null) { mainframe.VoiceNote("Paste your ElevenLabs API key first.", true); return; }
+            if (voice.VoiceId == null && Speak == null) { mainframe.VoiceNote("Paste your Voice ID first.", true); return; }
             if (hidden) SetHidden(false);
             brain.Cancel();
             heard = "voice check";
@@ -1020,9 +1074,9 @@ namespace CapriDesktop
         {
             mainframe.ShowVoice(voice.Key == null ? null : Voice.Tail(voice.Key), voice.VoiceId, voice.Model, voices);
             if (!note) return;
-            string name = voice.VoiceId == Voice.Default ? "default voice" : "custom voice";
+            string name = "custom voice";
             if (voices != null) foreach (VoiceEntry entry in voices.Voices) if (entry.Id == voice.VoiceId && entry.Name != null) name = entry.Name;
-            mainframe.VoiceNote(voice.Key == null ? "Needs your ElevenLabs API key." : "ElevenLabs · " + name, false);
+            mainframe.VoiceNote(voice.Key == null ? "Needs your ElevenLabs API key." : voice.VoiceId == null ? "Needs your Voice ID." : "ElevenLabs · " + name, false);
         }
 
         private float TalkScale()
@@ -1066,16 +1120,17 @@ namespace CapriDesktop
         private void ToggleChat()
         {
             if (chatting) { StopChat(); return; }
-            if (voice.Key == null)
+            if (voice.Key == null || voice.VoiceId == null)
             {
                 heard = "(voice)";
                 box.Prompt = "> you: ";
-                Answer(++asking, "Plug my voice in through the Mainframe first, choom.", TalkState.Talking);
+                Answer(++asking, voice.Key == null ? "Voice chat needs an ElevenLabs key in the Mainframe, choom. Type to me for now." : "Voice chat needs your Voice ID in the Mainframe, choom. Type to me for now.", TalkState.Talking);
                 mainframe.Restore();
                 return;
             }
             chatting = true;
             ears.Muted = false;
+            if (!testing && !muteKey) muteKey = Native.RegisterHotKey(Handle, MuteKeyId, 0x0001 | 0x0002 | 0x4000, 0x4E);
             pill.SetChat(true, false);
             pillUntil = clock.Elapsed.TotalSeconds + 1.5;
             brain.Cancel();
@@ -1157,7 +1212,7 @@ namespace CapriDesktop
                 if (backlog != null) foreach (short[] held in backlog) agent.Send(held);
                 backlog = null;
             }
-            mainframe.VoiceNote("Voice chat on. Talk to her.", false);
+            mainframe.VoiceNote(muteKey ? "Voice chat on. Ctrl + Alt + N mutes your mic." : "Voice chat on. Talk to her.", false);
         }
 
         private void ChatFailed(string problem)
@@ -1210,6 +1265,8 @@ namespace CapriDesktop
         {
             if (!chatting) return;
             chatting = false;
+            if (muteKey) Native.UnregisterHotKey(Handle, MuteKeyId);
+            muteKey = false;
             chatTicket++;
             Agent closing = agent;
             agent = null;
@@ -1538,6 +1595,8 @@ namespace CapriDesktop
             signals.Stop();
             brain.Cancel();
             StopChat();
+            if (talkKey) Native.UnregisterHotKey(Handle, TalkKeyId);
+            talkKey = false;
             speaker.Close();
             voice.Stop();
             engine.Cancel = true;
@@ -1792,8 +1851,22 @@ namespace CapriDesktop
                             updateItem.Text = "Check for updates";
                             checks.Add("PASS update check: version compare, daily timing, GitHub release parsing and download offer");
                             Point bounded = KeepOnScreen(new Point(int.MaxValue / 4, int.MaxValue / 4));
-                            if (!Screen.FromPoint(new Point(bounded.X + Width / 2, bounded.Y + Height / 2)).WorkingArea.Contains(new Rectangle(bounded, Size))) throw new Exception("Screen bounds failed.");
-                            checks.Add("PASS screen bounds");
+                            Rectangle corner = Screen.FromPoint(new Point(bounded.X + Width / 2, bounded.Y + Height / 2)).WorkingArea;
+                            Rectangle standing = BodyOnScreen(bounded, Body);
+                            if (!corner.Contains(standing) || corner.Right - standing.Right > 2 || corner.Bottom - standing.Bottom > 2) throw new Exception("She can't stand in the screen corner: " + standing + " in " + corner);
+                            Rectangle leftmost = BodyOnScreen(Within(new Point(corner.Left - 5000, bounded.Y), corner, Body), Body);
+                            if (leftmost.Left < corner.Left || leftmost.Left - corner.Left > 2) throw new Exception("She can't reach the left edge: " + leftmost + " in " + corner);
+                            Point stoodAt = anchor;
+                            anchor = bounded;
+                            Land(new Ledge { Floor = true, Left = corner.Left, Right = corner.Right, Y = corner.Bottom });
+                            Rectangle perched = BodyOnScreen(anchor, PerchedBody);
+                            bool cornered = seat != null && perched.Left >= corner.Left && perched.Right <= corner.Right && corner.Right - perched.Right <= 3;
+                            seat = null;
+                            anchor = stoodAt;
+                            Location = anchor;
+                            Play(idle);
+                            if (!cornered) throw new Exception("She can't sit in the bottom corner: " + perched + " in " + corner);
+                            checks.Add("PASS screen bounds: her body, not her see-through window, stays on screen, so she stands and sits right in the corners");
                             ((ToolStripMenuItem)((ToolStripMenuItem)menu.Items[3]).DropDownItems[0]).PerformClick();
                             if (Width != 242) throw new Exception("Small size failed.");
                             ((ToolStripMenuItem)((ToolStripMenuItem)menu.Items[3]).DropDownItems[1]).PerformClick();
@@ -1951,7 +2024,8 @@ namespace CapriDesktop
                             }
                             string sent;
                             lock (asked) sent = string.Join("\n", asked.ToArray());
-                            if (fetched.Length != tone.Length || sent.IndexOf("POST /v1/text-to-speech/abc?output_format=wav_24000", StringComparison.Ordinal) < 0 || sent.IndexOf("xi-api-key: sk_test_capri_1234", StringComparison.OrdinalIgnoreCase) < 0 || sent.IndexOf("{\"text\":\"Hi \\\"choom\\\".\",\"model_id\":\"eleven_v3\"}", StringComparison.Ordinal) < 0) throw new Exception("ElevenLabs request was wrong: " + sent);
+                            if (fetched.Length != tone.Length || sent.IndexOf("POST /v1/text-to-speech/abc?output_format=wav_24000", StringComparison.Ordinal) < 0 || sent.IndexOf("xi-api-key: sk_test_capri_1234", StringComparison.OrdinalIgnoreCase) < 0 || sent.IndexOf("{\"text\":\"Hi \\\"chewm\\\".\",\"model_id\":\"eleven_v3\"}", StringComparison.Ordinal) < 0) throw new Exception("ElevenLabs request was wrong: " + sent);
+                            if (Voice.Sayable("Choom, that's PREEM, chooms. Supreme.") != "Chewm, that's PREME, chewms. Supreme." || Voice.Unsaid("Chewm, a preme rig. Supreme chewms.") != "Choom, a preem rig. Supreme chooms.") throw new Exception("Slang respelling is wrong: " + Voice.Sayable("Choom, that's PREEM, chooms. Supreme."));
                             VoicePage page = Voice.Read<VoicePage>(System.Text.Encoding.UTF8.GetBytes("{\"voices\":[{\"voice_id\":\"abc\",\"name\":\"Capri 1\",\"category\":\"generated\",\"labels\":{}},{\"voice_id\":\"def\",\"name\":\"Rachel\",\"category\":\"premade\"}],\"has_more\":false,\"total_count\":2,\"next_page_token\":null}"));
                             System.Collections.Generic.List<VoiceModel> listed = Voice.Read<System.Collections.Generic.List<VoiceModel>>(System.Text.Encoding.UTF8.GetBytes("[{\"model_id\":\"eleven_v3\",\"name\":\"Eleven v3\",\"can_do_text_to_speech\":true,\"languages\":[]}]"));
                             if (page.Voices.Count != 2 || page.More || page.Voices[0].Name != "Capri 1" || listed.Count != 1 || !listed[0].Speaks) throw new Exception("ElevenLabs listing did not parse.");
@@ -1962,14 +2036,35 @@ namespace CapriDesktop
                             ChooseVoice("abc");
                             ChooseVoiceModel("eleven_v3");
                             if (preferences.VoiceId != "abc" || preferences.VoiceModel != "eleven_v3" || mainframe.VoiceStatus != "ElevenLabs · Capri 1 | abc | v3 | Forget") throw new Exception("Voice picks did not show: " + mainframe.VoiceStatus);
+                            mainframe.ShowShortcut(true, true);
+                            if (!mainframe.MicStatus.EndsWith("| - | keys | mute", StringComparison.Ordinal)) throw new Exception("The Ctrl + Alt + V and N hints did not show with a key: " + mainframe.MicStatus);
                             snap("mainframe-voice.png");                            ChooseVoice("  ");
                             ChooseVoiceModel(null);
-                            if (voice.VoiceId != Voice.Default || preferences.VoiceId != null || voice.Model != null || mainframe.VoiceStatus != "ElevenLabs · default voice | " + Voice.Default + " | Default model | Forget") throw new Exception("Blank voice did not fall back to the default: " + mainframe.VoiceStatus);
+                            if (voice.VoiceId != null || preferences.VoiceId != null || voice.Model != null || mainframe.VoiceStatus != "Needs your Voice ID. |  | Default model | Forget") throw new Exception("Blank voice was not cleared: " + mainframe.VoiceStatus);
+                            CloseTalk();
+                            pill.Press(2);
+                            if (pill.Chatting || chatting || reply != "Voice chat needs your Voice ID in the Mainframe, choom. Type to me for now.") throw new Exception("Wave without a Voice ID did not point to the Mainframe.");
+                            CloseTalk();
                             preferences.VoiceKey = sealedKey;
                             ForgetVoice();
-                            if (voice.Key != null || voices != null || preferences.VoiceKey != null || mainframe.VoiceStatus != "Needs your ElevenLabs API key. | " + Voice.Default + " | Default model | Connect") throw new Exception("Forget did not clear the key: " + mainframe.VoiceStatus);
+                            if (voice.Key != null || voices != null || preferences.VoiceKey != null || mainframe.VoiceStatus != "Needs your ElevenLabs API key. |  | Default model | Connect") throw new Exception("Forget did not clear the key: " + mainframe.VoiceStatus);
                             snap("mainframe-voice-empty.png");
-                            checks.Add("PASS voice: key sealed with DPAPI, tags stripped, errors read, real HTTP round trips against a fake ElevenLabs (401 explained, audio fetched), WAV cleanup, mouth from the audio, listing parse, voice and model picks, default voice, forget");
+                            if (!mainframe.MicStatus.EndsWith("| help | - | mute", StringComparison.Ordinal)) throw new Exception("Without a key the Mainframe should offer Get a key, not the shortcut: " + mainframe.MicStatus);
+                            mainframe.ShowShortcut(false, false);
+                            if (!mainframe.MicStatus.EndsWith("| help | - | -", StringComparison.Ordinal)) throw new Exception("The Ctrl + Alt + N hint showed while the key was taken: " + mainframe.MicStatus);
+                            System.Collections.Generic.List<Mic> found = Ears.List();
+                            ChooseMic("{0.0.1.00000000}.{missing}");
+                            if (preferences.Mic != "{0.0.1.00000000}.{missing}" || ears.Chosen != preferences.Mic || mainframe.MicStatus.IndexOf("| Mic: default |", StringComparison.Ordinal) < 0) throw new Exception("Missing mic did not fall back to the default label: " + mainframe.MicStatus);
+                            if (found.Count > 0)
+                            {
+                                ChooseMic(found[0].Id);
+                                if (mainframe.MicStatus.IndexOf("| Mic: " + found[0].Name + " |", StringComparison.Ordinal) < 0) throw new Exception("Mic pick did not show its name: " + mainframe.MicStatus);
+                                snap("mainframe-mic.png");
+                            }
+                            ChooseMic(null);
+                            if (preferences.Mic != null || ears.Chosen != null) throw new Exception("Default mic did not clear the pick.");
+                            checks.Add("PASS mic list (" + found.Count + " found) with full names, a saved pick, and a missing mic falls back to the default");
+                            checks.Add("PASS voice: key sealed with DPAPI, tags stripped, errors read, real HTTP round trips against a fake ElevenLabs (401 explained, audio fetched), WAV cleanup, mouth from the audio, listing parse, voice and model picks, a blank Voice ID asks for one, forget");
                             mainframe.Close();
                             if (mainframe.IsDisposed || !mainframe.Visible || mainframe.WindowState != FormWindowState.Minimized) throw new Exception("Closing the Mainframe quit instead of minimizing.");
                             checks.Add("PASS Mainframe starts in the taskbar, a second launch opens it, it picks a model, and its close button minimizes it");
@@ -2099,7 +2194,11 @@ namespace CapriDesktop
                             Speak = null;
                             CloseTalk();
                             pill.Press(2);
-                            if (pill.Chatting || chatting || reply != "Plug my voice in through the Mainframe first, choom.") throw new Exception("Wave without a key did not point to the Mainframe.");
+                            if (pill.Chatting || chatting || reply != "Voice chat needs an ElevenLabs key in the Mainframe, choom. Type to me for now.") throw new Exception("Wave without a key did not point to the Mainframe.");
+                            CloseTalk();
+                            Message talkPress = Message.Create(Handle, 0x0312, new IntPtr(TalkKeyId), IntPtr.Zero);
+                            WndProc(ref talkPress);
+                            if (pill.Chatting || chatting || reply != "Voice chat needs an ElevenLabs key in the Mainframe, choom. Type to me for now.") throw new Exception("Ctrl + Alt + V without a key did not point to the Mainframe.");
                             mainframe.WindowState = FormWindowState.Minimized;
                             if (TalkPill.Render(1, 0).Width != TalkPill.Measure(1).Width) throw new Exception("Mic button showed outside voice chat.");
                             System.Net.Sockets.TcpListener free = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
@@ -2193,7 +2292,7 @@ namespace CapriDesktop
                                             if (kind != null) { chunks++; lock (asked) asked.Add("chunk " + kind); }
                                         }
                                         send("{\"type\":\"user_transcript\",\"user_transcription_event\":{\"user_transcript\":\"hi\"}}");
-                                        send("{\"type\":\"agent_response\",\"agent_response_event\":{\"agent_response\":\"[GLITCH] Loud and clear, choom.\"}}");
+                                        send("{\"type\":\"agent_response\",\"agent_response_event\":{\"agent_response\":\"[GLITCH] Loud and clear, chewm.\"}}");
                                         send("{\"type\":\"audio\",\"audio_event\":{\"audio_base_64\":\"" + lineAudio + "\",\"event_id\":1,\"alignment\":{\"chars\":[\"L\"],\"char_durations_ms\":[40],\"char_start_times_ms\":[0]}}}");
                                         try
                                         {
@@ -2213,7 +2312,8 @@ namespace CapriDesktop
                             agentHost = Voice.Host;
                             Voice.Host = "http://localhost:" + port;
                             voice.Key = "sk_test_capri_1234";
-                            if (Agent.Create(voice.Key, Voice.Default) != "agent_test") throw new Exception("ElevenLabs agent was not made.");
+                            voice.VoiceId = "abc";
+                            if (Agent.Create(voice.Key, voice.VoiceId) != "agent_test") throw new Exception("ElevenLabs agent was not made.");
                             preferences.AgentId = "agent_old";
                             preferences.AgentVersion = 1;
                             CloseTalk();
@@ -2241,6 +2341,11 @@ namespace CapriDesktop
                             ears.Feed(loud);
                             pill.Press(3);
                             if (pill.Muted || ears.Muted) throw new Exception("Mic button did not unmute the mic.");
+                            Message mutePress = Message.Create(Handle, 0x0312, new IntPtr(MuteKeyId), IntPtr.Zero);
+                            WndProc(ref mutePress);
+                            if (!pill.Muted || !ears.Muted) throw new Exception("Ctrl + Alt + N did not mute the mic.");
+                            WndProc(ref mutePress);
+                            if (pill.Muted || ears.Muted) throw new Exception("Ctrl + Alt + N did not unmute the mic.");
                             ears.Feed(loud);
                             ears.Feed(loud);
                         }
@@ -2251,7 +2356,7 @@ namespace CapriDesktop
                             if (heard != "hi" || reply != "Loud and clear, choom." || (talkState != TalkState.Talking && talkState != TalkState.Online) || !speaker.Busy) throw new Exception("Voice chat did not hear and answer: " + heard + " / " + reply + " / " + talkState + " / " + log);
                             Play(idle);
                             if (MouthCell(clock.Elapsed.TotalSeconds, idle) < 0) throw new Exception("Her mouth did not follow the agent's audio.");
-                            string[] wanted = { "http POST /v1/convai/agents/create sk_test_capri_1234 {\"name\":\"Capri\"", "\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45}", "http PATCH /v1/convai/agents/agent_old sk_test_capri_1234 {\"conversation_config\":{\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45}}}", "check in once", "Don\u0027t beg them to talk", "\"prompt\":{\"prompt\":\"You are Capri", "\"llm\":\"gemini-2.5-flash\"", "\"tts\":{\"voice_id\":\"" + Voice.Default + "\"}", "\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true}},\"tts\":{\"voice_id\":true}}}", "http GET /v1/convai/conversation/get-signed-url?agent_id=agent_old sk_test_capri_1234", "init {\"type\":\"conversation_initiation_client_data\",\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "pong {\"type\":\"pong\",\"event_id\":7}", "chunk silent | chunk loud | chunk loud" };
+                            string[] wanted = { "http POST /v1/convai/agents/create sk_test_capri_1234 {\"name\":\"Capri\"", "\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45}", "http PATCH /v1/convai/agents/agent_old sk_test_capri_1234 {\"conversation_config\":{\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45}}}", "check in once", "Don\u0027t beg them to talk", "\"prompt\":{\"prompt\":\"You are Capri", "\"llm\":\"gemini-2.5-flash\"", "\"tts\":{\"voice_id\":\"abc\"}", "\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true}},\"tts\":{\"voice_id\":true}}}", "http GET /v1/convai/conversation/get-signed-url?agent_id=agent_old sk_test_capri_1234", "init {\"type\":\"conversation_initiation_client_data\",\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "pong {\"type\":\"pong\",\"event_id\":7}", "chunk silent | chunk loud | chunk loud" };
                             foreach (string piece in wanted) if (log.IndexOf(piece, StringComparison.Ordinal) < 0) throw new Exception("Agent traffic was missing " + piece + ": " + log);
                             short[] loud = new short[Ears.Chunk];
                             for (int i = 0; i < loud.Length; i++) loud[i] = (short)(Math.Sin(i * 0.3) * 9000);
