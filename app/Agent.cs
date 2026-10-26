@@ -179,6 +179,12 @@ namespace CapriDesktop
             Send("{\"user_audio_chunk\":\"" + Convert.ToBase64String(bytes) + "\"}");
         }
 
+        internal void Tell(string text)
+        {
+            if (!ready) return;
+            Send("{\"type\":\"contextual_update\",\"text\":" + Voice.Quote(text) + "}");
+        }
+
         private void Send(string text)
         {
             byte[] bytes = Encoding.UTF8.GetBytes(text);

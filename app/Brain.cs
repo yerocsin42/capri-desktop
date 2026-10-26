@@ -238,8 +238,10 @@ namespace CapriDesktop
         internal static string Nvidia = "https://integrate.api.nvidia.com";
         private static readonly string[] NvidiaPicks = { "z-ai/glm-5.3-flash", "nvidia/nemotron-3.5-super-vl-120b-a12b", "nvidia/nemotron-3.5-bolt-e4b", "openai/gpt-oss-20b", "meta/llama-3.2-11b-vision-instruct" };
         private static readonly string[] NvidiaDead = { "google/gemma-4-31b-it", "deepseek-ai/deepseek-v4.1-flash", "z-ai/glm-5.3", "moonshotai/kimi-k2.6", "google/gemma-3-12b-it", "meta/llama-3.2-90b-vision-instruct" };
+        internal static string NvidiaDefault { get { return NvidiaPicks[0]; } }
         internal const string Gone = "That model isn't on your key. Pick another one.";
         internal const string Down = "Their servers failed. Pick another model or retry.";
+        internal const string Busy = "Too many requests. Wait a minute, or watch slower.";
         internal const string Blind = "DeepSeek can't see your screen. In Capri Mainframe, press Free key and connect a free NVIDIA key instead.";
 
         internal static string Sightless(Cloud remote) { return remote.Model + " can't see screens. In Capri Mainframe, pick a model that can" + (remote.Kind == "nvidia" ? ", like z-ai/glm-5.3-flash." : "."); }
@@ -370,7 +372,7 @@ namespace CapriDesktop
         {
             WebException web = error as WebException;
             if (web != null) return web.Status == WebExceptionStatus.Timeout;
-            return error is BrainException && (error.Message == Gone || error.Message == Down);
+            return error is BrainException && (error.Message == Gone || error.Message == Down || error.Message == Busy);
         }
 
         internal static string Next(string current, List<string> models, ICollection<string> skip)
@@ -434,7 +436,7 @@ namespace CapriDesktop
             }
             bool follows = recent.Count == 2 && Hands.Follows(text, recent[0].Content, recent[1].Content);
             bool reached = false;
-            if (act != null && Hands.Direct(text, out direct, out directArgs)) calls.Add(new KeyValuePair<string, ToolArguments>(direct, directArgs));
+            if (act != null && Hands.Heard(text, out direct, out directArgs)) calls.Add(new KeyValuePair<string, ToolArguments>(direct, directArgs));
             else if (act != null && (Hands.Wants(text) || follows)) { reached = true; Reach(model, text, follows ? recent : new List<ChatMessage>(), calls, ticket); Hands.Rescue(text, calls); }
             if (calls.Count == 0)
             {
@@ -876,7 +878,7 @@ namespace CapriDesktop
         {
             if (status == 402 || Regex.IsMatch(body ?? "", @"insufficient[_ ](quota|balance)|no credits|credit balance|billing", RegexOptions.IgnoreCase)) return "No credits on this key. Add credits on their site, or press Free key for a free NVIDIA key.";
             if (status == 401 || status == 403) return "Key rejected. Press Forget, then paste it again.";
-            if (status == 429) return "Too many requests. Wait a minute, or watch slower.";
+            if (status == 429) return Busy;
             if (status == 404) return Gone;
             if (status >= 500) return Down;
             return null;
@@ -907,6 +909,7 @@ namespace CapriDesktop
 
         private static HttpWebRequest Create(string url, int timeout)
         {
+            ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
             request.ServicePoint.ConnectionLimit = Math.Max(request.ServicePoint.ConnectionLimit, 16);
             request.ServicePoint.Expect100Continue = false;
