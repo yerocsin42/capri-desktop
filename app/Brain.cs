@@ -439,7 +439,9 @@ namespace CapriDesktop
             if (calls.Count == 0)
             {
                 raw = Think(model, messages, false, new List<KeyValuePair<string, ToolArguments>>(), null, 90, ticket);
-                if (act != null && Hands.Promised(Clean(raw)))
+                ToolArguments lookup = act != null ? Hands.Lookup(text, Clean(raw)) : null;
+                if (lookup != null) calls.Add(new KeyValuePair<string, ToolArguments>("open_website", lookup));
+                else if (act != null && Hands.Promised(Clean(raw)))
                 {
                     if (!reached)
                     {

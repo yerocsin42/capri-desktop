@@ -36,6 +36,7 @@ namespace CapriDesktop
         internal abstract List<Spot> Windows(ICollection<long> skip);
         internal abstract Spot Find(long window);
         internal abstract bool Alive(long window);
+        internal virtual string Debug() { return ""; }
 
         protected bool Fills(PixelRect bounds)
         {
@@ -187,7 +188,8 @@ namespace CapriDesktop
                 {
                     IntPtr info = CFArrayGetValueAtIndex(array, i);
                     long id = Whole(info, number);
-                    if (Whole(info, layer) != 0 || Whole(info, owner) == self || skip.Contains(id)) continue;
+                    long level = Whole(info, layer);
+                    if (level < 0 || level > 3 || Whole(info, owner) == self || skip.Contains(id)) continue;
                     IntPtr shown = CFDictionaryGetValue(info, onscreen);
                     if (showing && (shown == IntPtr.Zero || !CFBooleanGetValue(shown) || Real(info, alpha) <= 0.05)) continue;
                     IntPtr box = CFDictionaryGetValue(info, frame);
@@ -200,6 +202,27 @@ namespace CapriDesktop
             }
             finally { CFRelease(array); }
             return found;
+        }
+
+        internal override string Debug()
+        {
+            List<string> parts = new List<string>();
+            IntPtr array = CGWindowListCopyWindowInfo(OnScreenOnly | ExcludeDesktop, 0);
+            if (array == IntPtr.Zero) return "no window info";
+            try
+            {
+                long count = CFArrayGetCount(array);
+                for (long i = 0; i < count && parts.Count < 12; i++)
+                {
+                    IntPtr info = CFArrayGetValueAtIndex(array, i);
+                    IntPtr box = CFDictionaryGetValue(info, frame);
+                    Area area = new Area();
+                    if (box != IntPtr.Zero) CGRectMakeWithDictionaryRepresentation(box, out area);
+                    parts.Add("#" + Whole(info, number) + " layer " + Whole(info, layer) + " pid " + Whole(info, owner) + " alpha " + Real(info, alpha).ToString("0.##") + " " + area.X + "," + area.Y + " " + area.Width + "x" + area.Height);
+                }
+                return count + " raw (self " + self + "): " + string.Join("; ", parts);
+            }
+            finally { CFRelease(array); }
         }
 
         private static long Whole(IntPtr info, IntPtr key)
@@ -295,6 +318,8 @@ namespace CapriDesktop
 
         internal override Spot Find(long window)
         {
+            long[] clients = Property(root, "_NET_CLIENT_LIST");
+            if (clients != null && Array.IndexOf(clients, window) < 0) return null;
             long[] current = Property(root, "_NET_CURRENT_DESKTOP");
             return Look(new IntPtr(window), current != null && current.Length > 0 ? current[0] : -1);
         }

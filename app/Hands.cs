@@ -57,6 +57,7 @@ namespace CapriDesktop
         internal const string Note =
             "\nYou have tools for their PC: open (launch, play) their apps and games, switch to, minimize or close apps that are open, play songs or videos they name, open websites or search them, control their music and volume, look at their screen, and use their mouse and keyboard for jobs inside apps and sites. " +
             "Use a tool whenever they ask you to do something like that, and never say you did or are doing it without one. Look at their screen when they ask what you see or what you think of something on it. Only close an app when they ask you to. You can't touch their files. " +
+            "You have a web browser: when they ask something you don't know or that changes, like the weather, news, scores, prices or times, search Google for it instead of guessing or saying you can't. " +
             "Most messages are just chat, not jobs: answer those as yourself, with your own opinions and tastes, and don't offer to open, play or look at anything unless they ask.";
 
         internal const string Prompt =
@@ -65,10 +66,11 @@ namespace CapriDesktop
             "If the job needs clicking, typing or more than one step, like opening an app and then searching, going somewhere or making something in it, call use_computer once with the whole job in their words.\n" +
             "When they name an app, never guess a website for it: use open_app, or use_computer if there's more to do.\n" +
             "If they want music but name none, pick a popular song that fits.\n" +
+            "If they ask something you'd have to look up, like the weather, news, scores, prices, times or facts you're unsure of, call open_website with site google and their question as the search.\n" +
             "Questions about their current screen or song need a tool too. For chat, negated or hypothetical requests, or an unclear target, call no tool and reply with only the word: chat";
 
         internal const string Chat =
-            "\nNo tools ran for this message. Answer as yourself, with your own opinions and tastes. Don't claim you opened, played or looked at anything.";
+            "\nNo tools ran for this message. Answer as yourself, with your own opinions and tastes. Don't claim you opened, played or looked at anything. You can search Google for them: if they ask something you don't know or that changes, like the weather, news, scores or prices, say you'll look it up instead of guessing or saying you can't.";
 
         private static readonly string[,] Specs =
         {
@@ -99,6 +101,7 @@ namespace CapriDesktop
             @"|^(see|tell me|show me) (what|which)\b|^see (this|that|my screen|the screen)\b|^what('?s| is) (on my screen|on the screen|playing|this song|this track|the song|on spotify)\b" +
             @"|^what ((song|track)( is|'s)? (this|playing|on)|am i (doing|playing|watching|listening)|are we (doing|playing|watching|listening)|do you see|can you see)\b|^what do you think (of|about) (this|that|it|my (build|skin|setup))\b|^do you (see|like) (this|that|my (build|skin|setup))\b" +
             @"|^(i (want|need|wanna|would like) (you to |to )?(open|launch|play|listen|watch|search)|let's (play|listen|watch)|find (me )?.+ (on|online)|can (you|u) see)\b" +
+            @"|^(what('?s| is| are)|how('?s| is)|is it|will it|when('?s| is| does| do)|who won|did|check|get|tell me|show me|find)\b.*\b(weather|forecast|temperature|raining|snowing|news|headlines|scores?|stock price|price of|exchange rate|time (is it )?in|opening hours|open (today|now|tonight)|release date|showtimes)\b|^(weather|forecast|news|headlines)\b|^who (won|is winning)\b" +
             @"|^(ouvre|ouvrir|lancer?|d[ée]marrer?|fermer?|quitter?|r[ée]duis|r[ée]duire|minimiser?|chercher?|rechercher?|mets|mettre|jouer?|passer?|couper?|augmenter?|baisser?|regarder?|afficher?|montre-moi|va sur|aller sur|retourne sur)\b" +
             @"|^(tu vois|qu'est-ce que (tu vois|je fais)|c'est quoi (cette|la) (chanson|musique)|quelle (chanson|musique)|qu'est-ce qu'il y a sur mon [ée]cran)\b", RegexOptions.IgnoreCase);
 
@@ -226,6 +229,17 @@ namespace CapriDesktop
                 string name = Regex.Replace(args.Site.Trim(), @"^(https?://)?(www\.)?|\.[a-z.]+(/.*)?$", "", RegexOptions.IgnoreCase);
                 if (Regex.IsMatch(text, @"\b" + Regex.Escape(name) + @"\b", RegexOptions.IgnoreCase) && Installed(name) && string.IsNullOrEmpty(args.Search)) calls[i] = new KeyValuePair<string, ToolArguments>("open_app", new ToolArguments { Name = name });
             }
+        }
+
+        private static readonly Regex Unknown = new Regex(@"\b(can'?t|cannot|can not|unable to|don'?t have|no way to|not able to)\b[^.!?]{0,40}\b(check|browse|look|search|google|access|know|tell|real[- ]?time|live|internet|web|online|current|up[- ]to[- ]date|forecast)\b|\b(i'?ll|i will|let me|lemme|i'?m (gonna|going to)|gonna)\s+(\w+\s+){0,2}(search|google|look (it |that |this )?up)\b", RegexOptions.IgnoreCase);
+        private static readonly Regex Question = new Regex(@"\?\s*$|^(what|what's|whats|how|how's|when|where|who|which|why|is|are|was|were|will|does|do|did|can|could|would|tell me|check|look up|google|search|any idea)\b", RegexOptions.IgnoreCase);
+
+        internal static ToolArguments Lookup(string said, string reply)
+        {
+            string text = Asked(said);
+            string plain = Regex.Replace(text, @"^(do|did) (you|u) (know|have any idea)\b|\byou know\b|^(tell|show|get|find) me\b|\b(near me|where i (am|live)|in my (area|city|town|suburb))\b", "", RegexOptions.IgnoreCase);
+            if (text.Length < 4 || !Question.IsMatch((said ?? "").Trim()) || !Unknown.IsMatch((reply ?? "").Replace('’', '\'')) || Regex.IsMatch(plain, @"\b(screen|song|playing|track|you|your|yourself|u|ur|capri|me|my|i|i'm|im)\b", RegexOptions.IgnoreCase) || Regex.IsMatch(reply ?? "", @"\bscreen\b", RegexOptions.IgnoreCase) || Safety.Screen(text) != null) return null;
+            return new ToolArguments { Site = "google", Search = text };
         }
 
         internal const string Unpromised = "I haven't done that yet, choom. Tell me what to open or click and I'm on it.";
