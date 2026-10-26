@@ -57,6 +57,7 @@ namespace CapriDesktop
         internal const string Note =
             "\nYou have tools for their PC: open (launch, play) their apps and games, switch to, minimize or close apps that are open, play songs or videos they name, open websites or search them, control their music and volume, look at their screen, and use their mouse and keyboard for jobs inside apps and sites. " +
             "Use a tool whenever they ask you to do something like that, and never say you did or are doing it without one. Look at their screen when they ask what you see or what you think of something on it. Only close an app when they ask you to. You can't touch their files. " +
+            "Your own website, where people download you, is " + Home + ". " +
             "You have a web browser: when they ask something you don't know or that changes, like the weather, news, scores, prices or times, search Google for it instead of guessing or saying you can't. " +
             "Most messages are just chat, not jobs: answer those as yourself, with your own opinions and tastes, and don't offer to open, play or look at anything unless they ask.";
 
@@ -66,6 +67,7 @@ namespace CapriDesktop
             "If the job needs clicking, typing or more than one step, like opening an app and then searching, going somewhere or making something in it, call use_computer once with the whole job in their words.\n" +
             "When they name an app, never guess a website for it: use open_app, or use_computer if there's more to do.\n" +
             "If they want music but name none, pick a popular song that fits.\n" +
+            "Your own website is " + Home + ": when they ask for your website or page, call open_website with that address.\n" +
             "If they ask something you'd have to look up, like the weather, news, scores, prices, times or facts you're unsure of, call open_website with site google and their question as the search.\n" +
             "Questions about their current screen or song need a tool too. For chat, negated or hypothetical requests, or an unclear target, call no tool and reply with only the word: chat";
 
@@ -93,6 +95,8 @@ namespace CapriDesktop
         internal static readonly string Tools = Render(false);
         internal static readonly string ClaudeTools = Render(true);
         internal static readonly string Listing = Written();
+        private const string LookupWords = @"^(what('?s| is| are)|how('?s| is)|is it|will it|when('?s| is| does| do)|who won|did|check|get|tell me|show me|find)\b.*\b(weather|forecast|temperature|raining|snowing|news|headlines|scores?|stock price|price of|exchange rate|time (is it )?in|opening hours|open (today|now|tonight)|release date|showtimes|rain|snow|sunny|hot out|cold out)\b|^(weather|forecast|news|headlines)\b|^who (won|is winning)\b";
+
         private static readonly Regex Asks = new Regex(
             @"^(open|launch|start|run|load up|boot up|fire up|play|shuffle|put on|blast|queue|close|quit|exit|kill|shut down|switch (back |over )?to|back to|go to|bring up|pull up|show me|minimi[sz]e|pause|unpause|resume|stop the music|skip|next|previous|go back|volume|louder|quieter|mute|unmute|search|google|look up|mind (opening|launching|playing|closing))\b" +
             @"|^(turn|make) (it|this|that|the volume|the music|the sound) (up|down|louder|quieter)\b|^(turn (up|down)|lower|raise) (the )?(volume|music|sound)\b|^put (some |a )?(music|song|tunes) on\b|^(get|bring) .+ (going|up)$" +
@@ -101,7 +105,7 @@ namespace CapriDesktop
             @"|^(see|tell me|show me) (what|which)\b|^see (this|that|my screen|the screen)\b|^what('?s| is) (on my screen|on the screen|playing|this song|this track|the song|on spotify)\b" +
             @"|^what ((song|track)( is|'s)? (this|playing|on)|am i (doing|playing|watching|listening)|are we (doing|playing|watching|listening)|do you see|can you see)\b|^what do you think (of|about) (this|that|it|my (build|skin|setup))\b|^do you (see|like) (this|that|my (build|skin|setup))\b" +
             @"|^(i (want|need|wanna|would like) (you to |to )?(open|launch|play|listen|watch|search)|let's (play|listen|watch)|find (me )?.+ (on|online)|can (you|u) see)\b" +
-            @"|^(what('?s| is| are)|how('?s| is)|is it|will it|when('?s| is| does| do)|who won|did|check|get|tell me|show me|find)\b.*\b(weather|forecast|temperature|raining|snowing|news|headlines|scores?|stock price|price of|exchange rate|time (is it )?in|opening hours|open (today|now|tonight)|release date|showtimes|rain|snow|sunny|hot out|cold out)\b|^(weather|forecast|news|headlines)\b|^who (won|is winning)\b" +
+            "|" + LookupWords +
             @"|^(ouvre|ouvrir|lancer?|d[ée]marrer?|fermer?|quitter?|r[ée]duis|r[ée]duire|minimiser?|chercher?|rechercher?|mets|mettre|jouer?|passer?|couper?|augmenter?|baisser?|regarder?|afficher?|montre-moi|va sur|aller sur|retourne sur)\b" +
             @"|^(tu vois|qu'est-ce que (tu vois|je fais)|c'est quoi (cette|la) (chanson|musique)|quelle (chanson|musique)|qu'est-ce qu'il y a sur mon [ée]cran)\b", RegexOptions.IgnoreCase);
 
@@ -244,12 +248,13 @@ namespace CapriDesktop
 
         internal static string Pulled(string result)
         {
+            if ((result ?? "").StartsWith("Opened your own website", StringComparison.Ordinal)) return "Here's my site, choom. That's where people download me.";
             Match searched = Regex.Match(result ?? "", @"^Searched google\.com for (.+)\.$");
             return searched.Success ? "Pulled up \"" + searched.Groups[1].Value + "\" on Google for you, choom." : null;
         }
 
         internal const string Unpromised = "I haven't done that yet, choom. Tell me what to open or click and I'm on it.";
-        private static readonly Regex Promise = new Regex(@"\b(i'?ll|i will|let me|lemme|i'?m (gonna|going to|about to)|gonna|on it,?)\s+(\w+\s+){0,2}(open|launch|load|boot|fire|pull|bring|search|google|look up|click|type|close|switch|head|install|download)\b|^((sure|ok|okay|alright|bet|got it|on it|say less|yessir+|yezzir+)[,.!\s]+)?(opening|launching|loading|pulling up|bringing up|firing up|booting up|heading to|searching|clicking|typing|closing|switching)\b", RegexOptions.IgnoreCase);
+        private static readonly Regex Promise = new Regex(@"\b(i'?ll|i will|let me|lemme|i'?m (gonna|going to|about to)|gonna|on it,?)\s+(\w+\s+){0,2}(open|launch|load|boot|fire|pull|bring|search|google|look up|click|type|close|switch|head|install|download|play(?!\s+(along|around|with|nice|fair|dumb|it (cool|safe)|((a|some|the|this|that|any|your|my)\s+)?(games?|round|match)\b|devil))|put on|queue|blast|spin)\b|^((sure|ok|okay|alright|bet|got it|on it|say less|yessir+|yezzir+)[,.!\s]+)?(opening|launching|loading|pulling up|bringing up|firing up|booting up|heading to|searching|clicking|typing|closing|switching|playing|putting on|queuing|queueing|blasting|spinning)\b", RegexOptions.IgnoreCase);
 
         internal static bool Promised(string said) { return Promise.IsMatch((said ?? "").Replace('’', '\'')); }
 
@@ -286,6 +291,20 @@ namespace CapriDesktop
             @"^((what('|\u2019)?s|what is) (playing|this song|this track|the song|on spotify)|what (song|track)( is|('|\u2019)s)? (this|playing|on)|what am i listening to|what are we listening to)$", "now_playing"
         };
 
+        internal static bool Heard(string said, out string tool, out ToolArguments args)
+        {
+            List<string> tries = new List<string>();
+            Match named = Regex.Match(said ?? "", @"\b[ck]app?r(?:i|ee|ie|y)\b[\s,.!?]*([^\s,.!?].*)$", RegexOptions.IgnoreCase | RegexOptions.RightToLeft);
+            if (named.Success) tries.Add(named.Groups[1].Value);
+            string[] sentences = Regex.Split((said ?? "").Trim(), @"(?<=[.!?])\s+");
+            if (sentences.Length > 1) tries.Add(sentences[sentences.Length - 1]);
+            tries.Add(said ?? "");
+            foreach (string attempt in tries) if (Direct(attempt, out tool, out args)) return true;
+            tool = null;
+            args = new ToolArguments();
+            return false;
+        }
+
         internal static bool Direct(string said, out string tool, out ToolArguments args)
         {
             tool = null;
@@ -303,10 +322,14 @@ namespace CapriDesktop
             {
                 string target = found.Groups[3].Value.Trim();
                 if (Regex.IsMatch(target, @"\s(and|then|&)\s|,\s*\S", RegexOptions.IgnoreCase)) return false;
+                if (Regex.IsMatch(target, @"^(your|ur|capri'?s|the capri)( own)? (web ?site|site|page|download page)$", RegexOptions.IgnoreCase)) { tool = "open_website"; args.Site = Home; return true; }
                 if (Installed(target)) { tool = "open_app"; args.Name = target; return true; }
                 if (Site(target)) { tool = "open_website"; args.Site = target; return true; }
                 return false;
             }
+            found = Regex.Match(text, @"^(?:google|look up)\s+(.+)$", RegexOptions.IgnoreCase);
+            if (found.Success && !Regex.IsMatch(found.Groups[1].Value, @"^(it|this|that|something|stuff|for me)$", RegexOptions.IgnoreCase)) { tool = "open_website"; args.Site = "google"; args.Search = found.Groups[1].Value.Trim(); return true; }
+            if (Regex.IsMatch(text, LookupWords, RegexOptions.IgnoreCase) && !Regex.IsMatch(Regex.Replace(text, @"\bnear me\b", ""), @"\b(my|your|you|me|i)\b", RegexOptions.IgnoreCase) && Safety.Screen(text) == null) { tool = "open_website"; args.Site = "google"; args.Search = text; return true; }
             found = Regex.Match(text, @"^(?:play|shuffle|put on|blast)\s+(.+?)(\s+on\s+(spotify|youtube))?$", RegexOptions.IgnoreCase);
             if (found.Success)
             {
@@ -582,6 +605,7 @@ namespace CapriDesktop
             string address = Address(site, search);
             if (address == null) return "That isn't a website.";
             Run(address);
+            if (address.TrimEnd('/') == "https://" + Home) return "Opened your own website, " + Home + ".";
             string host = new Uri(address).Host;
             if (host.StartsWith("www.", StringComparison.Ordinal)) host = host.Substring(4);
             return string.IsNullOrWhiteSpace(search) ? "Opened " + host + "." : "Searched " + host + " for " + search.Trim() + ".";
@@ -657,6 +681,13 @@ namespace CapriDesktop
             Native.keybd_event(key, 0, 0x1 | 0x2, UIntPtr.Zero);
         }
 
+        private static readonly string[,] KnownSongs =
+        {
+            { @"^in love with myself(\s+(by|from)\s+(petite meller|kalman chodakiewitz|eli shiffman|(cyberpunk:?\s+)?edgerunners)\b.*)?$", "2iyaHQlYrR8Eyr4wOmOT5D", "In Love With Myself", "In Love With Myself Petite Meller" }
+        };
+
+        internal const string Home = "yerocsin42.github.io/capri-desktop";
+
         private static string PlayMusic(string song, string app, string kind)
         {
             if (string.IsNullOrWhiteSpace(song)) return "What should I play?";
@@ -669,11 +700,16 @@ namespace CapriDesktop
             bool liked = Regex.IsMatch(song, @"^((my|your|the)\s+)?((liked|saved)\s+songs|likes)$", RegexOptions.IgnoreCase);
             if (liked) kind = "playlist";
             if (kind != "playlist" && kind != "album" && kind != "artist") kind = "song";
+            string known = null;
+            string look = song;
+            if (kind == "song")
+                for (int i = 0; i < KnownSongs.GetLength(0); i++)
+                    if (Regex.IsMatch(song, KnownSongs[i, 0], RegexOptions.IgnoreCase)) { known = KnownSongs[i, 1]; song = KnownSongs[i, 2]; look = KnownSongs[i, 3]; }
             string named = kind == "song" ? song : "the " + song + " " + kind;
             if (app != "youtube" && Match(Apps(), "spotify").Count > 0)
             {
                 if (liked) named = "their Liked Songs";
-                string spotted = liked ? null : Find(Fetch("https://html.duckduckgo.com/html/?q=" + Uri.EscapeDataString("site:open.spotify.com/" + (kind == "song" ? "track" : kind) + " " + song)), @"open\.spotify\.com(?:/|%2F)" + (kind == "song" ? "track" : kind) + @"(?:/|%2F)([A-Za-z0-9]{22})");
+                string spotted = liked ? null : known ?? Find(Fetch("https://html.duckduckgo.com/html/?q=" + Uri.EscapeDataString("site:open.spotify.com/" + (kind == "song" ? "track" : kind) + " " + song)), @"open\.spotify\.com(?:/|%2F)" + (kind == "song" ? "track" : kind) + @"(?:/|%2F)([A-Za-z0-9]{22})");
                 if (kind == "song" && spotted != null)
                 {
                     string before = NowPlaying();
@@ -688,7 +724,7 @@ namespace CapriDesktop
                 Run("spotify:search:" + Uri.EscapeDataString(song));
                 return PressPlay(song) ? "Playing " + named + " on Spotify." : "Couldn't find " + named + " to play, so Spotify is open on a search for it.";
             }
-            string where = Searches[0, 1] + Uri.EscapeDataString(song);
+            string where = Searches[0, 1] + Uri.EscapeDataString(look);
             System.Text.RegularExpressions.Match list = Regex.Match(kind == "song" ? "" : Fetch(where + "&sp=EgIQAw%253D%253D") ?? "", @"""watchEndpoint"":\{""videoId"":""([A-Za-z0-9_-]{11})"",""playlistId"":""([A-Za-z0-9_-]+)""");
             string video = list.Success ? null : Find(Fetch(where), "\"videoId\":\"([A-Za-z0-9_-]{11})\"");
             if (!list.Success && video == null) { Run(where); return "Couldn't find " + named + " to play, so YouTube is open on a search for it."; }

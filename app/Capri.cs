@@ -66,6 +66,7 @@ namespace CapriDesktop
         [DataMember] public string Model;
         [DataMember] public bool Welcomed;
         [DataMember] public bool NoSitting;
+        [DataMember] public bool NvidiaGlm;
         [DataMember] public string VoiceKey;
         [DataMember] public string VoiceId;
         [DataMember] public string VoiceModel;
@@ -623,6 +624,12 @@ namespace CapriDesktop
             Hands.Work = RunJob;
             Hands.Resume = ResumeJob;
             string textKey = Voice.Unprotect(preferences.TextKey);
+            if (!preferences.NvidiaGlm)
+            {
+                if (textKey != null && Cloud.KindOf(textKey) == "nvidia") preferences.TextModel = Brain.NvidiaDefault;
+                preferences.NvidiaGlm = true;
+                if (!testing) SavePreferences();
+            }
             if (textKey != null) brain.Remote = new Cloud(textKey, preferences.TextModel);
             mainframe.ShowTextKey(textKey == null ? null : Voice.Tail(textKey));
             voice.VoiceId = string.IsNullOrEmpty(preferences.VoiceId) ? null : preferences.VoiceId;
@@ -1894,7 +1901,7 @@ namespace CapriDesktop
             Hear("(You just woke up on this PC with a brand new brain. Say hi to the user in one short line.)", "brain online", "> sys: ");
         }
 
-        internal void ChooseModel(string name)
+        internal void ChooseModel(string name, bool keep = true)
         {
             if (name == brain.Model) return;
             brain.Cancel();
@@ -1903,7 +1910,9 @@ namespace CapriDesktop
             brain.Model = name;
             brain.Forget();
             Cloud remote = brain.Remote;
-            if (remote != null) { remote.Model = name; preferences.TextModel = name; }
+            if (remote != null) remote.Model = name;
+            if (!keep) return;
+            if (remote != null) preferences.TextModel = name;
             else preferences.Model = name;
             SavePreferences();
         }
@@ -2449,7 +2458,15 @@ namespace CapriDesktop
         private void Connect(string url, string voiceId)
         {
             Agent opened = new Agent();
-            opened.Act = Hands.Do;
+            opened.Act = delegate(string tool, ToolArguments args)
+            {
+                lock (shortcutGate)
+                {
+                    toolAsked = true;
+                    if (tool == shortcutTool && Environment.TickCount - shortcutAt < 10000) return shortcutResult ?? "Already doing that.";
+                }
+                return Hands.Do(tool, args);
+            };
             opened.Opened += delegate(int rate) { Post(delegate { if (agent == opened) ChatOpened(rate); }); };
             opened.Heard += delegate(string text) { Post(delegate { if (agent == opened) ChatHeard(text); }); };
             opened.Replied += delegate(string text) { Post(delegate { if (agent == opened) ChatReplied(text); }); };
@@ -2505,6 +2522,13 @@ namespace CapriDesktop
             Begin(++asking, "Can't open my voice link. Right-click me and open Capri Mainframe. The reason and the fix are under VOICE." + Brain.Stuck, TalkState.Dormant, null);
         }
 
+        private readonly object shortcutGate = new object();
+        private string shortcutTool;
+        private int shortcutAt;
+        private string shortcutResult;
+        private bool toolAsked;
+        private string heardLast;
+
         private void ChatHeard(string text)
         {
             if (!chatting) return;
@@ -2517,6 +2541,21 @@ namespace CapriDesktop
             string blocked = Safety.Screen(text);
             dropping = blocked != null;
             if (dropping) { speaker.Clear(); Begin(ticket, blocked, TalkState.Talking, null); return; }
+            string tool;
+            ToolArguments args;
+            bool shortcut = Hands.Heard(text, out tool, out args);
+            lock (shortcutGate) { toolAsked = shortcut; heardLast = text; }
+            if (shortcut)
+            {
+                Agent told = agent;
+                lock (shortcutGate) { shortcutTool = tool; shortcutAt = Environment.TickCount; shortcutResult = null; }
+                ThreadPool.QueueUserWorkItem(delegate
+                {
+                    string result = Hands.Do(tool, args);
+                    lock (shortcutGate) shortcutResult = result;
+                    if (told != null) told.Tell("Capri's hands already did what they just asked (" + tool + "): " + result + " Don't call a tool for it again. React to it in one short line.");
+                });
+            }
             reply = null;
             replyDone = -1;
             Say(null);
@@ -2533,6 +2572,9 @@ namespace CapriDesktop
             if (dropping) return;
             string said = Safety.Filter(Voice.Spoken(text));
             if (said != Voice.Spoken(text)) { dropping = true; speaker.Clear(); }
+            string promised = null;
+            lock (shortcutGate) if (!toolAsked && heardLast != null && Hands.Promised(said)) { promised = heardLast; heardLast = null; }
+            if (promised != null) { string missed = said; ThreadPool.QueueUserWorkItem(delegate { Thread.Sleep(4000); lock (shortcutGate) if (toolAsked) return; Brain.Log("https://api.elevenlabs.io/v1/convai/conversation", -1, "Voice chat said she'd do it but no tool ran. Heard: " + promised + " | Said: " + missed); }); }
             reply = said;
             replyStart = clock.Elapsed.TotalSeconds;
             replyDone = -1;
@@ -2709,7 +2751,7 @@ namespace CapriDesktop
             stalled.Add(old);
             string next = Brain.Next(old, cloudModels, stalled);
             if (next == null) return false;
-            ChooseModel(next);
+            ChooseModel(next, false);
             mainframe.ShowCloud(brain.Remote, cloudModels);
             mainframe.ShowProblem(old.Substring(old.IndexOf('/') + 1) + " wasn't answering, so she switched to " + next.Substring(next.IndexOf('/') + 1) + ".");
             return true;
@@ -3766,7 +3808,11 @@ namespace CapriDesktop
                                 if (!Hands.Wants("can you see what im doing?") || !Hands.Wants("play me some music") || !Hands.Wants("open notepad") || !Hands.Wants("go to youtube.com") || Hands.Wants("hey") || Hands.Wants("how was your day?") || Hands.Wants("still there?") || Hands.Wants("out of five playtesters, who's the best?")) throw new Exception("Requests and chat were told apart wrong.");
                                 if (!Hands.Wants("click the search bar") || !Hands.Wants("make a song in suno") || Hands.Wants("make a joke") || !Hands.Promised("Opening Comet now, choom!") || !Hands.Promised("Bet, I'll open it for you.") || Hands.Promised("I'll play a game with you anytime.") || Hands.Promised("Sure, I love that song.")) throw new Exception("Computer jobs or false promises were spotted wrong.");
                                 ToolArguments lookedUp = Hands.Lookup("when does the new GTA come out?", "I don't have live info on that, choom.");
-                                if (!Hands.Wants("what's the weather in sydney?") || !Hands.Wants("can you check the weather") || !Hands.Wants("who won the game last night") || Hands.Wants("i love rainy weather") || lookedUp == null || lookedUp.Site != "google" || lookedUp.Search != "when does the new GTA come out" || Hands.Lookup("what's the weather near me?", "I'll look it up for you, choom!") == null || Hands.Lookup("what's my name?", "I don't have a way to know your name.") != null || Hands.Lookup("how are you?", "Can't complain, choom.") != null || Hands.Lookup("what do you see?", "I can't see your screen right now.") != null || Hands.Lookup("what's the capital of france?", "Paris, choom.") != null || !Hands.Wants("is it gonna rain tomorrow?") || Hands.Lookup("when does gta 6 come out?", "I gotta check that for you, choom. You might need to look that up somewhere else.") == null || Hands.Lookup("is it hot in perth?", "Check a proper weather feed, choom; I ain't got crystal ball optics.") == null || Hands.Lookup("when's the next gta out?", "You gotta check a search engine for that, choom.") == null || Hands.Pulled("Searched google.com for weather in sydney.") != "Pulled up \"weather in sydney\" on Google for you, choom." || Hands.Pulled("Searched youtube.com for lofi beats.") != null) throw new Exception("Look-ups that need Google were spotted wrong.");
+                                if (!Hands.Wants("what's the weather in sydney?") || !Hands.Wants("can you check the weather") || !Hands.Wants("who won the game last night") || Hands.Wants("i love rainy weather") || lookedUp == null || lookedUp.Site != "google" || lookedUp.Search != "when does the new GTA come out" || Hands.Lookup("what's the weather near me?", "I'll look it up for you, choom!") == null || Hands.Lookup("what's my name?", "I don't have a way to know your name.") != null || Hands.Lookup("how are you?", "Can't complain, choom.") != null || Hands.Lookup("what do you see?", "I can't see your screen right now.") != null || Hands.Lookup("what's the capital of france?", "Paris, choom.") != null || !Hands.Wants("is it gonna rain tomorrow?") || Hands.Lookup("when does gta 6 come out?", "I gotta check that for you, choom. You might need to look that up somewhere else.") == null || Hands.Lookup("is it hot in perth?", "Check a proper weather feed, choom; I ain't got crystal ball optics.") == null || Hands.Lookup("when's the next gta out?", "You gotta check a search engine for that, choom.") == null || Hands.Pulled("Searched google.com for weather in sydney.") != "Pulled up \"weather in sydney\" on Google for you, choom." || Hands.Pulled("Searched youtube.com for lofi beats.") != null || Hands.Pulled("Opened your own website, " + Hands.Home + ".") != "Here's my site, choom. That's where people download me.") throw new Exception("Look-ups that need Google were spotted wrong.");
+                                string shortTool;
+                                ToolArguments shortArgs;
+                                if (!Hands.Direct("capri, open your website", out shortTool, out shortArgs) || shortTool != "open_website" || shortArgs.Site != Hands.Home || !Hands.Direct("google weather tomorrow", out shortTool, out shortArgs) || shortTool != "open_website" || shortArgs.Site != "google" || shortArgs.Search != "weather tomorrow" || Hands.Direct("look up it", out shortTool, out shortArgs)) throw new Exception("Her website or a quick Google search didn't skip the brain.");
+                                if (!Hands.Heard("This is day 4. Capri, play In Love With Myself.", out shortTool, out shortArgs) || shortTool != "play_music" || shortArgs.Song != "In Love With Myself" || !Hands.Heard("This is day 4, Capri, open your website", out shortTool, out shortArgs) || shortTool != "open_website" || shortArgs.Site != Hands.Home || !Hands.Heard("Capri, what's the weather tomorrow?", out shortTool, out shortArgs) || shortArgs.Site != "google" || shortArgs.Search != "what's the weather tomorrow" || Hands.Heard("how's my score looking?", out shortTool, out shortArgs) || Hands.Heard("I love you Capri", out shortTool, out shortArgs)) throw new Exception("Voice chat shortcuts were heard wrong: " + shortTool + " " + shortArgs.Song + shortArgs.Site + shortArgs.Search);
                                 Func<Sight> oldLook = Computer.Look;
                                 Func<string, ToolArguments, Sight, string> oldAct = Computer.Act;
                                 Func<IntPtr> oldFront = Computer.Front;
@@ -3932,6 +3978,15 @@ namespace CapriDesktop
                                         if (Hands.NowPlaying() != "") throw new Exception("Spotify was reported running before launch.");
                                         if (Hands.Do("play_music", new ToolArguments { Song = "D\u00e9senchant\u00e9e" }) != "Playing D\u00e9senchant\u00e9e on Spotify." || ran.Count != opening + 2 || ran[opening + 1] != "spotify:track:0VjIjW4GlUZAMYd2vXMi3b") throw new Exception("A stopped Spotify install fell back to YouTube.");
                                     }
+                                    spotifyWindows.Clear();
+                                    Hands.Catalog = delegate { return new System.Collections.Generic.List<InstalledApp> { new InstalledApp("Spotify", spotifyId) }; };
+                                    Hands.Exists = delegate { return false; };
+                                    Hands.Forget();
+                                    Func<string, string> fetchWas = Hands.Fetch;
+                                    Hands.Fetch = delegate { throw new Exception("A song she already knows was searched for."); };
+                                    string loved = Hands.Do("play_music", new ToolArguments { Song = "in love with myself" });
+                                    Hands.Fetch = fetchWas;
+                                    if (loved != "Playing In Love With Myself on Spotify." || ran[ran.Count - 1] != "spotify:track:2iyaHQlYrR8Eyr4wOmOT5D") throw new Exception("In Love With Myself didn't play the Edgerunners 2 track: " + loved);
                                     checks.Add("PASS Spotify discovery: Store names and IDs, classic shortcuts, French paths, and an executable without a shortcut all open and play with no running window");
                                     Hands.Run = delegate(string id) { ran.Add(id); };
                                     Hands.Exists = delegate { return false; };
@@ -4080,7 +4135,7 @@ namespace CapriDesktop
                                         { "minimise word", "app_window|word|minimize|", "true" },
                                         { "switch to roblox", "app_window|roblox|switch_to|", "true" },
                                         { "search YouTube for Valorant tips", "", "true" },
-                                        { "google how to fix ping", "", "true" },
+                                        { "google how to fix ping", "open_website|google||", "true" },
                                         { "what's on my screen?", "", "true" },
                                         { "can you see what im doing?", "", "true" },
                                         { "can you see my screen?", "", "true" },
@@ -5856,13 +5911,15 @@ namespace CapriDesktop
                             Think = delegate { throw new WebException("late", WebExceptionStatus.Timeout); };
                             cloudModels = null;
                             stalled.Clear();
+                            preferences.TextModel = Brain.NvidiaDefault;
                             Hear("hey again");
                         }
                         else if (step == 19)
                         {
                             if (brain.Model != "nvidia/nemotron-3.5-super-vl-120b-a12b" || brain.Remote.Model != brain.Model || !stalled.Contains("google/gemma-4-31b-it") || !stalled.Contains("z-ai/glm-5.3-flash") || heard != "hey again") throw new Exception("A stuck NVIDIA model did not switch to the next one: " + brain.Model);
+                            if (preferences.TextModel != "z-ai/glm-5.3-flash" || Brain.NvidiaDefault != "z-ai/glm-5.3-flash" || !Brain.Stalled(new BrainException(Brain.Busy, true))) throw new Exception("A stuck NVIDIA model's stand-in was saved over GLM 5.3 Flash: " + preferences.TextModel);
                             if (Brain.Next("z-ai/glm-5.3-flash", new System.Collections.Generic.List<string> { "z-ai/glm-5.3-flash", "openai/gpt-oss-20b", "moonshotai/kimi-k2.6" }, new System.Collections.Generic.HashSet<string>()) != "openai/gpt-oss-20b" || !Brain.Stalled(new BrainException(Brain.Gone)) || !Brain.Stalled(new BrainException(Brain.Down)) || Brain.Stalled(new BrainException("Key rejected. Press Forget, then paste it again."))) throw new Exception("NVIDIA fallbacks were picked wrong.");
-                            checks.Add("PASS stuck NVIDIA model: a timeout, a gone model or a server failure switches to the next working NVIDIA model and asks again, at most twice per message");
+                            checks.Add("PASS stuck NVIDIA model: a timeout, a rate limit, a gone model or a server failure switches to the next working NVIDIA model and asks again, at most twice per message");
                             if (talkState != TalkState.Dormant || reply != "NVIDIA didn't answer in time. Try again or pick another model under BRAIN in Capri Mainframe." || errorVoice != 0) throw new Exception("A cloud timeout did not reach the bubble without voice.");
                             Think = delegate { throw new WebException("cancelled", WebExceptionStatus.RequestCanceled); };
                             Hear("still there");
