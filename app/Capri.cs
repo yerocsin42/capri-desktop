@@ -3546,7 +3546,7 @@ namespace CapriDesktop
                             foreach (int size in new[] { 170, 240, 320, 440 })
                             {
                                 preferences.Size = size;
-                                int high = top.Top + (int)(top.Height * 0.3);
+                                int high = top.Top + Math.Max((int)(top.Height * 0.3), Headroom() + 8);
                                 Ledge[] shelves = { new Ledge { Left = top.Left + 200, Right = top.Left + 640, Y = high }, new Ledge { Left = top.Left + 700, Right = top.Left + 1140, Y = top.Top + top.Height - 120 } };
                                 if (Perch(shelves, new Point(top.Left + 420, high - 12)) != shelves[0]) throw new Exception("At size " + size + " she would not sit on a window a third of the way down the screen.");
                                 if (Perch(shelves, new Point(top.Left + 420, high + size / 3)) != shelves[0]) throw new Exception("At size " + size + " dropping her over a window's top edge did not perch her on it.");
