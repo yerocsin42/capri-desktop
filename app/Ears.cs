@@ -430,6 +430,247 @@ namespace CapriDesktop
         }
     }
 
+    // Windows 10's tar has no bzip2 ("Can't initialize filter"), so her ears unpack that layer here. Each block's CRC is checked.
+    internal static class Bunzip
+    {
+        private static readonly uint[] Crcs = MakeCrcs();
+
+        private static uint[] MakeCrcs()
+        {
+            uint[] table = new uint[256];
+            for (uint i = 0; i < 256; i++)
+            {
+                uint c = i << 24;
+                for (int k = 0; k < 8; k++) c = (c & 0x80000000u) != 0 ? (c << 1) ^ 0x04c11db7u : c << 1;
+                table[i] = c;
+            }
+            return table;
+        }
+
+        private static IOException Damaged() { return new IOException("The ears download is damaged."); }
+
+        private sealed class Bits
+        {
+            private readonly Stream from;
+            private readonly byte[] buffer = new byte[1 << 16];
+            private int at, end;
+            private ulong held;
+            private int count;
+
+            internal Bits(Stream from) { this.from = from; }
+
+            private int Next()
+            {
+                if (at == end)
+                {
+                    at = 0;
+                    end = from.Read(buffer, 0, buffer.Length);
+                    if (end <= 0) { end = 0; return -1; }
+                }
+                return buffer[at++];
+            }
+
+            internal uint Read(int n)
+            {
+                while (count < n)
+                {
+                    int b = Next();
+                    if (b < 0) throw new IOException("The ears download ended early.");
+                    held = (held << 8) | (uint)b;
+                    count += 8;
+                }
+                count -= n;
+                return (uint)(held >> count) & ((1u << n) - 1);
+            }
+
+            internal uint Bit() { return Read(1); }
+
+            // A stream ends padded to a whole byte; this is the byte after it, or -1 at the end.
+            internal int NextByte() { count = 0; return Next(); }
+        }
+
+        internal static void Copy(Stream from, Stream to)
+        {
+            Bits bits = new Bits(from);
+            byte[] output = new byte[1 << 16];
+            for (int streams = 0; ; streams++)
+            {
+                int b = bits.NextByte();
+                if (b != 'B') { if (streams > 0) return; throw Damaged(); }
+                if (bits.Read(8) != 'Z' || bits.Read(8) != 'h') throw Damaged();
+                int level = (int)bits.Read(8) - '0';
+                if (level < 1 || level > 9) throw Damaged();
+                Unpack(bits, level * 100000, output, to);
+            }
+        }
+
+        private static void Unpack(Bits bits, int most, byte[] output, Stream to)
+        {
+            int[] tt = new int[most];
+            uint combined = 0;
+            while (true)
+            {
+                uint high = bits.Read(24), low = bits.Read(24);
+                if (high == 0x177245 && low == 0x385090)
+                {
+                    if (((bits.Read(16) << 16) | bits.Read(16)) != combined) throw Damaged();
+                    return;
+                }
+                if (high != 0x314159 || low != 0x265359) throw Damaged();
+                uint blockCrc = (bits.Read(16) << 16) | bits.Read(16);
+                if (bits.Bit() != 0) throw new IOException("The ears download uses old bzip2 randomizing.");
+                int origin = (int)bits.Read(24);
+
+                byte[] used = new byte[256];
+                int inUse = 0;
+                uint rows = bits.Read(16);
+                for (int i = 0; i < 16; i++)
+                {
+                    if ((rows & (0x8000u >> i)) == 0) continue;
+                    uint row = bits.Read(16);
+                    for (int j = 0; j < 16; j++) if ((row & (0x8000u >> j)) != 0) used[inUse++] = (byte)(i * 16 + j);
+                }
+                if (inUse == 0) throw Damaged();
+                int alphabet = inUse + 2;
+                int tables = (int)bits.Read(3);
+                if (tables < 2 || tables > 6) throw Damaged();
+                int selectorCount = (int)bits.Read(15);
+                if (selectorCount < 1) throw Damaged();
+                byte[] order = { 0, 1, 2, 3, 4, 5 };
+                byte[] selectors = new byte[selectorCount];
+                for (int i = 0; i < selectorCount; i++)
+                {
+                    int j = 0;
+                    while (bits.Bit() != 0) if (++j >= tables) throw Damaged();
+                    byte picked = order[j];
+                    for (; j > 0; j--) order[j] = order[j - 1];
+                    order[0] = picked;
+                    selectors[i] = picked;
+                }
+
+                // Canonical Huffman tables, the way bzip2 builds them.
+                int[][] limits = new int[tables][], bases = new int[tables][], perms = new int[tables][];
+                int[] shortest = new int[tables];
+                for (int t = 0; t < tables; t++)
+                {
+                    int[] lengths = new int[alphabet];
+                    int length = (int)bits.Read(5);
+                    for (int s = 0; s < alphabet; s++)
+                    {
+                        while (true)
+                        {
+                            if (length < 1 || length > 20) throw Damaged();
+                            if (bits.Bit() == 0) break;
+                            length += bits.Bit() == 0 ? 1 : -1;
+                        }
+                        lengths[s] = length;
+                    }
+                    int min = 32, max = 0;
+                    foreach (int l in lengths) { if (l < min) min = l; if (l > max) max = l; }
+                    int[] perm = new int[alphabet], start = new int[23], limit = new int[23];
+                    int p = 0;
+                    for (int l = min; l <= max; l++) for (int s = 0; s < alphabet; s++) if (lengths[s] == l) perm[p++] = s;
+                    foreach (int l in lengths) start[l + 1]++;
+                    for (int i = 1; i < 23; i++) start[i] += start[i - 1];
+                    int vec = 0;
+                    for (int l = min; l <= max; l++)
+                    {
+                        vec += start[l + 1] - start[l];
+                        limit[l] = vec - 1;
+                        vec <<= 1;
+                    }
+                    for (int l = min + 1; l <= max; l++) start[l] = ((limit[l - 1] + 1) << 1) - start[l];
+                    limits[t] = limit;
+                    bases[t] = start;
+                    perms[t] = perm;
+                    shortest[t] = min;
+                }
+
+                // Huffman, then runs of the front symbol (RUNA/RUNB) and move-to-front, into tt.
+                byte[] front = new byte[256];
+                for (int i = 0; i < 256; i++) front[i] = (byte)i;
+                int[] counts = new int[256];
+                int end = inUse + 1, n = 0, group = -1, left = 0, run = 0, weight = 1, gMin = 0;
+                int[] gLimit = null, gBase = null, gPerm = null;
+                while (true)
+                {
+                    if (left == 0)
+                    {
+                        if (++group >= selectorCount) throw Damaged();
+                        left = 50;
+                        int pick = selectors[group];
+                        gLimit = limits[pick];
+                        gBase = bases[pick];
+                        gPerm = perms[pick];
+                        gMin = shortest[pick];
+                    }
+                    left--;
+                    int zn = gMin;
+                    int zvec = (int)bits.Read(zn);
+                    while (zvec > gLimit[zn])
+                    {
+                        if (++zn > 20) throw Damaged();
+                        zvec = (zvec << 1) | (int)bits.Bit();
+                    }
+                    int at = zvec - gBase[zn];
+                    if (at < 0 || at >= alphabet) throw Damaged();
+                    int symbol = gPerm[at];
+                    if (symbol <= 1)
+                    {
+                        if (weight >= 1 << 21) throw Damaged();
+                        run += (symbol + 1) * weight;
+                        weight <<= 1;
+                        continue;
+                    }
+                    if (run > 0)
+                    {
+                        if (run > most - n) throw Damaged();
+                        byte value = used[front[0]];
+                        counts[value] += run;
+                        for (; run > 0; run--) tt[n++] = value;
+                    }
+                    weight = 1;
+                    if (symbol == end) break;
+                    if (n >= most) throw Damaged();
+                    int index = symbol - 1;
+                    byte moved = front[index];
+                    Array.Copy(front, 0, front, 1, index);
+                    front[0] = moved;
+                    counts[used[moved]]++;
+                    tt[n++] = used[moved];
+                }
+                if (origin >= n) throw Damaged();
+
+                // Undo the Burrows-Wheeler sort, then bzip2's first run-length step (4 equal bytes, then a count).
+                int[] next = new int[257];
+                for (int i = 0; i < 256; i++) next[i + 1] = next[i] + counts[i];
+                for (int i = 0; i < n; i++) tt[next[tt[i] & 0xff]++] |= i << 8;
+                int pos = tt[origin] >> 8, last = -1, same = 0, filled = 0;
+                uint crc = 0xffffffffu;
+                for (int i = 0; i < n; i++)
+                {
+                    if ((uint)pos >= (uint)n) throw Damaged();
+                    int entry = tt[pos];
+                    int value = entry & 0xff;
+                    pos = entry >> 8;
+                    int repeat = 1;
+                    if (same == 4) { repeat = value; value = last; same = 0; }
+                    else if (value == last) same++;
+                    else { last = value; same = 1; }
+                    for (; repeat > 0; repeat--)
+                    {
+                        crc = (crc << 8) ^ Crcs[(crc >> 24) ^ (uint)value];
+                        output[filled++] = (byte)value;
+                        if (filled == output.Length) { to.Write(output, 0, filled); filled = 0; }
+                    }
+                }
+                if (filled > 0) to.Write(output, 0, filled);
+                if (~crc != blockCrc) throw Damaged();
+                combined = ((combined << 1) | (combined >> 31)) ^ blockCrc;
+            }
+        }
+    }
+
     // Her own ears: NVIDIA's Parakeet TDT 0.6B v2 (CC-BY-4.0, English), run by the sherpa-onnx her free voice ships.
     // They hear whichever mic is picked, offline, without Windows' online speech setting.
     internal sealed class LocalEars : IDisposable
@@ -490,17 +731,42 @@ namespace CapriDesktop
             File.Delete(tarball);
         }
 
-        // Windows 10 and 11 ship bsdtar, which unpacks .tar.bz2. The checksum was already matched, so this is the known archive.
-        private static void Untar(string tarball, string into)
+        internal static bool SystemBzip = true;
+
+        // Windows 10 and 11 ship bsdtar, but only Windows 11's reads bzip2. When tar can't, she unpacks the bzip2 layer herself and tar gets the plain archive.
+        // The checksum was already matched, so this is the known archive.
+        internal static void Untar(string tarball, string into)
         {
             string tar = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "tar.exe");
             if (!File.Exists(tar)) throw new IOException("Windows is missing tar.exe, which unpacks her ears.");
-            ProcessStartInfo start = new ProcessStartInfo(tar, "-xjf \"" + tarball + "\" -C \"" + into + "\"") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true };
+            if (SystemBzip && Tar(tar, "-xjf \"" + tarball + "\" -C \"" + into + "\"") == null) return;
+            string plain = Path.ChangeExtension(tarball, null);
+            try
+            {
+                using (FileStream packed = new FileStream(tarball, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20))
+                using (FileStream opened = new FileStream(plain, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
+                {
+                    try { Bunzip.Copy(packed, opened); }
+                    catch (IOException) { throw; }
+                    catch (Exception) { throw new IOException("The ears download is damaged."); }
+                }
+                File.Delete(tarball);
+                Directory.Delete(into, true);
+                Directory.CreateDirectory(into);
+                string problem = Tar(tar, "-xf \"" + plain + "\" -C \"" + into + "\"");
+                if (problem != null) throw new IOException("Couldn't unpack her ears: " + Voice.Short(problem));
+            }
+            finally { if (File.Exists(plain)) File.Delete(plain); }
+        }
+
+        private static string Tar(string tar, string arguments)
+        {
+            ProcessStartInfo start = new ProcessStartInfo(tar, arguments) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true };
             using (Process unpacking = Process.Start(start))
             {
                 string problem = unpacking.StandardError.ReadToEnd();
                 unpacking.WaitForExit();
-                if (unpacking.ExitCode != 0) throw new IOException("Couldn't unpack her ears: " + Voice.Short(problem.Trim()));
+                return unpacking.ExitCode == 0 ? null : problem.Trim();
             }
         }
 

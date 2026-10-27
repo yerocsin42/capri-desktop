@@ -8430,6 +8430,50 @@ namespace CapriDesktop
                             Directory.Delete(earsRoot, true);
                             if (LocalEars.PackSize != 482468385 || LocalEars.PackSha.Length != 64 || !LocalEars.PackUrl.StartsWith("https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/", StringComparison.Ordinal)) throw new Exception("Her ears point at the wrong download.");
                             checks.Add("PASS her own ears pack: Parakeet's .tar.bz2 downloads with its checksum, unpacks with Windows tar into ears, and only counts as ready once her free voice brings sherpa-onnx");
+                            string bunzipRoot = Path.Combine(Path.GetDirectoryName(settingsPath), "bunzip-test");
+                            string bunzipSource = Path.Combine(bunzipRoot, "source");
+                            Directory.CreateDirectory(Path.Combine(bunzipSource, "pack"));
+                            System.Collections.Generic.List<byte> tricky = new System.Collections.Generic.List<byte>();
+                            byte[] noise = new byte[1200000];
+                            new Random(28).NextBytes(noise);
+                            tricky.AddRange(noise);
+                            foreach (int runLength in new[] { 1, 3, 4, 5, 255, 258, 259, 260, 263, 1000, 70000 }) for (int i = 0; i < runLength; i++) tricky.Add((byte)(runLength % 251));
+                            for (int i = 0; i < 256; i++) tricky.Add((byte)i);
+                            byte[] fox = System.Text.Encoding.ASCII.GetBytes("the quick brown fox jumps over the lazy dog ");
+                            for (int i = 0; i < 40000; i++) tricky.AddRange(fox);
+                            byte[] trickyBytes = tricky.ToArray();
+                            File.WriteAllBytes(Path.Combine(Path.Combine(bunzipSource, "pack"), "tricky.bin"), trickyBytes);
+                            File.WriteAllBytes(Path.Combine(Path.Combine(bunzipSource, "pack"), "empty.bin"), new byte[0]);
+                            string bunzipTar = Path.Combine(bunzipRoot, "pack.tar.bz2");
+                            using (Process packing = Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "tar.exe"), "-cjf \"" + bunzipTar + "\" -C \"" + bunzipSource + "\" pack") { UseShellExecute = false, CreateNoWindow = true }))
+                                if (!packing.WaitForExit(60000) || packing.ExitCode != 0) throw new Exception("Couldn't make the test bzip2 pack with tar.");
+                            byte[] bunzipPack = File.ReadAllBytes(bunzipTar);
+                            string bunzipInto = Path.Combine(bunzipRoot, "into");
+                            Directory.CreateDirectory(bunzipInto);
+                            bool systemBzip = LocalEars.SystemBzip;
+                            string unpackedSha = "", trickySha = "", damagedProblem = null;
+                            bool cleaned = false, emptyKept = false;
+                            try
+                            {
+                                LocalEars.SystemBzip = false;
+                                LocalEars.Untar(bunzipTar, bunzipInto);
+                                using (System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create())
+                                {
+                                    trickySha = BitConverter.ToString(sha.ComputeHash(trickyBytes));
+                                    unpackedSha = BitConverter.ToString(sha.ComputeHash(File.ReadAllBytes(Path.Combine(Path.Combine(bunzipInto, "pack"), "tricky.bin"))));
+                                }
+                                emptyKept = File.Exists(Path.Combine(Path.Combine(bunzipInto, "pack"), "empty.bin"));
+                                cleaned = !File.Exists(bunzipTar) && !File.Exists(Path.Combine(bunzipRoot, "pack.tar"));
+                                bunzipPack[bunzipPack.Length / 2] ^= 0x10;
+                                File.WriteAllBytes(bunzipTar, bunzipPack);
+                                try { LocalEars.Untar(bunzipTar, bunzipInto); }
+                                catch (IOException problem) { damagedProblem = problem.Message; }
+                            }
+                            finally { LocalEars.SystemBzip = systemBzip; }
+                            if (unpackedSha != trickySha || !emptyKept || !cleaned || damagedProblem == null || File.Exists(Path.Combine(bunzipRoot, "pack.tar")))
+                                throw new Exception("Unpacking bzip2 without Windows' tar went wrong: " + (unpackedSha == trickySha) + " / " + emptyKept + " / " + cleaned + " / " + damagedProblem);
+                            Directory.Delete(bunzipRoot, true);
+                            checks.Add("PASS ears on Windows 10: when Windows' tar can't read bzip2, she unpacks that layer herself (block CRCs checked) and tar unpacks the rest; a damaged pack stops with an error");
                             if (kokoro.Installed)
                             {
                                 byte[] freeLine = kokoro.Speak("Hey choom, this is my free voice.");

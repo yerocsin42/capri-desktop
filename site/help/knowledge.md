@@ -530,6 +530,9 @@ Voice chat follows your pick under VOICE. With FREE VOICE picked, or no ElevenLa
 - She listens with her own offline ears for English (a download the first time: "My ears are still downloading, so type to me for now. I'll say when I can hear you."). Other languages use Windows speech.
 - "One sec, opening my ears." then "Free voice chat is on; talk and I'll type back." or similar.
 
+### "Couldn't unpack her ears: tar.exe: Error opening archive: Can't initialize filter"
+This happened on Windows 10 with 0.7.0 and 0.7.1: Windows 10's built-in tar can't unpack the ears download. 0.7.2 fixes it. Update (right-click her > Check for updates), then start free voice chat again. Typing to her works meanwhile.
+
 ### ElevenLabs voice chat
 She says "Opening voice chat...", then "Voice chat on. <mute key> mutes your mic." It needs:
 - ELEVENLABS picked under VOICE, with a key (made with Restrict key off)
