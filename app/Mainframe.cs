@@ -14,7 +14,7 @@ namespace CapriDesktop
         private static readonly Color Edge = Color.FromArgb(52, 60, 74);
         private static readonly Color Track = Color.FromArgb(30, 36, 46);
         private const int Wide = 380;
-        private const int Tall = 594;
+        private const int Tall = 618;
         private static readonly int[] Gaps = { 10, 15, 30, 60, 90, 120, 180, 300, 600 };
         private static readonly string[] GapNames = { "10 s", "15 s", "30 s", "1 min", "1.5 min", "2 min", "3 min", "5 min", "10 min" };
         private const int SetupHeight = 118;
@@ -34,12 +34,12 @@ namespace CapriDesktop
         private static readonly string[] WanderNames = { "Off", "Rarely", "Sometimes", "Often", "Restless" };
         private static readonly string[] Lengths = { "Short", "Medium", "Long" };
         private static readonly int[] Recalls = { 8, 16, 32 };
-        private const int VoiceHeight = 252;
+        private const int VoiceHeight = 276;
         // While her free voice or ears download, a row with the brain setup's dotted bar opens here and pushes the rest down.
-        private const int InstallAt = 395;
+        private const int InstallAt = 419;
         private const int InstallRow = 40;
         // The ElevenLabs key row. Unless ELEVENLABS is picked with a key saved, one row under it folds away and the rest moves up.
-        private const int KeyAt = 262;
+        private const int KeyAt = 286;
         private const int KeyFold = 36;
         private float voiceFilled = -1;
         private readonly Label installNote;
@@ -65,7 +65,8 @@ namespace CapriDesktop
         private readonly Toggle onTop;
         private readonly Toggle watch;
         private readonly Label voiceHead;
-        private readonly Rung[] voiceRungs = new Rung[2];
+        private readonly Rung[] voiceRungs = new Rung[3];
+        private bool off;
         private bool eleven;
         private bool wantEleven;
         private int arrangedFold = -1;
@@ -211,10 +212,11 @@ namespace CapriDesktop
             shortcut.Cursor = Cursors.Hand;
             shortcut.Click += delegate { PickKeys(false); };
             Lower(shortcut);
-            string[,] voiceTiers = { { "FREE VOICE", "Free · runs on your PC" }, { "ELEVENLABS", "Sounds amazing · paid" } };
+            string[,] voiceTiers = { { "OFF", "Silent · text only" }, { "FREE VOICE", "Free · runs on your PC" }, { "ELEVENLABS", "Sounds amazing · paid" } };
             for (int i = 0; i < voiceRungs.Length; i++)
             {
-                bool paid = i == 1;
+                bool silent = i == 0;
+                bool paid = i == 2;
                 Rung rung = new Rung();
                 // A pair of its own: a self-checking radio button would untick the BRAIN tiers too.
                 rung.AutoCheck = false;
@@ -225,11 +227,11 @@ namespace CapriDesktop
                 rung.HintFont = Font;
                 rung.AccessibleName = voiceTiers[i, 0] + ", " + voiceTiers[i, 1];
                 rung.Bounds = new Rectangle(28, 208 + 24 * i, paid ? 246 : 328, 24);
-                rung.Click += delegate { if (!syncing) PickVoice(paid); };
+                rung.Click += delegate { if (syncing) return; if (silent) PickSilent(); else PickVoice(paid); };
                 Controls.Add(rung);
                 voiceRungs[i] = Lower(rung);
             }
-            keyHelp = Lower(Make("Setup guide", 276, 233, 80, 22, delegate { capri.OpenKeyPage(); }));
+            keyHelp = Lower(Make("Setup guide", 276, 257, 80, 22, delegate { capri.OpenKeyPage(); }));
             keyEntry = Lower(Input(28, KeyAt, 244));
             keyEntry.Box.UseSystemPasswordChar = true;
             keyEntry.Box.AccessibleName = "ElevenLabs API key";
@@ -237,7 +239,7 @@ namespace CapriDesktop
             keyEntry.Box.TextChanged += delegate { Relabel(); };
             keyEntry.Box.KeyDown += delegate(object sender, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; Connect(); } };
             voiceMenu = Dropdown();
-            voiceEntry = Lower(Input(28, 298, 196));
+            voiceEntry = Lower(Input(28, 322, 196));
             voiceEntry.Chevron = true;
             voiceEntry.Cue = "Voice ID";
             voiceEntry.Box.AccessibleName = "ElevenLabs voice ID";
@@ -245,22 +247,22 @@ namespace CapriDesktop
             voiceEntry.Box.KeyDown += delegate(object sender, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; capri.ChooseVoice(voiceEntry.Box.Text); } };
             voiceEntry.Box.Leave += delegate { capri.ChooseVoice(voiceEntry.Box.Text); };
             speechModelMenu = Dropdown();
-            speechModels = Lower(Make("Default model", 232, 298, 124, 28, delegate { speechModelMenu.Show(speechModels, new Point(0, speechModels.Height)); }));
+            speechModels = Lower(Make("Default model", 232, 322, 124, 28, delegate { speechModelMenu.Show(speechModels, new Point(0, speechModels.Height)); }));
             speechModels.Chevron = true;
             freeMenu = Dropdown();
-            freeVoices = Lower(Make("Free voice: Her own", 28, 298, 196, 28, delegate { freeMenu.Show(freeVoices, new Point(0, freeVoices.Height)); }));
+            freeVoices = Lower(Make("Free voice: Her own", 28, 322, 196, 28, delegate { freeMenu.Show(freeVoices, new Point(0, freeVoices.Height)); }));
             freeVoices.Chevron = true;
             freeVoices.Visible = false;
-            freeSetup = Lower(Make("Get free voice", 232, 298, 124, 28, delegate { if (capri.SettingUpVoice) capri.CancelFreeVoice(); else capri.SetUpFreeVoice(); }));
+            freeSetup = Lower(Make("Get free voice", 232, 322, 124, 28, delegate { if (capri.SettingUpVoice) capri.CancelFreeVoice(); else capri.SetUpFreeVoice(); }));
             freeSetup.Accent = Look.Cyan;
             freeSetup.Loud = true;
             freeSetup.Visible = false;
             micMenu = Dropdown();
-            mics = Lower(Make("Mic: default", 28, 334, 244, 28, delegate { ShowMics(); }));
+            mics = Lower(Make("Mic: default", 28, 358, 244, 28, delegate { ShowMics(); }));
             mics.Chevron = true;
             mics.AccessibleName = "Microphone";
-            Lower(Make("Test", 280, 334, 76, 28, delegate { capri.TestVoice(); }));
-            muteShortcut = Lower(Caption("Ctrl + Alt + N mutes mic", 28, 369, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim));
+            Lower(Make("Test", 280, 358, 76, 28, delegate { capri.TestVoice(); }));
+            muteShortcut = Lower(Caption("Ctrl + Alt + N mutes mic", 28, 393, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim));
             muteShortcut.Cursor = Cursors.Hand;
             muteShortcut.Click += delegate { PickKeys(true); };
             Deactivate += delegate { if (capturing == 0) return; capturing = 0; KeyLabels(); };
@@ -649,9 +651,9 @@ namespace CapriDesktop
 
         internal bool WatchShown { get { return watch.Checked; } }
 
-        internal bool ElevenShown { get { return voiceRungs[1].Checked && !voiceRungs[0].Checked; } }
+        internal bool ElevenShown { get { return voiceRungs[2].Checked && !voiceRungs[1].Checked && !voiceRungs[0].Checked; } }
 
-        internal string VoiceTierStatus { get { return (ElevenShown ? "ELEVENLABS" : "FREE VOICE") + " | " + (eleven ? "key" : "-") + " | " + (!eleven ? "free voice" : keySaved ? "voice id" : "-") + " | fold " + arrangedFold; } }
+        internal string VoiceTierStatus { get { return (off ? "OFF" : ElevenShown ? "ELEVENLABS" : "FREE VOICE") + " | " + (eleven && !off ? "key" : "-") + " | " + (off ? "-" : !eleven ? "free voice" : keySaved ? "voice id" : "-") + " | fold " + arrangedFold; } }
 
         internal string Overlap()
         {
@@ -724,6 +726,7 @@ namespace CapriDesktop
             string tail = tier == 1 ? nvidiaTail : tier == 2 ? paidTail : null;
             textSaved = tail != null;
             textEntry.Box.AccessibleName = tier == 1 ? "NVIDIA API key" : "OpenAI, Anthropic or DeepSeek API key";
+            tierNote.Text = tier == 1 ? "Most NVIDIA models can't see your screen." : "Pick one. Only one brain runs at a time.";
             textEntry.Cue = textSaved ? (tier == 1 ? "NVIDIA key saved, ends " : "Key saved, ends ") + tail : tier == 1 ? "Paste your free NVIDIA key" : "Paste a ChatGPT or Claude key";
             RelabelText();
             Arrange(expanded);
@@ -819,20 +822,22 @@ namespace CapriDesktop
 
         internal int CapriRowTop { get { return showHide.Top; } }
 
-        // FREE VOICE shows her free voice picker. ELEVENLABS shows the key box, then the Voice ID and model once a key is saved.
-        private int Fold { get { return eleven && keySaved ? 0 : KeyFold; } }
+        // OFF folds both rows under the VOICE rows away. FREE VOICE shows her free voice picker. ELEVENLABS shows the key box, then the Voice ID and model once a key is saved.
+        private int Fold { get { return off ? 2 * KeyFold : eleven && keySaved ? 0 : KeyFold; } }
 
         private void VoiceTier()
         {
+            off = capri.Silent;
             eleven = keySaved ? capri.Speaking : wantEleven;
-            voiceRungs[0].Checked = !eleven;
-            voiceRungs[1].Checked = eleven;
-            keyEntry.Visible = eleven;
-            connect.Visible = eleven;
-            voiceEntry.Visible = eleven && keySaved;
-            speechModels.Visible = eleven && keySaved;
-            freeVoices.Visible = !eleven;
-            freeSetup.Visible = !eleven && !freeReady;
+            voiceRungs[0].Checked = off;
+            voiceRungs[1].Checked = !off && !eleven;
+            voiceRungs[2].Checked = !off && eleven;
+            keyEntry.Visible = eleven && !off;
+            connect.Visible = eleven && !off;
+            voiceEntry.Visible = eleven && keySaved && !off;
+            speechModels.Visible = eleven && keySaved && !off;
+            freeVoices.Visible = !eleven && !off;
+            freeSetup.Visible = !eleven && !off && !freeReady;
             if (Fold != arrangedFold) Arrange(expanded);
         }
 
@@ -843,12 +848,16 @@ namespace CapriDesktop
             if (paid && !keySaved) keyEntry.Box.Focus();
         }
 
+        internal void PickSilent()
+        {
+            capri.Silence();
+        }
+
         internal void ShowVoice(string tail, string voiceId, string model, VoiceListing listing)
         {
             keySaved = tail != null;
             keyEntry.Cue = keySaved ? "Key saved, ends " + tail : "Paste ElevenLabs API key";
             Relabel();
-            shortcut.Visible = keySaved;
             VoiceTier();
             if (!voiceEntry.Box.Focused || voiceEntry.Box.Text.Trim().Length == 0) voiceEntry.Box.Text = voiceId;
             voiceMenu.Items.Clear();
@@ -880,7 +889,7 @@ namespace CapriDesktop
             freeVoices.Text = "Free voice: " + chosen;
             freeVoices.Width = Scaled(ready ? 328 : 196);
             freeSetup.Text = busy ? "Cancel" : "Get free voice";
-            freeSetup.Visible = !eleven && !ready;
+            freeSetup.Visible = !eleven && !off && !ready;
             freeMenu.Items.Clear();
             foreach (FreeStyle style in LocalVoice.Styles)
             {
@@ -897,7 +906,6 @@ namespace CapriDesktop
         {
             shortcutReady = talk;
             muteReady = mute;
-            shortcut.Visible = keySaved;
             KeyLabels();
         }
 
@@ -940,6 +948,7 @@ namespace CapriDesktop
             muteShortcut.Text = capturing == 2 ? waiting : muteName + (muteReady ? " mutes mic" : " is taken");
         }
 
+        internal string TierNote { get { return tierNote.Text; } }
         internal string KeyStatus { get { return shortcut.Text + " | " + muteShortcut.Text; } }
 
         internal void ShowMic(string name)

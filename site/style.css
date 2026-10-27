@@ -175,9 +175,8 @@ h1 em { font-weight: 600; }
 .helper-capri { position: absolute; z-index: 3; bottom: calc(100% + 1px - var(--s) * .21); width: var(--s); height: var(--s); pointer-events: none; }
 .helper-sprite { position: absolute; inset: 0; background-repeat: no-repeat; transform: scaleX(-1); }
 .helper-hit { position: absolute; left: 32%; top: 4%; width: 47%; height: 75%; pointer-events: auto; cursor: pointer; }
-.helper-tendrils { position: absolute; left: calc(var(--s) * -.7); top: calc(var(--s) * -.68); width: calc(var(--s) * 2.5); height: calc(var(--s) * 2.1); }
 .helper-tab { display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 32px); margin-left: auto; padding: 13px calc(var(--s) * .56) 13px 16px; background: #fff; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.helper-tab:hover { background: #f6f7f5; }
+.helper-tab:hover { background: #fff; box-shadow: 0 14px 40px #00000040; }
 .helper-tab > svg { flex: none; width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .helper-tab-words { display: grid; }
 .helper-tab-words strong { font-size: 18px; line-height: 1.25; }

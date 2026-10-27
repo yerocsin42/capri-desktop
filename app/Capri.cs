@@ -89,6 +89,7 @@ namespace CapriDesktop
         [DataMember] public bool Watch;
         [DataMember] public int GlanceGap;
         [DataMember] public bool Quiet;
+        [DataMember] public bool Silent;
         [DataMember] public bool Wander;
         [DataMember] public bool FreeVoice;
         [DataMember] public bool NoDance;
@@ -539,6 +540,8 @@ namespace CapriDesktop
         private const string ElevenOffLine = "ElevenLabs off. I'll type, no credits used.";
         private const string ElevenOnLine = "ElevenLabs back on.";
         private const string FreeOnLine = "ElevenLabs off. Free voice it is.";
+        private const string VoiceOffLine = "Voice off. I'll type instead.";
+        private const string VoiceOnLine = "Voice back on.";
         private const string ElevenOffChat = "FREE VOICE is picked, so voice chat is off. Pick ELEVENLABS in the Mainframe to talk to me.";
         private static readonly RectangleF BodyRight = RectangleF.FromLTRB(0.25f, 0f, 0.76f, 1f);
         private static readonly RectangleF PerchedRight = RectangleF.FromLTRB(0.21f, 0.17f, 0.69f, 0.98f);
@@ -2297,6 +2300,7 @@ namespace CapriDesktop
         internal bool PopIns { get { return preferences.PopIns; } }
         internal bool Watching { get { return preferences.Watch; } }
         internal bool Speaking { get { return !preferences.Quiet; } }
+        internal bool Silent { get { return preferences.Silent; } }
 
         internal void ToggleSpeaking()
         {
@@ -2310,10 +2314,40 @@ namespace CapriDesktop
             Answer(++asking, preferences.Quiet ? (FreeChatOn && !testing && kokoro.Installed ? FreeOnLine : ElevenOffLine) : ElevenOnLine, TalkState.Talking, true);
         }
 
+        // OFF under VOICE: she never talks out loud, so no voice downloads and no ElevenLabs credits. Voice chat stays free voice chat and she types back.
+        internal void Silence()
+        {
+            if (preferences.Silent) return;
+            preferences.Silent = true;
+            voice.Stop();
+            if (chatting && !local) StopChat();
+            SavePreferences();
+            mainframe.Sync();
+            ShowVoice();
+            if (hidden || IsDisposed) return;
+            heard = "settings";
+            box.Prompt = "> sys: ";
+            Answer(++asking, VoiceOffLine, TalkState.Talking, true);
+        }
+
         // The VOICE rows. Without a key she uses her free voice either way, so ELEVENLABS only clears Quiet for the key that comes next.
         internal void ChooseVoiceTier(bool paid)
         {
-            if (voice.Key != null && paid == preferences.Quiet) ToggleSpeaking();
+            bool wasSilent = preferences.Silent;
+            preferences.Silent = false;
+            if (wasSilent)
+            {
+                preferences.Quiet = !paid;
+                SavePreferences();
+                if (!paid) GetFreeVoice();
+                if (!hidden && !IsDisposed && (!paid || voice.Key != null))
+                {
+                    heard = "settings";
+                    box.Prompt = "> sys: ";
+                    Answer(++asking, VoiceOnLine, TalkState.Talking);
+                }
+            }
+            else if (voice.Key != null && paid == preferences.Quiet) ToggleSpeaking();
             else if (paid && preferences.Quiet) { preferences.Quiet = false; SavePreferences(); }
             mainframe.Sync();
             ShowVoice();
@@ -3355,7 +3389,7 @@ namespace CapriDesktop
 
         private void GetFreeVoice()
         {
-            if (testing || SettingUpVoice || kokoro.Installed) return;
+            if (testing || SettingUpVoice || kokoro.Installed || preferences.Silent) return;
             balloonPage = null;
             balloonUpdate = false;
             balloonMainframe = true;
@@ -3386,6 +3420,7 @@ namespace CapriDesktop
 
         internal void TestVoice()
         {
+            if (preferences.Silent) { mainframe.VoiceNote("Her voice is OFF. Pick FREE VOICE or ELEVENLABS to hear her.", true); return; }
             if (voice.Key == null && Speak == null && !kokoro.Installed) { mainframe.VoiceNote("Get her free voice, or paste an ElevenLabs key.", true); return; }
             if (voice.Key != null && voice.VoiceId == null && Speak == null) { mainframe.VoiceNote("Paste your Voice ID first.", true); return; }
             if (hidden) SetHidden(false);
@@ -3511,8 +3546,8 @@ namespace CapriDesktop
         {
             if (chatting) { StopChat(); return; }
             // Voice chat follows the VOICE pick: FREE VOICE, or no key, is free voice chat.
-            if (FreeChatOn && (preferences.Quiet || voice.Key == null)) { StartLocal(); return; }
-            if (preferences.Quiet && voice.Key != null)
+            if (FreeChatOn && (preferences.Quiet || preferences.Silent || voice.Key == null)) { StartLocal(); return; }
+            if ((preferences.Quiet || preferences.Silent) && voice.Key != null)
             {
                 heard = "(voice)";
                 box.Prompt = "> you: ";
@@ -4037,6 +4072,12 @@ namespace CapriDesktop
 
         private void CheckChat(double now)
         {
+            if (agent != null && ears.Muted && !speaker.Busy)
+            {
+                Rest();
+                mainframe.VoiceNote("Mic muted. Voice chat is paused until you unmute.", false);
+                return;
+            }
             bool due = agent != null && (checkedIn || (wokeAt >= 0 && now - wokeAt >= 8));
             if (!due || speaker.Busy) { quietSince = -1; return; }
             if (quietSince < 0) quietSince = now;
@@ -4072,6 +4113,7 @@ namespace CapriDesktop
             pill.SetChat(true, ears.Muted);
             CheckEars(clock.Elapsed.TotalSeconds);
             if (local && earsReady) mainframe.VoiceNote(ears.Muted ? "Mic muted. Click the mic to unmute." : transcribing ? "Hearing you..." : "Free voice chat on. Talk and I'll type back.", false);
+            else if (!local) mainframe.VoiceNote(ears.Muted ? "Mic muted. Voice chat pauses once she stops talking." : "Mic on. Talk and she'll pick up.", false);
         }
 
         private void Listen(short[] chunk)
@@ -4138,7 +4180,7 @@ namespace CapriDesktop
             UpdateAnimation();
             bool quiet = local;
             Cloud remote = brain.Remote;
-            if (!testing && (voice.Key == null || quiet || voiceBroke) && kokoro.Installed && !preferences.Quiet) ThreadPool.QueueUserWorkItem(delegate { try { kokoro.Warm(); } catch (Exception) { } });
+            if (!testing && (voice.Key == null || quiet || voiceBroke) && kokoro.Installed && !preferences.Quiet && !preferences.Silent) ThreadPool.QueueUserWorkItem(delegate { try { kokoro.Warm(); } catch (Exception) { } });
             ThreadPool.QueueUserWorkItem(delegate
             {
                 string said;
@@ -4186,6 +4228,7 @@ namespace CapriDesktop
             Func<string, byte[]> speak = preferences.Quiet || local || quiet || voiceBroke ? null : Speak;
             if (speak == null && !local && !quiet && !voiceBroke && !testing && voice.Ready && !preferences.Quiet) speak = voice.Speak;
             if (speak == null && (voice.Key == null || local || quiet || voiceBroke || preferences.Quiet)) speak = free;
+            if (preferences.Silent) speak = null;
             string words = Voice.Spoken(said);
             if (speak == null || words.Length == 0 || state == TalkState.Dormant) { Begin(ticket, said, state, null); return; }
             reply = null;
@@ -6386,6 +6429,26 @@ namespace CapriDesktop
                                 }
                                 checks.Add("PASS send or write: asked to send, write or type a message in a chat app, she types it and presses Enter without asking; only a draft or \"don't send it\" stays unsent; typed asks like send hi in #play-testing always become the job, even when her brain only answers chat");
                                 checks.Add("PASS does what she's asked: send, message, DM, tell someone on Discord, join, leave or end a call and hang up are jobs, not chat; their own words decide send or draft even if the job is reworded; she skips asking about a step they asked for, even inside a done, and stops after the fourth ask, but still asks which one, before buying, or about a password");
+                                string notepadAsk = "Capri, can you open up Notepad and type in Hi?";
+                                Job notepad = new Job("open Notepad and type Hi", notepadAsk);
+                                string notepadBrief = Computer.Brief(notepad.Task, new System.Collections.Generic.List<string>(), new Sight { Title = "Untitled - Notepad", Program = "Notepad" });
+                                if (!notepadBrief.StartsWith("Job: \"open Notepad and type Hi\"\nTheir exact words, only to understand the job, never to type: \"" + notepadAsk + "\"", StringComparison.Ordinal)) throw new Exception("The job brief still runs their exact words into the job: " + notepadBrief);
+                                string[,] echoes = {
+                                    { "Hi\nTheir exact words: \"" + notepadAsk + "\"", "Hi" },
+                                    { "Hi\\nTheir exact words: \\\"" + notepadAsk + "\\\"", "Hi" },
+                                    { "Hi Their exact words, only to understand the job, never to type: \"" + notepadAsk + "\"", "Hi" },
+                                    { "Hi " + notepadAsk, "Hi" },
+                                    { "Their exact words: \"" + notepadAsk + "\"", "" },
+                                    { "Hi\n", "Hi\n" },
+                                    { notepadAsk, notepadAsk }
+                                };
+                                for (int i = 0; i < echoes.GetLength(0); i++)
+                                {
+                                    string typedOut = Computer.Unechoed(echoes[i, 0], notepadAsk);
+                                    if (typedOut != echoes[i, 1]) throw new Exception("Typing " + Voice.Quote(echoes[i, 0]) + " came out as " + Voice.Quote(typedOut) + ", not " + Voice.Quote(echoes[i, 1]) + ".");
+                                }
+                                if (Computer.Unechoed("Hi " + notepadAsk, null) != "Hi " + notepadAsk) throw new Exception("Words were cut from a job that had no exact words.");
+                                checks.Add("PASS typing only the job: the brief keeps their exact words apart from the job, and a type step never types the \"Their exact words\" line or their whole sentence (NORMAL typed both into Notepad)");
                                 System.Collections.Generic.List<Point> cursorLong = Computer.Path(new Point(100, 100), new Point(1300, 700), 7);
                                 System.Collections.Generic.List<Point> cursorShort = Computer.Path(new Point(400, 400), new Point(460, 420), 7);
                                 double cursorLength = Math.Sqrt(1200.0 * 1200 + 600.0 * 600), cursorBend = 0, cursorPast = 0;
@@ -7408,6 +7471,11 @@ namespace CapriDesktop
                                         preferences.Tier = 1;
                                         ChooseTier(0);
                                         if (preferences.Tier != 0 || brain.Remote != null || preferences.TextKey != null || !mainframe.TextStatus.EndsWith("| no key row", StringComparison.Ordinal)) throw new Exception("Picking NORMAL did not move her to her own brain: " + mainframe.TextStatus);
+                                        mainframe.ShowTiers(1, null, null);
+                                        string nvidiaNote = mainframe.TierNote;
+                                        ShowTiers();
+                                        if (nvidiaNote != "Most NVIDIA models can't see your screen." || mainframe.TierNote != "Pick one. Only one brain runs at a time.") throw new Exception("HIGHER didn't say most NVIDIA models can't see, or the note stayed: " + nvidiaNote + " / " + mainframe.TierNote);
+                                        checks.Add("PASS NVIDIA sight note: with HIGHER picked, the line under BRAIN says most NVIDIA models can't see your screen");
                                         preferences.PaidKey = null;
                                         ChooseTier(2);
                                         if (preferences.Tier != 2 || brain.Remote != null || preferences.TextKey != null || !mainframe.TextStatus.EndsWith("| Paste a ChatGPT or Claude key | Connect", StringComparison.Ordinal) || !mainframe.TiersFit) throw new Exception("MAX INTELLIGENCE without its key did not fall back to her own brain: " + mainframe.TextStatus);
@@ -8182,9 +8250,9 @@ namespace CapriDesktop
                             if (voice.Key != null || voices != null || preferences.VoiceKey != null || mainframe.VoiceStatus != keylessNote + " |  | Default model | Connect") throw new Exception("Forget did not clear the key: " + mainframe.VoiceStatus);
                             if (mainframe.VoiceTierStatus != "FREE VOICE | - | free voice | fold 36") throw new Exception("Forget left the VOICE rows laid out for a key: " + mainframe.VoiceTierStatus);
                             snap("mainframe-voice-empty.png");
-                            if (!mainframe.MicStatus.EndsWith("| help | - | mute", StringComparison.Ordinal)) throw new Exception("Without a key the Mainframe should offer the Setup guide, not the shortcut: " + mainframe.MicStatus);
+                            if (!mainframe.MicStatus.EndsWith("| help | keys | mute", StringComparison.Ordinal)) throw new Exception("Without a key the Mainframe should offer the Setup guide and still show the voice chat shortcut, since free voice chat needs no key: " + mainframe.MicStatus);
                             mainframe.ShowShortcut(false, false);
-                            if (!mainframe.MicStatus.EndsWith("| help | - | taken", StringComparison.Ordinal) || mainframe.KeyStatus != "Ctrl + Alt + V is taken | Ctrl + Alt + N is taken") throw new Exception("A taken Ctrl + Alt + N didn't say so: " + mainframe.MicStatus + " / " + mainframe.KeyStatus);
+                            if (!mainframe.MicStatus.EndsWith("| help | taken | taken", StringComparison.Ordinal) || mainframe.KeyStatus != "Ctrl + Alt + V is taken | Ctrl + Alt + N is taken") throw new Exception("A taken Ctrl + Alt + N didn't say so: " + mainframe.MicStatus + " / " + mainframe.KeyStatus);
                             if (!FreeChatOn)
                             {
                                 CloseTalk();
@@ -8604,6 +8672,41 @@ namespace CapriDesktop
                             ShowVoice(false);
                             if (keylessRows != "FREE VOICE | - | free voice | fold 36" || pendingRows != "ELEVENLABS | key | - | fold 36" || pendingNote != "Paste your ElevenLabs key, then press Connect." || pendingQuiet || pendingOverlap != null) throw new Exception("ELEVENLABS without a key didn't open the key box: " + keylessRows + " / " + pendingRows + " / " + pendingNote + " / " + pendingOverlap);
                             checks.Add("PASS VOICE rows without a key: FREE VOICE shows her free voice picker, and ELEVENLABS opens the key box and says to paste a key");
+                            voice.Key = keyWas ?? "test-key";
+                            ShowVoice(false);
+                            bool offQuietWas = preferences.Quiet;
+                            mainframe.PickVoice(false);
+                            string offFreeSaid = null;
+                            FreeSpeak = delegate(string words) { offFreeSaid = words; return tone; };
+                            talked = false;
+                            mainframe.PickSilent();
+                            bool offSaid = preferences.Silent && reply == VoiceOffLine;
+                            string offRows = mainframe.VoiceTierStatus;
+                            int offCapri = mainframe.CapriRowTop;
+                            string offOverlap = mainframe.Overlap();
+                            Answer(++asking, "Only text now.", TalkState.Talking);
+                            bool offQuiet = !talked && offFreeSaid == null && reply == "Only text now." && mouths == null;
+                            TestVoice();
+                            string offTest = mainframe.VoiceNoteText;
+                            ToggleChat();
+                            bool offChat = chatting && local;
+                            StopChat();
+                            mainframe.PickVoice(true);
+                            bool backPaid = !preferences.Silent && !preferences.Quiet && mainframe.VoiceTierStatus == "ELEVENLABS | key | voice id | fold 0";
+                            asking++;
+                            CloseTalk();
+                            mainframe.PickSilent();
+                            mainframe.PickVoice(false);
+                            bool backFree = !preferences.Silent && preferences.Quiet && mainframe.VoiceTierStatus == "FREE VOICE | - | free voice | fold 36";
+                            asking++;
+                            CloseTalk();
+                            FreeSpeak = null;
+                            preferences.Quiet = offQuietWas;
+                            voice.Key = keyWas;
+                            ShowVoice(false);
+                            if (!offSaid || offRows != "OFF | - | - | fold 72" || offCapri >= freeCapri || offOverlap != null || !offQuiet || offTest != "Her voice is OFF. Pick FREE VOICE or ELEVENLABS to hear her." || !offChat || !backFree || !backPaid)
+                                throw new Exception("Turning her voice off went wrong: said " + offSaid + ", rows " + offRows + ", CAPRI row " + offCapri + " vs " + freeCapri + ", overlap " + offOverlap + ", quiet " + offQuiet + ", test " + offTest + ", chat " + offChat + ", back " + backFree + "/" + backPaid);
+                            checks.Add("PASS voice OFF: OFF under VOICE stops her talking out loud (no free voice, no ElevenLabs), folds the rows under it, voice chat stays free and she types back, Test says her voice is off, and FREE VOICE or ELEVENLABS bring her voice back");
                             if (FreeChatOn)
                             {
                                 string freeSaid = null;
@@ -9012,6 +9115,20 @@ namespace CapriDesktop
                             lock (asked) log = string.Join(" | ", asked.ToArray());
                             if (System.Text.RegularExpressions.Regex.Matches(log, "get-signed-url").Count < 2 || System.Text.RegularExpressions.Regex.Matches(log, "init \\{").Count < 2 || log.IndexOf("woke silent | woke loud | woke loud | woke loud", StringComparison.Ordinal) < 0) throw new Exception("Talking did not reopen the link and replay what she missed: " + log);
                             if (agent != null || !chatting || !resting || mainframe.VoiceStatus.IndexOf("Voice chat resting", StringComparison.Ordinal) != 0) throw new Exception("A clean hang-up from ElevenLabs did not leave her resting: " + mainframe.VoiceStatus + " / " + log);
+                            lock (waking) resting = false;
+                            agent = new Agent();
+                            speaker.Clear();
+                            ToggleMic();
+                            CheckChat(clock.Elapsed.TotalSeconds);
+                            bool mutedRest = agent == null && resting && ears.Muted && mainframe.VoiceStatus.IndexOf("Mic muted. Voice chat is paused until you unmute.", StringComparison.Ordinal) == 0;
+                            short[] mutedTalk = new short[Ears.Chunk];
+                            for (int i = 0; i < mutedTalk.Length; i++) mutedTalk[i] = (short)(Math.Sin(i * 0.3) * 9000);
+                            for (int i = 0; i < 4; i++) ears.Feed(mutedTalk);
+                            bool stayedAsleep = resting && agent == null;
+                            ToggleMic();
+                            bool unmuted = !ears.Muted && resting && mainframe.VoiceStatus.IndexOf("Mic on. Talk and she'll pick up.", StringComparison.Ordinal) == 0;
+                            if (!mutedRest || !stayedAsleep || !unmuted) throw new Exception("Muting the mic in voice chat did not pause her listening: " + mutedRest + " " + stayedAsleep + " " + unmuted + " / " + mainframe.VoiceStatus);
+                            checks.Add("PASS mute pauses voice chat: muting closes the ElevenLabs link once she stops talking, so she never asks if you're there, talking while muted doesn't wake her, and unmuting lets her pick up when you talk");
                             pill.Press(2);
                             if (pill.Chatting || chatting || agent != null || ears.Listening || speaker.Busy || resting) throw new Exception("Wave did not end voice chat.");
                             Voice.Host = agentHost;

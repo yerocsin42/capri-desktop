@@ -105,6 +105,7 @@ namespace CapriDesktop
         internal const string Bigger = "Bigger brain models handle jobs like this better. Pick one under BRAIN in Capri Mainframe.";
         internal const string Confused = "Got lost before I could start that job. " + Bigger;
         internal const string Stalled = "Got stuck on that one. " + Bigger;
+        internal const string Exact = "\nTheir exact words: ";
         private const int MostTargets = 70;
 
         internal const string Prompt =
@@ -255,7 +256,9 @@ namespace CapriDesktop
 
         internal static string Brief(string job, IList<string> steps, Sight sight)
         {
-            StringBuilder text = new StringBuilder("Job: " + Voice.Quote(job));
+            int said = job.IndexOf(Exact, StringComparison.Ordinal);
+            StringBuilder text = new StringBuilder("Job: " + Voice.Quote(said < 0 ? job : job.Substring(0, said)));
+            if (said >= 0) text.Append("\nTheir exact words, only to understand the job, never to type: " + job.Substring(said + Exact.Length));
             if (steps.Count > 0)
             {
                 text.Append("\nDone so far:");
@@ -263,6 +266,18 @@ namespace CapriDesktop
             }
             text.Append("\n\nScreen now:\n" + sight.Text + "\n\nWhat's the next step? Call one tool.");
             return text.ToString();
+        }
+
+        internal static string Unechoed(string text, string asked)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+            string kept = Regex.Replace(text, @"\s*(?:\\n)?\s*Their exact words\b.*$", "", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+            if (!string.IsNullOrWhiteSpace(asked) && kept.Trim().Length > 0)
+            {
+                string without = kept.Replace(Voice.Quote(asked.Trim()), "").Replace(asked.Trim(), "");
+                if (without.Trim().Length > 0) kept = without;
+            }
+            return kept == text ? text : kept.Trim();
         }
 
         internal static string Describe(string tool, ToolArguments args, Sight sight)
@@ -1217,7 +1232,7 @@ namespace CapriDesktop
         internal Job(string task, string asked = null)
         {
             bool theirs = !string.IsNullOrWhiteSpace(asked) && !string.Equals(asked.Trim(), task.Trim(), StringComparison.OrdinalIgnoreCase);
-            Task = theirs ? task + "\nTheir exact words: " + Voice.Quote(asked.Trim()) : task;
+            Task = theirs ? task + Computer.Exact + Voice.Quote(asked.Trim()) : task;
             Words = theirs ? asked.Trim() : task.Trim();
             approved.UnionWith(Computer.Allowed(task));
             if (!theirs) return;
@@ -1545,6 +1560,7 @@ namespace CapriDesktop
 
         private string Perform(string tool, ToolArguments args, Sight sight)
         {
+            if (tool == "type") args.Text = Computer.Unechoed(args.Text, Task.IndexOf(Computer.Exact, StringComparison.Ordinal) >= 0 ? Words : null);
             // The window in front changed after she looked, so she looks again instead of acting on old buttons. Only Esc stops her.
             if (tool != "open_app" && tool != "open_website" && tool != "wait" && sight != null && sight.Window != IntPtr.Zero && Computer.Front() != sight.Window)
                 return "Couldn't do that: the window in front changed.";
