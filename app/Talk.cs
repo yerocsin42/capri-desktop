@@ -115,9 +115,17 @@ namespace CapriDesktop
             }
         }
 
-        internal static Font Mono(float size, FontStyle style, GraphicsUnit unit = GraphicsUnit.Pixel)
+        private const string Extras = "ıŁłŒœŠšŸŽžƒ–—‘’‚“”„†‡•…‰‹›€™";
+
+        internal static bool Drawable(string text)
         {
-            if (embedded != null) return new Font(embedded, size, embedded.IsStyleAvailable(style) ? style : FontStyle.Regular, unit);
+            foreach (char c in text ?? "") if (c > 0xFF && Extras.IndexOf(c) < 0) return false;
+            return true;
+        }
+
+        internal static Font Mono(float size, FontStyle style, GraphicsUnit unit = GraphicsUnit.Pixel, string text = null)
+        {
+            if (embedded != null && Drawable(text)) return new Font(embedded, size, embedded.IsStyleAvailable(style) ? style : FontStyle.Regular, unit);
             foreach (string family in new[] { "Cascadia Mono", "Consolas", "Courier New" })
             {
                 Font font = new Font(family, size, style, unit);
@@ -444,6 +452,1363 @@ namespace CapriDesktop
         }
     }
 
+    internal sealed class Tear : Overlay
+    {
+        internal const double Length = 0.75;
+        internal const double WideLength = 1.2;
+        internal const double BurstLength = 1.5;
+        internal const double Linger = 0.7;
+        private static readonly Color Crimson = Color.FromArgb(176, 6, 32);
+        private static readonly Color Ink = Color.FromArgb(8, 6, 10);
+        private static readonly Color Bruise = Color.FromArgb(34, 8, 48);
+        private static readonly Color Violet = Color.FromArgb(110, 30, 170);
+        private static readonly Color Hot = Color.FromArgb(255, 120, 140);
+        private readonly Timer ticks = new Timer();
+        private readonly System.Diagnostics.Stopwatch watch = new System.Diagnostics.Stopwatch();
+        private readonly Random random = new Random();
+        private Rectangle area;
+        private Rectangle heart;
+        private int seed;
+        private bool wide;
+        private Point? core;
+        private IntPtr under;
+
+        internal Tear() : base("Capri glitch")
+        {
+            ticks.Interval = 33;
+            ticks.Tick += delegate { Step(); };
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams value = base.CreateParams;
+                value.ExStyle |= 0x00000020;
+                return value;
+            }
+        }
+
+        internal void Burst(Rectangle body, Rectangle screen, bool everywhere, bool spawn = false, IntPtr behind = default(IntPtr))
+        {
+            wide = everywhere || spawn;
+            under = wide ? behind : IntPtr.Zero;
+            area = Rectangle.Intersect(wide ? Rectangle.Inflate(body, body.Height, body.Height * 2 / 3) : Rectangle.Inflate(body, body.Width, body.Height / 8), screen);
+            if (area.Width < 8 || area.Height < 8) return;
+            heart = new Rectangle(body.Left - area.Left, body.Top - area.Top, body.Width, body.Height);
+            core = spawn ? new Point(heart.Left + heart.Width / 2, heart.Top + heart.Height / 2) : (Point?)null;
+            seed = random.Next();
+            ticks.Interval = 33;
+            watch.Reset();
+            watch.Start();
+            Step();
+            ticks.Start();
+        }
+
+        private void Step()
+        {
+            double t = watch.Elapsed.TotalSeconds;
+            double length = core != null ? BurstLength : wide ? WideLength : Length, linger = core != null ? Linger : 0;
+            if (t >= length + linger) { ticks.Stop(); Hide(); return; }
+            Present(Frame(area.Size, Held(t, length, linger), seed, wide, core, heart, (int)(t * 30)), area.Location);
+            if (under != IntPtr.Zero) { Native.SetWindowPos(Handle, under, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); under = IntPtr.Zero; }
+        }
+
+        internal static double Held(double t, double length, double linger)
+        {
+            double grown = 0.26 * length, hold = 0.3 * length + linger;
+            return t < grown ? t / length : t < grown + hold ? 0.26 + 0.3 * (t - grown) / hold : (t - linger) / length;
+        }
+
+        internal static Bitmap Frame(Size size, double progress, int seed, bool wide = false, Point? core = null, Rectangle? body = null, int flicker = 0)
+        {
+            Bitmap image = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppPArgb);
+            Random pick = new Random(seed + flicker);
+            double fade = Math.Max(0, Math.Min(1, (1 - progress) / 0.65));
+            fade = fade * fade * (3 - 2 * fade);
+            if (fade <= 0) return image;
+            Rectangle heart = body ?? new Rectangle(size.Width * 2 / 5, size.Height / 4, size.Width / 5, size.Height / 2);
+            if (wide) Tendrils(image, new Rectangle(Point.Empty, size), core != null ? (PointF)core.Value : new PointF(heart.Left + heart.Width / 2f, heart.Top + heart.Height / 2f), new SizeF(heart.Width * 0.1f, heart.Height * 0.06f), Math.Max(0.6f, heart.Height / 260f), progress, seed, flicker);
+            using (Graphics graphics = Graphics.FromImage(image))
+            {
+                double rest = core != null ? Math.Max(0, Math.Min(1, (progress - 0.25) * 3)) : 1;
+                Rectangle near = wide ? Rectangle.Intersect(Rectangle.Inflate(heart, heart.Width / 2, heart.Height / 12), new Rectangle(Point.Empty, size)) : new Rectangle(Point.Empty, size);
+                if (near.Width < 4 || near.Height < 4) return image;
+                int bars = (int)Math.Round((wide ? 2 + pick.Next(4) : 6 + pick.Next(7)) * (0.45 + 0.55 * fade) * rest);
+                int unit = Math.Max(2, wide ? heart.Height / 50 : size.Height / 26);
+                for (int i = 0; i < bars; i++)
+                {
+                    int y = near.Top + pick.Next(near.Height);
+                    int tall = 1 + (int)(unit * (wide ? 0.6 : 6) * Math.Pow(pick.NextDouble(), 2.2));
+                    int width = wide ? near.Width / 6 + pick.Next(Math.Max(1, near.Width / 2)) : near.Width / 4 + pick.Next(Math.Max(1, near.Width * 3 / 4));
+                    int x = near.Left + pick.Next(Math.Max(1, near.Width - width));
+                    int kind = pick.Next(10);
+                    Color colour = kind < 4 ? Ink : kind < 8 ? Look.Red : Crimson;
+                    int alpha = (int)((kind < 4 ? 180 + pick.Next(60) : 150 + pick.Next(100)) * fade);
+                    if (alpha <= 0) continue;
+                    using (Brush brush = new SolidBrush(Color.FromArgb(alpha, colour))) graphics.FillRectangle(brush, x, y, width, tall);
+                    if (kind < 4 && tall > 3)
+                        using (Brush edge = new SolidBrush(Color.FromArgb(alpha * 2 / 3, Look.Red)))
+                        {
+                            graphics.FillRectangle(edge, x, y, width, 1);
+                            graphics.FillRectangle(edge, x, y + tall - 1, width, 1);
+                        }
+                    if (pick.Next(3) == 0)
+                        using (Brush ghost = new SolidBrush(Color.FromArgb(alpha / 3, Look.Red))) graphics.FillRectangle(ghost, x + pick.Next(-near.Width / 16, near.Width / 16 + 1), y + tall + 1, width / 2, Math.Max(1, tall / 2));
+                }
+            }
+            return image;
+        }
+
+        internal static void Tendrils(Bitmap image, Rectangle room, PointF middle, SizeF spread, float unit, double progress, int seed, int flicker)
+        {
+            room = Rectangle.Intersect(room, new Rectangle(Point.Empty, image.Size));
+            if (room.Width < 8 || room.Height < 8) return;
+            double alpha = Math.Max(0, Math.Min(1, (0.97 - progress) / 0.17));
+            alpha = alpha * alpha * (3 - 2 * alpha);
+            if (alpha <= 0.01) return;
+            Random shape = new Random(seed), jitter = new Random(seed ^ (flicker * 7919 + 1));
+            double open = Math.Min(1, progress / 0.26);
+            open = 1 - (1 - open) * (1 - open) * (1 - open);
+            double clock = flicker / 30.0;
+            List<PointF[]> spines = new List<PointF[]>();
+            List<float[]> widths = new List<float[]>();
+            int count = 4 + shape.Next(3);
+            for (int i = 0; i < count; i++)
+            {
+                double angle = (i + 0.15 + shape.NextDouble() * 0.7) / count * 2 * Math.PI, dx = Math.Cos(angle), dy = Math.Sin(angle);
+                float x = middle.X + (float)(dx * spread.Width), y = middle.Y + (float)(dy * spread.Height);
+                double reach = Math.Min(dx > 0.01 ? (room.Right - 12 - x) / dx : dx < -0.01 ? (room.Left + 12 - x) / dx : 1e9, dy > 0.01 ? (room.Bottom - 12 - y) / dy : dy < -0.01 ? (room.Top + 12 - y) / dy : 1e9);
+                double length = Math.Max(0, reach) * (0.6 + 0.32 * shape.NextDouble()), thick = (10 + shape.NextDouble() * 6) * unit;
+                double close = Math.Max(0, Math.Min(1, (progress - 0.56 - 0.08 * shape.NextDouble()) / 0.3));
+                close = Math.Round(close * close * (3 - 2 * close) * 6) / 6;
+                Ribbon(spines, widths, shape, room, x, y, angle, length, thick, open * (1 - close), clock, unit, 2);
+            }
+            if (spines.Count == 0) return;
+            float[] shiftX = new float[spines.Count], shiftY = new float[spines.Count];
+            for (int v = 0; v < spines.Count; v++)
+                if (jitter.NextDouble() < 0.08)
+                {
+                    shiftX[v] = (float)((jitter.Next(2) * 2 - 1) * (3 + jitter.Next(7)) * unit);
+                    shiftY[v] = (float)((jitter.NextDouble() * 2 - 1) * 2 * unit);
+                }
+            using (Graphics graphics = Graphics.FromImage(image))
+            {
+                const int Soft = 4;
+                using (Bitmap glow = new Bitmap(Math.Max(1, room.Width / Soft), Math.Max(1, room.Height / Soft), PixelFormat.Format32bppPArgb))
+                {
+                    using (Graphics blur = Graphics.FromImage(glow))
+                    using (Brush haze = new SolidBrush(Color.FromArgb((int)(70 * alpha), 210, 12, 96)))
+                    using (Brush halo = new SolidBrush(Color.FromArgb((int)(150 * alpha), 230, 10, 80)))
+                    {
+                        blur.SmoothingMode = SmoothingMode.AntiAlias;
+                        for (int v = 0; v < spines.Count; v++) blur.FillPolygon(haze, Outline(spines[v], widths[v], 1f / Soft, 3.4f, 18 * unit, shiftX[v] - room.X, shiftY[v] - room.Y), FillMode.Winding);
+                        for (int v = 0; v < spines.Count; v++) blur.FillPolygon(halo, Outline(spines[v], widths[v], 1f / Soft, 1.8f, 6 * unit, shiftX[v] - room.X, shiftY[v] - room.Y), FillMode.Winding);
+                    }
+                    using (Bitmap half = new Bitmap(Math.Max(1, room.Width / 2), Math.Max(1, room.Height / 2), PixelFormat.Format32bppPArgb))
+                    {
+                        using (Graphics soft = Graphics.FromImage(half))
+                        {
+                            soft.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                            soft.PixelOffsetMode = PixelOffsetMode.Half;
+                            soft.DrawImage(glow, new Rectangle(0, 0, half.Width, half.Height), 0, 0, glow.Width, glow.Height, GraphicsUnit.Pixel);
+                        }
+                        graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+                        graphics.PixelOffsetMode = PixelOffsetMode.Half;
+                        graphics.DrawImage(half, room, 0, 0, half.Width, half.Height, GraphicsUnit.Pixel);
+                    }
+                    graphics.PixelOffsetMode = PixelOffsetMode.Default;
+                }
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                bool split = progress < 0.1 || jitter.Next(4) == 0;
+                float cut = (2 + jitter.Next(3)) * unit;
+                using (Brush cyan = new SolidBrush(Color.FromArgb((int)(170 * alpha), Shatter.Mint)))
+                using (Brush violet = new SolidBrush(Color.FromArgb((int)(235 * alpha), Shatter.Violet)))
+                using (Brush red = new SolidBrush(Color.FromArgb((int)(255 * alpha), 236, 6, 68)))
+                    for (int v = 0; v < spines.Count; v++)
+                    {
+                        if (split) graphics.FillPolygon(cyan, Outline(spines[v], widths[v], 1, 1, 0, shiftX[v] + cut, shiftY[v] - cut * 0.4f), FillMode.Winding);
+                        graphics.FillPolygon(violet, Outline(spines[v], widths[v], 1, 1, 0, shiftX[v] - 3 * unit, shiftY[v] + 3 * unit), FillMode.Winding);
+                        graphics.FillPolygon(red, Outline(spines[v], widths[v], 1, 1, 0, shiftX[v], shiftY[v]), FillMode.Winding);
+                    }
+                graphics.SmoothingMode = SmoothingMode.None;
+                using (Brush speck = new SolidBrush(Color.FromArgb((int)(210 * alpha), 255, 222, 232)))
+                    for (int v = 0; v < spines.Count; v++)
+                        for (int k = 1; k < spines[v].Length; k++)
+                        {
+                            PointF a = spines[v][k - 1], b = spines[v][k];
+                            float girth = widths[v][k - 1], ex = b.X - a.X, ey = b.Y - a.Y, reach = (float)Math.Sqrt(ex * ex + ey * ey);
+                            if (girth < 5 * unit || reach < 1) continue;
+                            Random stars = new Random(seed ^ ((int)(spines[v][0].X * 7 + spines[v][0].Y * 13) * 977 + k * 131));
+                            for (int dot = 0, dots = (int)(reach * girth / (180 * unit * unit)) + 1; dot < dots; dot++)
+                            {
+                                double along = stars.NextDouble(), across = (stars.NextDouble() * 2 - 1) * 0.3 * girth;
+                                float dotSize = (1 + stars.Next(2)) * Math.Max(1, unit * 0.8f);
+                                if (jitter.Next(4) == 0) continue;
+                                graphics.FillRectangle(speck, a.X + ex * (float)along - ey / reach * (float)across + shiftX[v], a.Y + ey * (float)along + ex / reach * (float)across + shiftY[v], dotSize, dotSize);
+                            }
+                        }
+                Color[] colours = { Look.Red, Hot, Color.White, Ink, Shatter.Violet, Shatter.Mint };
+                for (int v = 0; v < spines.Count; v++)
+                {
+                    PointF[] spine = spines[v];
+                    if (spine.Length < 3) continue;
+                    PointF tip = spine[spine.Length - 1];
+                    int blocks = progress > 0.55 ? 2 + jitter.Next(4) : jitter.Next(3);
+                    float scatter = (float)(6 + 30 * Math.Max(0, progress - 0.5)) * unit;
+                    for (int k = 0; k < blocks; k++)
+                    {
+                        float side = (2 + jitter.Next(3)) * unit;
+                        using (Brush block = new SolidBrush(Color.FromArgb((int)(255 * alpha), colours[jitter.Next(colours.Length)])))
+                            graphics.FillRectangle(block, tip.X + shiftX[v] + (float)((jitter.NextDouble() * 2 - 1) * scatter), tip.Y + shiftY[v] + (float)((jitter.NextDouble() * 2 - 1) * scatter), side * (1 + jitter.Next(4)), side);
+                    }
+                }
+                graphics.CompositingMode = CompositingMode.SourceCopy;
+                using (Brush hole = new SolidBrush(Color.Transparent))
+                    for (int k = 0, holes = jitter.Next(5); k < holes; k++)
+                    {
+                        PointF[] spine = spines[jitter.Next(spines.Count)];
+                        PointF at = spine[jitter.Next(spine.Length)];
+                        graphics.FillRectangle(hole, at.X - (4 + jitter.Next(10)) * unit, at.Y - unit, (8 + jitter.Next(20)) * unit, (1 + jitter.Next(3)) * unit);
+                    }
+            }
+            int bands = progress < 0.1 ? 3 + jitter.Next(3) : progress > 0.55 ? 2 + jitter.Next(5) : jitter.Next(4);
+            if (bands == 0) return;
+            BitmapData data = image.LockBits(room, ImageLockMode.ReadWrite, PixelFormat.Format32bppPArgb);
+            try
+            {
+                int[] row = new int[room.Width], moved = new int[room.Width];
+                for (int b = 0; b < bands; b++)
+                {
+                    int top = jitter.Next(room.Height), tall = Math.Max(1, (int)((2 + jitter.Next(14)) * unit)), shift = (int)((jitter.Next(2) * 2 - 1) * (5 + jitter.Next(18)) * unit);
+                    for (int y = top; y < Math.Min(room.Height, top + tall); y++)
+                    {
+                        IntPtr line = data.Scan0 + y * data.Stride;
+                        Marshal.Copy(line, row, 0, room.Width);
+                        for (int x = 0; x < room.Width; x++) { int from = x - shift; moved[x] = from >= 0 && from < room.Width ? row[from] : 0; }
+                        Marshal.Copy(moved, 0, line, room.Width);
+                    }
+                }
+            }
+            finally { image.UnlockBits(data); }
+        }
+
+        private static void Ribbon(List<PointF[]> spines, List<float[]> widths, Random shape, Rectangle room, float x, float y, double aim, double length, double thick, double shown, double clock, float unit, int depth)
+        {
+            int count = depth == 2 ? 4 + shape.Next(4) : 2 + shape.Next(2);
+            double[] parts = new double[count];
+            double total = 0;
+            bool hook = shape.NextDouble() < 0.35;
+            for (int i = 0; i < count; i++) { parts[i] = (0.35 + 1.3 * shape.NextDouble()) * (hook && i == count - 1 ? 0.55 : 1); total += parts[i]; }
+            PointF[] spine = new PointF[count + 1];
+            float[] width = new float[count + 1];
+            double[] headings = new double[count + 1];
+            spine[0] = new PointF(x, y);
+            width[0] = (float)(thick * 0.9);
+            headings[0] = aim;
+            int side = shape.Next(2) * 2 - 1;
+            double phase = shape.NextDouble() * 6.28, start = aim;
+            float walkX = x, walkY = y;
+            for (int i = 1; i <= count; i++)
+            {
+                aim += (shape.NextDouble() - 0.5) * 0.32;
+                if (shape.NextDouble() < 0.7) side = -side;
+                double bend = hook && i == count ? 1 + shape.NextDouble() * 0.6 : 0.22 + shape.NextDouble() * 0.48;
+                double heading = aim + side * bend, step = length * parts[i - 1] / total;
+                walkX += (float)(Math.Cos(heading) * step);
+                walkY += (float)(Math.Sin(heading) * step);
+                spine[i] = new PointF(walkX, walkY);
+                headings[i] = heading;
+                double bulge = 0.7 + 0.6 * shape.NextDouble();
+                width[i] = i == count ? 0 : (float)(thick * Math.Pow(1 - (double)i / count, 0.45) * bulge);
+            }
+            float fit = 1, margin = 6;
+            for (int i = 1; i <= count; i++)
+            {
+                float ex = spine[i].X - x, ey = spine[i].Y - y;
+                if (spine[i].X < room.Left + margin && ex < 0) fit = Math.Min(fit, (x - room.Left - margin) / -ex);
+                if (spine[i].X > room.Right - margin && ex > 0) fit = Math.Min(fit, (room.Right - margin - x) / ex);
+                if (spine[i].Y < room.Top + margin && ey < 0) fit = Math.Min(fit, (y - room.Top - margin) / -ey);
+                if (spine[i].Y > room.Bottom - margin && ey > 0) fit = Math.Min(fit, (room.Bottom - margin - y) / ey);
+            }
+            fit = Math.Max(0.2f, fit);
+            for (int i = 1; i <= count; i++) spine[i] = new PointF(x + (spine[i].X - x) * fit, y + (spine[i].Y - y) * fit);
+            const int Fine = 3;
+            int ends = count * Fine;
+            PointF[] line = new PointF[ends + 1];
+            float[] girths = new float[ends + 1];
+            double[] arc = new double[ends + 1];
+            line[0] = spine[0];
+            girths[0] = width[0];
+            for (int i = 1; i <= count; i++)
+            {
+                float ex = spine[i].X - spine[i - 1].X, ey = spine[i].Y - spine[i - 1].Y;
+                double bow = (shape.NextDouble() - 0.5) * 0.22, swell = 1 + shape.NextDouble() * 0.3, pinch = i < count && shape.NextDouble() < 0.4 ? 0.35 + shape.NextDouble() * 0.25 : 1;
+                for (int k = 1; k <= Fine; k++)
+                {
+                    int n = (i - 1) * Fine + k;
+                    double t = (double)k / Fine, lift = bow * 4 * t * (1 - t);
+                    line[n] = new PointF(spine[i - 1].X + ex * (float)t - ey * (float)lift, spine[i - 1].Y + ey * (float)t + ex * (float)lift);
+                    girths[n] = (float)((width[i - 1] + (width[i] - width[i - 1]) * t) * (k == Fine ? pinch : swell));
+                    arc[n] = arc[n - 1] + Math.Sqrt((line[n].X - line[n - 1].X) * (line[n].X - line[n - 1].X) + (line[n].Y - line[n - 1].Y) * (line[n].Y - line[n - 1].Y));
+                }
+            }
+            int forks = depth == 2 ? 1 + shape.Next(2) : depth == 1 ? shape.Next(2) : 0;
+            for (int f = 0; f < forks; f++)
+            {
+                int at = 1 + shape.Next(Math.Max(1, count - 2)), from = at * Fine;
+                double turn = (shape.Next(2) * 2 - 1) * (0.55 + shape.NextDouble() * 0.5), rest = Math.Max(1, arc[ends] - arc[from]);
+                double reach = rest * (0.4 + shape.NextDouble() * 0.25);
+                Ribbon(spines, widths, shape, room, line[from].X, line[from].Y, headings[at] + turn, reach, width[at] * 0.6, Math.Max(0, Math.Min(1, (shown * arc[ends] - arc[from]) / rest)), clock, unit, depth - 1);
+            }
+            double visible = shown * arc[ends];
+            if (visible < 2) return;
+            double taper = Math.Max(4 * unit, arc[ends] * 0.14);
+            float swayX = (float)-Math.Sin(start), swayY = (float)Math.Cos(start);
+            List<PointF> points = new List<PointF>();
+            List<float> sizes = new List<float>();
+            for (int i = 0; i <= ends; i++)
+            {
+                PointF point = line[i];
+                float girth = (float)(girths[i] * Math.Min(1, (visible - arc[i]) / taper));
+                bool last = arc[i] >= visible;
+                if (last)
+                {
+                    double t = (visible - arc[i - 1]) / Math.Max(0.001, arc[i] - arc[i - 1]);
+                    point = new PointF(line[i - 1].X + (float)((line[i].X - line[i - 1].X) * t), line[i - 1].Y + (float)((line[i].Y - line[i - 1].Y) * t));
+                    girth = 0;
+                }
+                float sway = (float)(Math.Sin(clock * 3.6 + i * 0.37 + phase) * 1.8 * unit * arc[i] / Math.Max(1, arc[ends]));
+                points.Add(new PointF(point.X + swayX * sway, point.Y + swayY * sway));
+                sizes.Add(girth);
+                if (last) break;
+            }
+            spines.Add(points.ToArray());
+            widths.Add(sizes.ToArray());
+        }
+
+        private static PointF[] Outline(PointF[] spine, float[] width, float scale, float grow, float extra, float shiftX, float shiftY)
+        {
+            int n = spine.Length;
+            PointF[] edge = new PointF[n * 2];
+            for (int i = 0; i < n; i++)
+            {
+                PointF a = spine[Math.Max(0, i - 1)], b = spine[i], c = spine[Math.Min(n - 1, i + 1)];
+                double inX = b.X - a.X, inY = b.Y - a.Y, outX = c.X - b.X, outY = c.Y - b.Y;
+                double inLength = Math.Sqrt(inX * inX + inY * inY), outLength = Math.Sqrt(outX * outX + outY * outY);
+                if (inLength < 0.001) { inX = outX; inY = outY; inLength = outLength; }
+                if (outLength < 0.001) { outX = inX; outY = inY; outLength = inLength; }
+                if (inLength < 0.001) { inX = outX = 1; inY = outY = 0; inLength = outLength = 1; }
+                double firstX = -inY / inLength, firstY = inX / inLength, nextX = -outY / outLength, nextY = outX / outLength;
+                double mx = firstX + nextX, my = firstY + nextY, ml = Math.Sqrt(mx * mx + my * my);
+                if (ml < 0.001) { mx = firstX; my = firstY; ml = 1; }
+                mx /= ml;
+                my /= ml;
+                double half = (width[i] * grow + (width[i] > 0 ? extra : 0)) / 2 / Math.Max(0.4, mx * firstX + my * firstY);
+                edge[i] = new PointF((float)((b.X + mx * half + shiftX) * scale), (float)((b.Y + my * half + shiftY) * scale));
+                edge[n * 2 - 1 - i] = new PointF((float)((b.X - mx * half + shiftX) * scale), (float)((b.Y - my * half + shiftY) * scale));
+            }
+            return edge;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) ticks.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
+    internal sealed class Shatter : Overlay
+    {
+        internal sealed class Shard
+        {
+            internal float X;
+            internal float Y;
+            internal float Size;
+            internal float Angle;
+            internal float Spin;
+            internal float Way;
+            internal float Speed;
+            internal float Rise;
+            internal float Delay;
+            internal Color Colour;
+        }
+
+        internal const double LeaveLength = 0.95;
+        internal const double ArriveLength = 0.72;
+        internal const double Handoff = 0.42;
+        internal static readonly Color Violet = Color.FromArgb(122, 60, 255);
+        internal static readonly Color Mint = Color.FromArgb(30, 240, 138);
+        private readonly Timer ticks = new Timer();
+        private readonly System.Diagnostics.Stopwatch watch = new System.Diagnostics.Stopwatch();
+        private readonly Random random = new Random();
+        private Bitmap picture;
+        private List<Shard> shards;
+        private Rectangle area;
+        private Point at;
+        private bool leaving;
+        private float scale;
+        private int seed;
+
+        internal Shatter() : base("Capri shatter")
+        {
+            ticks.Interval = 33;
+            ticks.Tick += delegate { Step(); };
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams value = base.CreateParams;
+                value.ExStyle |= 0x00000020;
+                return value;
+            }
+        }
+
+        internal static Rectangle Room(Rectangle canvas) { return Rectangle.FromLTRB(canvas.Left - canvas.Width * 3 / 4, canvas.Top - canvas.Height, canvas.Right + canvas.Width * 3 / 4, canvas.Bottom + canvas.Height / 5); }
+
+        internal void Play(Bitmap self, Point canvas, Rectangle screen, bool leave, int size)
+        {
+            Stop();
+            area = Rectangle.Intersect(Room(new Rectangle(canvas, self.Size)), screen);
+            if (area.Width < 8 || area.Height < 8) { self.Dispose(); return; }
+            picture = self;
+            scale = size / 240f;
+            at = new Point(canvas.X - area.Left, canvas.Y - area.Top);
+            leaving = leave;
+            seed = random.Next();
+            shards = Cut(self, scale, leave, seed);
+            watch.Reset();
+            watch.Start();
+            Step();
+            ticks.Start();
+        }
+
+        internal void Stop()
+        {
+            ticks.Stop();
+            if (Visible) Hide();
+            if (picture != null) { picture.Dispose(); picture = null; }
+        }
+
+        private void Step()
+        {
+            double t = watch.Elapsed.TotalSeconds;
+            if (picture == null || t >= (leaving ? LeaveLength : ArriveLength)) { Stop(); return; }
+            Present(Frame(area.Size, picture, at, shards, t, leaving, scale, seed, (int)(t * 30)), area.Location);
+        }
+
+        private static double Smooth(double x)
+        {
+            x = Math.Max(0, Math.Min(1, x));
+            return x * x * (3 - 2 * x);
+        }
+
+        internal static List<Shard> Cut(Bitmap self, float scale, bool leave, int seed)
+        {
+            Random pick = new Random(seed);
+            List<Shard> made = new List<Shard>();
+            int step = Math.Max(6, (int)Math.Round(9 * scale));
+            float middleX = self.Width / 2f, middleY = self.Height / 2f;
+            Color[] accents = { Violet, Mint, Color.White, Look.Red, Look.Pink };
+            for (int y = step / 2; y < self.Height; y += step)
+                for (int x = step / 2; x < self.Width; x += step)
+                {
+                    Color seen = self.GetPixel(x, y);
+                    if (seen.A < 140) continue;
+                    Shard shard = new Shard();
+                    shard.X = x + (float)(pick.NextDouble() - 0.5) * step * 0.6f;
+                    shard.Y = y + (float)(pick.NextDouble() - 0.5) * step * 0.6f;
+                    shard.Size = step * (0.55f + 0.6f * (float)pick.NextDouble());
+                    shard.Angle = (float)(pick.NextDouble() * Math.PI);
+                    shard.Spin = (float)((pick.NextDouble() * 2 - 1) * 9);
+                    shard.Way = (float)(Math.Atan2(y - middleY, x - middleX) + (pick.NextDouble() * 2 - 1) * 0.9);
+                    shard.Speed = (float)((170 + pick.NextDouble() * 430) * scale);
+                    shard.Rise = (float)((40 + pick.NextDouble() * 200) * scale);
+                    shard.Delay = (float)(leave ? 0.1 + 0.12 * (1 - y / (double)self.Height) + pick.NextDouble() * 0.14 : 0.04 + pick.NextDouble() * 0.12);
+                    bool chunk = pick.Next(100) < 9;
+                    if (chunk) shard.Size *= 2.2f;
+                    shard.Colour = chunk || pick.Next(10) < 3 ? accents[pick.Next(accents.Length)] : Color.FromArgb(255, seen.R, seen.G, seen.B);
+                    made.Add(shard);
+                }
+            return made;
+        }
+
+        internal static Bitmap Frame(Size size, Bitmap self, Point at, List<Shard> shards, double t, bool leave, float scale, int seed, int flicker)
+        {
+            Bitmap image = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppPArgb);
+            Random pick = new Random(seed + flicker * 7919);
+            double length = leave ? LeaveLength : ArriveLength;
+            float middleX = at.X + self.Width / 2f, middleY = at.Y + self.Height * 0.45f, feet = at.Y + self.Height * 0.9f;
+            using (Graphics graphics = Graphics.FromImage(image))
+            {
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                if (leave) Beam(graphics, middleX, 0, feet, t - 0.45, 0.06, 0.12, 0.33, true, scale, pick);
+                else Beam(graphics, middleX, 0, feet, t, 0.08, 0.12, 0.26, false, scale, pick);
+                double shown = leave ? 1 - Smooth((t - 0.14) / 0.2) : t < Handoff + 0.05 ? Smooth((t - 0.28) / 0.12) : 0;
+                double glitch = leave ? Math.Min(1, 0.35 + t / 0.12) : 1 - Smooth((t - 0.34) / 0.1) * 0.6;
+                if (shown > 0.01) Sliced(graphics, self, at, shown, glitch, scale, pick);
+                PointF[] corners = new PointF[4];
+                foreach (Shard shard in shards)
+                {
+                    float x, y, tall, alpha;
+                    if (leave)
+                    {
+                        double life = t - shard.Delay;
+                        if (life < 0) continue;
+                        double travel = (1 - Math.Exp(-3 * life)) / 3;
+                        x = shard.X + (float)(Math.Cos(shard.Way) * shard.Speed * travel);
+                        y = shard.Y + (float)(Math.Sin(shard.Way) * shard.Speed * travel * 0.6 - shard.Rise * life);
+                        tall = shard.Size * (float)(1 - 0.55 * Smooth(life / 0.7));
+                        alpha = (float)(1 - Smooth((t - (length - 0.32)) / 0.32));
+                    }
+                    else
+                    {
+                        double land = 0.2 + shard.Delay, start = land - 0.24;
+                        if (t < start) continue;
+                        double left = 1 - Smooth((t - start) / 0.24);
+                        x = shard.X + (float)(Math.Cos(shard.Way) * shard.Speed * 0.38 * left);
+                        y = shard.Y + (float)(Math.Sin(shard.Way) * shard.Speed * 0.38 * left * 0.6 - shard.Rise * 0.5 * left);
+                        tall = shard.Size * (float)(0.6 + 0.4 * (1 - left));
+                        alpha = (float)(Smooth((t - start) / 0.1) * (1 - Smooth((t - Handoff) / 0.06)));
+                    }
+                    if (alpha <= 0.01 || tall <= 0.5f) continue;
+                    double turn = shard.Angle + shard.Spin * t;
+                    float c = (float)Math.Cos(turn), s = (float)Math.Sin(turn), wide = tall * 0.5f, px = at.X + x, py = at.Y + y;
+                    corners[0] = new PointF(px + tall * s, py - tall * c);
+                    corners[1] = new PointF(px + wide * c, py + wide * s);
+                    corners[2] = new PointF(px - tall * s, py + tall * c);
+                    corners[3] = new PointF(px - wide * c, py - wide * s);
+                    using (Brush fill = new SolidBrush(Color.FromArgb((int)(255 * alpha), shard.Colour))) graphics.FillPolygon(fill, corners);
+                }
+                if (!leave) Lines(graphics, middleX, middleY, (t - 0.3) / 0.42, scale, seed);
+            }
+            return image;
+        }
+
+        private static void Beam(Graphics graphics, float middle, float top, float bottom, double b, double rise, double hold, double fall, bool up, float scale, Random pick)
+        {
+            if (b < 0 || b > rise + hold + fall) return;
+            double grown = Smooth(b / rise);
+            double wide = 30 * scale * (b < rise ? grown : 1 - Smooth((b - rise - hold) / fall));
+            if (wide < 0.6) return;
+            float upper = up ? (float)(bottom - (bottom - top) * grown) : top;
+            float lower = up ? bottom : (float)(top + (bottom - top) * grown);
+            if (lower - upper < 2) return;
+            float w = (float)wide, rows = Math.Max(8, 14 * scale);
+            List<PointF> left = new List<PointF>(), right = new List<PointF>();
+            for (float y = upper; ; y += rows)
+            {
+                float row = Math.Min(y, lower);
+                left.Add(new PointF(middle - w / 2 - (float)(pick.NextDouble() * w * 0.35), row));
+                right.Add(new PointF(middle + w / 2 + (float)(pick.NextDouble() * w * 0.35), row));
+                if (row >= lower) break;
+            }
+            right.Reverse();
+            List<PointF> outline = new List<PointF>(left);
+            outline.AddRange(right);
+            RectangleF haze = new RectangleF(middle - w * 1.4f, upper, w * 2.8f, lower - upper);
+            using (LinearGradientBrush glow = new LinearGradientBrush(haze, Color.Transparent, Color.Transparent, LinearGradientMode.Horizontal))
+            {
+                ColorBlend blend = new ColorBlend();
+                blend.Colors = new[] { Color.FromArgb(0, Violet), Color.FromArgb(90, Violet), Color.FromArgb(0, Violet) };
+                blend.Positions = new[] { 0f, 0.5f, 1f };
+                glow.InterpolationColors = blend;
+                graphics.FillRectangle(glow, haze);
+            }
+            using (Pen edge = new Pen(Violet, Math.Max(2, 3 * scale))) graphics.DrawPolygon(edge, outline.ToArray());
+            using (Brush body = new SolidBrush(Look.Red)) graphics.FillPolygon(body, outline.ToArray());
+            using (Brush core = new SolidBrush(Color.FromArgb(245, 255, 255, 255))) graphics.FillRectangle(core, middle - w * 0.16f, upper, w * 0.32f, lower - upper);
+            using (Brush flash = new SolidBrush(Color.FromArgb((int)(150 * Math.Min(1, wide / (30 * scale))), 255, 255, 255))) graphics.FillEllipse(flash, middle - w * 1.6f, lower - w * 0.35f, w * 3.2f, w * 0.7f);
+        }
+
+        private static void Sliced(Graphics graphics, Bitmap self, Point at, double shown, double glitch, float scale, Random pick)
+        {
+            using (ImageAttributes plain = Tint(Color.Empty, shown))
+            using (ImageAttributes green = Tint(Mint, shown * 0.6 * glitch))
+            using (ImageAttributes violet = Tint(Violet, shown * 0.6 * glitch))
+            {
+                float shift = (float)(4 * scale * glitch);
+                for (int top = 0; top < self.Height; )
+                {
+                    int tall = Math.Min(self.Height - top, Math.Max(3, (int)(self.Height * (0.03 + pick.NextDouble() * 0.13))));
+                    float off = pick.Next(3) == 0 ? (float)((pick.NextDouble() * 2 - 1) * 18 * scale * glitch) : 0;
+                    foreach (KeyValuePair<ImageAttributes, float> layer in new[] { new KeyValuePair<ImageAttributes, float>(green, off - shift), new KeyValuePair<ImageAttributes, float>(violet, off + shift), new KeyValuePair<ImageAttributes, float>(plain, off) })
+                        graphics.DrawImage(self, new Rectangle(at.X + (int)Math.Round(layer.Value), at.Y + top, self.Width, tall), 0, top, self.Width, tall, GraphicsUnit.Pixel, layer.Key);
+                    top += tall;
+                }
+            }
+            Color[] bars = { Color.White, Mint, Look.Red, Violet };
+            for (int i = 0, count = (int)Math.Round(5 * glitch); i < count; i++)
+            {
+                int y = at.Y + (int)(self.Height * (0.1 + pick.NextDouble() * 0.8));
+                int width = (int)(self.Width * (0.25 + pick.NextDouble() * 0.5));
+                int x = at.X + (int)(self.Width * (0.5 + (pick.NextDouble() - 0.5) * 0.5)) - width / 2;
+                using (Brush bar = new SolidBrush(Color.FromArgb((int)(210 * shown), bars[pick.Next(bars.Length)]))) graphics.FillRectangle(bar, x, y, width, Math.Max(2, (int)((1 + pick.Next(3)) * scale)));
+            }
+        }
+
+        private static ImageAttributes Tint(Color colour, double alpha)
+        {
+            ImageAttributes tint = new ImageAttributes();
+            float a = (float)Math.Max(0, Math.Min(1, alpha));
+            ColorMatrix matrix = colour.IsEmpty
+                ? new ColorMatrix(new[] { new float[] { 1, 0, 0, 0, 0 }, new float[] { 0, 1, 0, 0, 0 }, new float[] { 0, 0, 1, 0, 0 }, new float[] { 0, 0, 0, a, 0 }, new float[] { 0, 0, 0, 0, 1 } })
+                : new ColorMatrix(new[] { new float[] { 0, 0, 0, 0, 0 }, new float[] { 0, 0, 0, 0, 0 }, new float[] { 0, 0, 0, 0, 0 }, new float[] { 0, 0, 0, a, 0 }, new float[] { colour.R / 255f, colour.G / 255f, colour.B / 255f, 0, 1 } });
+            tint.SetColorMatrix(matrix);
+            return tint;
+        }
+
+        private static void Lines(Graphics graphics, float middleX, float middleY, double u, float scale, int seed)
+        {
+            if (u <= 0 || u >= 1) return;
+            Random pick = new Random(seed);
+            Color[] colours = { Color.White, Color.White, Color.White, Look.Red, Violet };
+            float near = 120 * scale * (float)(0.7 + 0.9 * Smooth(u));
+            int alpha = (int)(235 * (1 - Smooth((u - 0.35) / 0.65)));
+            for (int i = 0; i < 28; i++)
+            {
+                double angle = (i + pick.NextDouble() * 0.7) / 28 * 2 * Math.PI;
+                float inner = near * (float)(0.85 + pick.NextDouble() * 0.5), outer = inner + 150 * scale * (float)(0.5 + pick.NextDouble());
+                float thick = (float)((2 + pick.NextDouble() * 6) * scale);
+                Color colour = colours[pick.Next(colours.Length)];
+                float c = (float)Math.Cos(angle), s = (float)Math.Sin(angle);
+                PointF[] wedge = { new PointF(middleX + c * inner, middleY + s * inner * 0.8f), new PointF(middleX + c * outer - s * thick, middleY + (s * outer + c * thick) * 0.8f), new PointF(middleX + c * outer + s * thick, middleY + (s * outer - c * thick) * 0.8f) };
+                using (Brush fill = new SolidBrush(Color.FromArgb(alpha, colour))) graphics.FillPolygon(fill, wedge);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { ticks.Dispose(); if (picture != null) { picture.Dispose(); picture = null; } }
+            base.Dispose(disposing);
+        }
+    }
+
+    internal sealed class Takeover : Overlay
+    {
+        internal const double FaceAt = 0.12;
+        internal const double FaceIn = 0.3;
+        internal const double FlyAt = 0.95;
+        internal const double FlyLength = 0.45;
+        internal const double BadgeAt = 1.3;
+        internal const double Settled = 1.75;
+        internal const double LeaveLength = 0.32;
+        internal const double VineLength = 1.6;
+        internal static readonly RectangleF FacePlate = new RectangleF(140, 145, 110, 110);
+        internal static readonly RectangleF Zoom = new RectangleF(45, 45, 300, 300);
+        private static readonly StringFormat Spaced = Typographic();
+        // Her face tearing through the window first is off for now (too intrusive, yerocsin42 27 Oct 2026); the badge and brackets still show.
+        internal static bool HackIn;
+        internal static Bitmap Face;
+        private static Bitmap painted, minted, bruised;
+        private static RectangleF paintedFrom;
+        private readonly Timer ticks = new Timer();
+        private readonly System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+        private readonly Random random = new Random();
+        private IntPtr window;
+        private string app = "";
+        private Rectangle box;
+        private Rectangle screen;
+        private Rectangle shownBox;
+        private double started = -1;
+        private double leaving = -1;
+        private double nextFlicker;
+        private double flickerUntil;
+        private bool clean;
+        private int seed;
+        private float scale = 1;
+
+        internal Takeover() : base("Capri control")
+        {
+            ticks.Interval = 33;
+            ticks.Tick += delegate { Step(); };
+        }
+
+        [DllImport("user32.dll")] private static extern bool SetWindowDisplayAffinity(IntPtr window, uint affinity);
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams value = base.CreateParams;
+                value.ExStyle |= 0x00000020;
+                return value;
+            }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            try { SetWindowDisplayAffinity(Handle, 0x11); } catch (EntryPointNotFoundException) { }
+        }
+
+        internal bool Active { get { return started >= 0 && leaving < 0; } }
+
+        internal IntPtr Window { get { return window; } }
+
+        private double Now { get { return watch.Elapsed.TotalSeconds; } }
+
+        internal void Follow(IntPtr handle, string name, Rectangle bounds, float size)
+        {
+            Rectangle seen;
+            if (handle == IntPtr.Zero) return;
+            scale = Math.Max(0.8f, Math.Min(1.6f, size));
+            if (Ledges.Showing(handle, out seen)) bounds = seen;
+            if (bounds.Width < 60 || bounds.Height < 40) return;
+            app = name;
+            if (Active && handle == window) return;
+            bool moving = Active;
+            window = handle;
+            box = bounds;
+            screen = Screen.FromRectangle(bounds).Bounds;
+            leaving = -1;
+            clean = false;
+            if (!moving) { started = HackIn ? Now : Now - Settled; seed = random.Next(); }
+            else if (Now - started > Settled) started = Now - (HackIn ? BadgeAt : Settled);
+            nextFlicker = Now + 4 + random.NextDouble() * 3;
+            ticks.Start();
+            Step();
+        }
+
+        internal void Release()
+        {
+            if (!Active) return;
+            leaving = Now;
+            clean = false;
+        }
+
+        internal void Stop()
+        {
+            ticks.Stop();
+            started = -1;
+            leaving = -1;
+            window = IntPtr.Zero;
+            if (Visible) Hide();
+        }
+
+        private void Step()
+        {
+            double now = Now, t = now - started;
+            if (started < 0) { ticks.Stop(); return; }
+            if (leaving >= 0 && now - leaving >= LeaveLength) { Stop(); return; }
+            Rectangle seen;
+            if (Ledges.Showing(window, out seen)) box = seen;
+            else if (leaving < 0) { Release(); now = Now; }
+            bool moving = t < Settled || leaving >= 0;
+            if (!moving && now >= nextFlicker) { flickerUntil = now + 0.12; nextFlicker = now + 4 + random.NextDouble() * 3; }
+            bool flicking = now < flickerUntil;
+            if (!moving && !flicking && clean && box == shownBox) return;
+            Rectangle area = t < Settled ? screen : Rectangle.Intersect(Rectangle.Inflate(box, 8, 8), screen);
+            if (area.Width < 8 || area.Height < 8) return;
+            Rectangle inside = new Rectangle(box.X - area.X, box.Y - area.Y, box.Width, box.Height);
+            Present(Frame(area.Size, inside, app, t, leaving >= 0 ? (now - leaving) / LeaveLength : 0, flicking ? seed + (int)(now * 30) : -1, Face, scale, seed), area.Location);
+            clean = !moving && !flicking;
+            shownBox = box;
+        }
+
+        private static StringFormat Typographic()
+        {
+            StringFormat format = (StringFormat)StringFormat.GenericTypographic.Clone();
+            format.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
+            return format;
+        }
+
+        private static double Smooth(double x)
+        {
+            x = Math.Max(0, Math.Min(1, x));
+            return x * x * (3 - 2 * x);
+        }
+
+        private static double Back(double x)
+        {
+            x = Math.Max(0, Math.Min(1, x)) - 1;
+            return x * x * (2.7 * x + 1.7) + 1;
+        }
+
+        internal static Bitmap Frame(Size size, Rectangle box, string app, double t, double gone, int glitch, Bitmap face, float scale, int seed)
+        {
+            Bitmap image = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppPArgb);
+            double fade = 1 - Smooth(gone);
+            if (fade <= 0) return image;
+            Random pick = new Random(glitch >= 0 ? glitch : (int)(t * 30) * 7919 + 13);
+            float unit = Math.Max(0.6f, Math.Min(1.6f, box.Height / 560f)), hole = (float)Math.Min(box.Height * 0.24, size.Height * 0.28);
+            PointF centre = new PointF(box.Left + box.Width / 2f, box.Top + box.Height / 2f);
+            double torn = Back((t - FaceAt) / 0.24), vine = (t - 0.08) / (VineLength - 0.08);
+            float ring = hole * 0.75f * (float)Math.Max(0.15, Math.Min(1, torn));
+            if (vine > 0 && t < VineLength) Tear.Tendrils(image, Rectangle.Inflate(box, box.Width / 30, box.Height / 30), centre, new SizeF(ring, ring), unit, gone > 0 ? Math.Max(vine, 0.8 + 0.17 * gone) : vine, seed, (int)(t * 30));
+            using (Graphics graphics = Graphics.FromImage(image))
+            using (Font font = Look.Mono(11 * scale, FontStyle.Bold))
+            {
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                string lead = "CAPRI IS CONTROLLING ", name = app.ToUpperInvariant();
+                float tall = 26 * scale, icon = 20 * scale, pad = 7 * scale;
+                float leadWide = graphics.MeasureString(lead, font, PointF.Empty, Spaced).Width;
+                float nameWide = graphics.MeasureString(name, font, PointF.Empty, Spaced).Width;
+                float wide = pad + icon + pad + leadWide + nameWide + pad * 1.4f;
+                float top = Math.Max(4 * scale, box.Top + 6 * scale);
+                float middle = box.Left + box.Width / 2f;
+                RectangleF iconAt = new RectangleF(middle - wide / 2 + pad, top + (tall - icon) / 2, icon, icon);
+                if (t < 0.2) Hits(graphics, box, t / 0.2 + gone, unit, pick);
+                if (t < FlyAt + FlyLength + 0.1) Border(graphics, box, Smooth((t - 0.08) / 0.2) * (1 - Smooth((t - FlyAt - FlyLength * 0.5) / 0.3)) * fade, scale, pick);
+                if (t >= FlyAt + FlyLength * 0.6) Brackets(graphics, box, Smooth((t - FlyAt - FlyLength * 0.6) / 0.25) * fade, scale);
+                if (t >= BadgeAt)
+                {
+                    double open = Smooth((t - BadgeAt) / 0.18);
+                    float shownWide = icon + pad * 2 + (float)((wide - icon - pad * 2) * open);
+                    float shake = glitch >= 0 ? (float)((pick.NextDouble() * 2 - 1) * 6 * scale) : 0;
+                    RectangleF slab = new RectangleF(middle - wide / 2 + shake, top, shownWide, tall);
+                    Badge(graphics, slab, iconAt, lead, name, font, pad, icon, Smooth((t - BadgeAt - 0.08) / 0.3), fade, face, glitch >= 0, pick, scale);
+                }
+                if (face != null && t >= FaceAt && t < FlyAt + FlyLength)
+                {
+                    double fly = Smooth((t - FlyAt) / FlyLength);
+                    float bob = (float)(Math.Sin(t * 7) * 3 * scale * (1 - fly));
+                    PointF from = new PointF(centre.X, centre.Y + bob);
+                    PointF to = new PointF(iconAt.X + icon / 2, iconAt.Y + icon / 2);
+                    double flick = t < FaceAt + 0.2 && pick.Next(3) == 0 ? 0.35 : 1;
+                    for (int ghost = 2; ghost >= 0; ghost--)
+                    {
+                        double p = Math.Max(0, fly - ghost * 0.09);
+                        if (ghost > 0 && (fly <= 0 || fly >= 1)) continue;
+                        float side = (float)(Math.Exp(Math.Log(hole * 2) + (Math.Log(icon) - Math.Log(hole * 2)) * p) * Math.Max(0.02, torn));
+                        PointF at = new PointF(from.X + (to.X - from.X) * (float)p, from.Y + (to.Y - from.Y) * (float)p);
+                        float q = (float)p;
+                        RectangleF source = new RectangleF(Zoom.X + (FacePlate.X - Zoom.X) * q, Zoom.Y + (FacePlate.Y - Zoom.Y) * q, Zoom.Width + (FacePlate.Width - Zoom.Width) * q, Zoom.Height + (FacePlate.Height - Zoom.Height) * q);
+                        double slices = ghost > 0 ? 0.6 : t < FaceAt + FaceIn ? 1 - (t - FaceAt) / FaceIn : pick.Next(9) == 0 ? 0.5 : 0;
+                        Portal(graphics, face, at, side, source, (ghost == 0 ? flick : 0.32 / ghost) * fade, slices, ghost == 1 ? Shatter.Violet : ghost == 2 ? Shatter.Mint : Color.Empty, scale, unit, p, seed, pick);
+                    }
+                }
+            }
+            return image;
+        }
+
+        private static Bitmap Baked(Bitmap face, int span, RectangleF source, Color tint)
+        {
+            Bitmap art = new Bitmap(span, span, PixelFormat.Format32bppPArgb);
+            using (Graphics paint = Graphics.FromImage(art))
+            using (ImageAttributes look = Tint(tint, tint.IsEmpty ? 1 : 0.55))
+            {
+                paint.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                paint.PixelOffsetMode = PixelOffsetMode.Half;
+                paint.DrawImage(face, new Rectangle(0, 0, span, span), source.X, source.Y, source.Width, source.Height, GraphicsUnit.Pixel, look);
+            }
+            return art;
+        }
+
+        private static void Portal(Graphics graphics, Bitmap face, PointF at, float side, RectangleF source, double alpha, double slices, Color tint, float scale, float unit, double square, int seed, Random pick)
+        {
+            if (side < 2 || alpha <= 0.01) return;
+            Random shape = new Random(seed ^ 0x5bd1);
+            const int Points = 14;
+            PointF[] edge = new PointF[Points], rim = new PointF[Points], lip = new PointF[Points];
+            float band = Math.Max(3 * unit, side * 0.05f), drop = 3 * unit * (float)(1 - square);
+            for (int i = 0; i < Points; i++)
+            {
+                double angle = (i + 0.3 * shape.NextDouble()) / Points * 2 * Math.PI - Math.PI / 2;
+                double jag = i % 2 == 0 ? 0.94 + 0.16 * shape.NextDouble() : 0.6 + 0.2 * shape.NextDouble();
+                double reach = (jag + (1 / Math.Max(Math.Abs(Math.Cos(angle)), Math.Abs(Math.Sin(angle))) - jag) * square) * side / 2;
+                float cos = (float)Math.Cos(angle), sin = (float)Math.Sin(angle);
+                edge[i] = new PointF(at.X + cos * (float)reach, at.Y + sin * (float)reach);
+                rim[i] = new PointF(at.X + cos * ((float)reach + band), at.Y + sin * ((float)reach + band));
+                lip[i] = new PointF(rim[i].X - drop, rim[i].Y + drop);
+            }
+            int a = (int)(255 * Math.Max(0, Math.Min(1, alpha)));
+            if (!tint.IsEmpty)
+            {
+                using (Brush ghost = new SolidBrush(Color.FromArgb(a, tint))) graphics.FillPolygon(ghost, rim);
+                return;
+            }
+            using (Brush violet = new SolidBrush(Color.FromArgb(a, Shatter.Violet))) graphics.FillPolygon(violet, lip);
+            using (Brush red = new SolidBrush(Color.FromArgb(a, 236, 6, 68))) graphics.FillPolygon(red, rim);
+            using (Brush dark = new SolidBrush(Color.FromArgb(a, 10, 8, 14))) graphics.FillPolygon(dark, edge);
+            int span = Math.Max(2, (int)Math.Ceiling(side * 1.08f));
+            if (painted == null || painted.Width != span || paintedFrom != source)
+            {
+                foreach (Bitmap old in new[] { painted, minted, bruised }) if (old != null) old.Dispose();
+                painted = Baked(face, span, source, Color.Empty);
+                minted = bruised = null;
+                paintedFrom = source;
+            }
+            Bitmap art = painted;
+            if (slices > 0.01 || alpha < 0.999)
+            {
+                if (slices > 0.25 && minted == null)
+                {
+                    minted = Baked(face, span, source, Shatter.Mint);
+                    bruised = Baked(face, span, source, Shatter.Violet);
+                }
+                art = new Bitmap(span, span, PixelFormat.Format32bppPArgb);
+                using (Graphics paint = Graphics.FromImage(art))
+                using (ImageAttributes look = Tint(Color.Empty, alpha))
+                {
+                    paint.InterpolationMode = InterpolationMode.NearestNeighbor;
+                    int shift = (int)(6 * scale * slices);
+                    for (float done = 0; done < 1; )
+                    {
+                        float part = slices <= 0.01 ? 1 : (float)Math.Min(1 - done, 0.05 + pick.NextDouble() * 0.15);
+                        int top = (int)(span * done), tall = Math.Max(1, (int)Math.Ceiling(span * part));
+                        int off = slices > 0.01 && pick.Next(3) == 0 ? (int)((pick.NextDouble() * 2 - 1) * 28 * scale * slices) : 0;
+                        if (slices > 0.25)
+                        {
+                            paint.DrawImage(minted, new Rectangle(off - shift, top, span, tall), 0, top, span, tall, GraphicsUnit.Pixel);
+                            paint.DrawImage(bruised, new Rectangle(off + shift, top, span, tall), 0, top, span, tall, GraphicsUnit.Pixel);
+                        }
+                        paint.DrawImage(painted, new Rectangle(off, top, span, tall), 0, top, span, tall, GraphicsUnit.Pixel, look);
+                        done += part;
+                    }
+                }
+            }
+            InterpolationMode smooth = graphics.InterpolationMode;
+            PixelOffsetMode offset = graphics.PixelOffsetMode;
+            graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+            graphics.PixelOffsetMode = PixelOffsetMode.None;
+            using (TextureBrush texture = new TextureBrush(art, WrapMode.Clamp))
+            {
+                texture.TranslateTransform((float)Math.Round(at.X - span / 2f), (float)Math.Round(at.Y - span / 2f));
+                graphics.FillPolygon(texture, edge);
+            }
+            graphics.InterpolationMode = smooth;
+            graphics.PixelOffsetMode = offset;
+            if (art != painted) art.Dispose();
+            using (Pen seam = new Pen(Color.FromArgb(a, 10, 8, 14), Math.Max(1.2f, 1.6f * unit))) graphics.DrawPolygon(seam, edge);
+        }
+
+        private static void Hits(Graphics graphics, Rectangle box, double t, float unit, Random pick)
+        {
+            double fade = 1 - Smooth(t);
+            if (fade <= 0.01) return;
+            Color[] colours = { Look.Red, Color.FromArgb(10, 8, 14), Look.Pink, Shatter.Mint, Shatter.Violet };
+            for (int i = 0, bars = 4 + pick.Next(5); i < bars; i++)
+            {
+                float wide = box.Width * (float)(0.25 + pick.NextDouble() * 0.65), tall = (1 + pick.Next(5)) * unit;
+                using (Brush bar = new SolidBrush(Color.FromArgb((int)(220 * fade), colours[pick.Next(colours.Length)])))
+                    graphics.FillRectangle(bar, box.Left + (float)pick.NextDouble() * (box.Width - wide), box.Top + (float)pick.NextDouble() * box.Height, wide, tall);
+            }
+        }
+
+        private static Rectangle Rect(RectangleF area) { return Rectangle.Round(area); }
+
+        private static ImageAttributes Tint(Color colour, double alpha)
+        {
+            ImageAttributes tint = new ImageAttributes();
+            float a = (float)Math.Max(0, Math.Min(1, alpha));
+            tint.SetColorMatrix(colour.IsEmpty
+                ? new ColorMatrix(new[] { new float[] { 1, 0, 0, 0, 0 }, new float[] { 0, 1, 0, 0, 0 }, new float[] { 0, 0, 1, 0, 0 }, new float[] { 0, 0, 0, a, 0 }, new float[] { 0, 0, 0, 0, 1 } })
+                : new ColorMatrix(new[] { new float[] { 0, 0, 0, 0, 0 }, new float[] { 0, 0, 0, 0, 0 }, new float[] { 0, 0, 0, 0, 0 }, new float[] { 0, 0, 0, a, 0 }, new float[] { colour.R / 255f, colour.G / 255f, colour.B / 255f, 0, 1 } }));
+            return tint;
+        }
+
+        private static void Border(Graphics graphics, Rectangle box, double alpha, float scale, Random pick)
+        {
+            if (alpha <= 0.01) return;
+            List<PointF> edge = new List<PointF>();
+            float step = 18 * scale, kick = 5 * scale;
+            for (float x = box.Left; x < box.Right; x += step) edge.Add(new PointF(x, box.Top + (float)(pick.NextDouble() * 2 - 1) * kick));
+            for (float y = box.Top; y < box.Bottom; y += step) edge.Add(new PointF(box.Right + (float)(pick.NextDouble() * 2 - 1) * kick, y));
+            for (float x = box.Right; x > box.Left; x -= step) edge.Add(new PointF(x, box.Bottom + (float)(pick.NextDouble() * 2 - 1) * kick));
+            for (float y = box.Bottom; y > box.Top; y -= step) edge.Add(new PointF(box.Left + (float)(pick.NextDouble() * 2 - 1) * kick, y));
+            PointF[] points = edge.ToArray();
+            Color[] colours = { Shatter.Violet, Color.FromArgb(40, 230, 255), Look.Pink };
+            for (int i = 0; i < colours.Length; i++)
+                using (Pen pen = new Pen(Color.FromArgb((int)(220 * alpha), colours[i]), (i == 2 ? 2.4f : 2f) * scale))
+                {
+                    pen.LineJoin = LineJoin.Miter;
+                    using (Matrix shift = new Matrix())
+                    {
+                        shift.Translate((i - 1) * 2.5f * scale, 0);
+                        PointF[] moved = (PointF[])points.Clone();
+                        shift.TransformPoints(moved);
+                        graphics.DrawPolygon(pen, moved);
+                    }
+                }
+        }
+
+        private static void Brackets(Graphics graphics, Rectangle box, double alpha, float scale)
+        {
+            if (alpha <= 0.01) return;
+            float reach = 22 * scale, thick = 3 * scale;
+            foreach (int pass in new[] { 0, 1 })
+                using (Pen pen = new Pen(Color.FromArgb((int)(230 * alpha), pass == 0 ? Shatter.Violet : Look.Pink), thick))
+                {
+                    pen.StartCap = LineCap.Square;
+                    pen.EndCap = LineCap.Square;
+                    float o = pass == 0 ? 2 * scale : 0, l = box.Left + 2 + o, r = box.Right - 3 + o, u = box.Top + 2 + o, d = box.Bottom - 3 + o;
+                    graphics.DrawLines(pen, new[] { new PointF(l, u + reach), new PointF(l, u), new PointF(l + reach, u) });
+                    graphics.DrawLines(pen, new[] { new PointF(r - reach, u), new PointF(r, u), new PointF(r, u + reach) });
+                    graphics.DrawLines(pen, new[] { new PointF(l, d - reach), new PointF(l, d), new PointF(l + reach, d) });
+                    graphics.DrawLines(pen, new[] { new PointF(r - reach, d), new PointF(r, d), new PointF(r, d - reach) });
+                }
+        }
+
+        private static void Badge(Graphics graphics, RectangleF slab, RectangleF iconAt, string lead, string name, Font font, float pad, float icon, double typed, double fade, Bitmap face, bool glitch, Random pick, float scale)
+        {
+            int a = (int)(255 * fade);
+            using (GraphicsPath shape = new GraphicsPath())
+            {
+                float cut = slab.Height * 0.35f;
+                shape.AddPolygon(new[] { new PointF(slab.Left + cut, slab.Top), new PointF(slab.Right, slab.Top), new PointF(slab.Right - cut, slab.Bottom), new PointF(slab.Left, slab.Bottom) });
+                using (Brush lip = new SolidBrush(Color.FromArgb(a, Shatter.Violet)))
+                using (Matrix down = new Matrix())
+                using (GraphicsPath under = (GraphicsPath)shape.Clone())
+                {
+                    down.Translate(2 * scale, 3 * scale);
+                    under.Transform(down);
+                    graphics.FillPath(lip, under);
+                }
+                using (LinearGradientBrush fill = new LinearGradientBrush(slab, Color.FromArgb(a * 94 / 100, 34, 22, 44), Color.FromArgb(a * 96 / 100, 12, 8, 18), LinearGradientMode.Vertical)) graphics.FillPath(fill, shape);
+                using (Pen edge = new Pen(Color.FromArgb(a, Look.Red), 1.6f * scale)) graphics.DrawPath(edge, shape);
+                using (Region was = graphics.Clip)
+                {
+                graphics.SetClip(shape, CombineMode.Intersect);
+                float x = iconAt.Left + icon + pad;
+                float y = slab.Top + (slab.Height - font.GetHeight(graphics)) / 2 + 1;
+                int shown = (int)Math.Round((lead.Length + name.Length) * Math.Max(0, Math.Min(1, typed)));
+                string leadShown = lead.Substring(0, Math.Min(lead.Length, shown)), nameShown = shown > lead.Length ? name.Substring(0, Math.Min(name.Length, shown - lead.Length)) : "";
+                using (Brush pink = new SolidBrush(Color.FromArgb(a, Look.Pink)))
+                using (Brush white = new SolidBrush(Color.FromArgb(a, 255, 255, 255)))
+                {
+                    graphics.DrawString(leadShown, font, pink, x, y, Spaced);
+                    if (nameShown.Length > 0) graphics.DrawString(nameShown, font, white, x + graphics.MeasureString(lead, font, PointF.Empty, Spaced).Width, y, Spaced);
+                }
+                if (glitch)
+                    using (Brush bar = new SolidBrush(Color.FromArgb(a * 3 / 4, pick.Next(2) == 0 ? Shatter.Mint : Look.Pink)))
+                        graphics.FillRectangle(bar, slab.Left, slab.Top + (float)pick.NextDouble() * slab.Height, slab.Width * (float)(0.3 + pick.NextDouble() * 0.6), Math.Max(1, 2 * scale));
+                graphics.Clip = was;
+                }
+            }
+            using (Brush back = new SolidBrush(Color.FromArgb(a, 10, 8, 14))) graphics.FillRectangle(back, iconAt);
+            if (face != null)
+                using (ImageAttributes look = Tint(Color.Empty, fade))
+                    graphics.DrawImage(face, Rect(iconAt), FacePlate.X, FacePlate.Y, FacePlate.Width, FacePlate.Height, GraphicsUnit.Pixel, look);
+            using (Pen ring = new Pen(Color.FromArgb(a, Shatter.Mint), 1.4f * scale)) graphics.DrawRectangle(ring, iconAt.X, iconAt.Y, iconAt.Width, iconAt.Height);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) ticks.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
+    // Her own pink pointer for mouse jobs: it glides to each target and ripples where she clicks, while their mouse
+    // stays where they left it. Clicks go straight through it, recordings show it, and her own screenshots paint it out.
+    internal sealed class HerPointer : Overlay
+    {
+        internal const double Ripple = 0.38;
+        private readonly Timer ticks = new Timer();
+        private readonly System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+        private readonly object gate = new object();
+        private IntPtr window;
+        private Bitmap arrow;
+        private Point tip;
+        private int reach = 40;
+        private float scale = 1;
+        private double tapped = -1;
+
+        internal HerPointer() : base("Capri pointer")
+        {
+            ticks.Interval = 16;
+            ticks.Tick += delegate { Step(); };
+        }
+
+        [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams value = base.CreateParams;
+                value.ExStyle |= 0x00000020;
+                return value;
+            }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            window = Handle;
+        }
+
+        internal Point Tip { get { lock (gate) return tip; } }
+
+        internal bool Rippling { get { return tapped >= 0; } }
+
+        // Her job thread calls this on every step of a glide, so it only posts the move to the window's own thread.
+        internal void MoveTo(Point at)
+        {
+            int edge;
+            lock (gate) { tip = at; edge = reach; }
+            IntPtr handle = window;
+            if (handle != IntPtr.Zero) SetWindowPos(handle, new IntPtr(-1), at.X - edge, at.Y - edge, 0, 0, 0x0001 | 0x0010 | 0x4000);
+        }
+
+        internal void Begin(Point at)
+        {
+            using (Graphics screen = Graphics.FromHwnd(IntPtr.Zero)) scale = Math.Max(1f, screen.DpiX / 96f);
+            int size = (int)Math.Round(36 * scale);
+            if (arrow == null || arrow.Width != size) { if (arrow != null) arrow.Dispose(); arrow = Look.PointerArt(size); }
+            lock (gate) { tip = at; reach = (int)Math.Round(40 * scale); }
+            tapped = -1;
+            Render();
+        }
+
+        internal void Tap()
+        {
+            if (!Visible) return;
+            tapped = watch.Elapsed.TotalSeconds;
+            ticks.Start();
+            Render();
+        }
+
+        internal void End()
+        {
+            ticks.Stop();
+            tapped = -1;
+            if (Visible) Hide();
+        }
+
+        private void Step()
+        {
+            if (tapped >= 0 && watch.Elapsed.TotalSeconds - tapped > Ripple) { tapped = -1; ticks.Stop(); }
+            if (Visible) Render();
+        }
+
+        internal void Render()
+        {
+            if (arrow == null) return;
+            Point at = Tip;
+            Bitmap frame = new Bitmap(reach * 2, reach * 2, PixelFormat.Format32bppArgb);
+            using (Graphics graphics = Graphics.FromImage(frame))
+            {
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                if (tapped >= 0)
+                {
+                    double t = Math.Min(1, (watch.Elapsed.TotalSeconds - tapped) / Ripple);
+                    float eased = (float)(1 - Math.Pow(1 - t, 3));
+                    float radius = (5 + 17 * eased) * scale;
+                    int alpha = (int)Math.Round(230 * (1 - t));
+                    using (Pen cyan = new Pen(Color.FromArgb(alpha / 2, Look.Cyan), 2f * scale)) graphics.DrawEllipse(cyan, reach - radius + 1.5f * scale, reach - radius + 0.5f * scale, radius * 2, radius * 2);
+                    using (Pen pink = new Pen(Color.FromArgb(alpha, Look.Pink), (2.6f - 1.2f * eased) * scale)) graphics.DrawEllipse(pink, reach - radius, reach - radius, radius * 2, radius * 2);
+                }
+                float s = arrow.Width / 32f;
+                graphics.DrawImage(arrow, reach - 2 * s, reach - 2 * s, arrow.Width, arrow.Height);
+            }
+            Present(frame, new Point(at.X - reach, at.Y - reach));
+            // A window she clicks may be always on top too; her pointer stays above it, like a real cursor.
+            SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { ticks.Dispose(); if (arrow != null) { arrow.Dispose(); arrow = null; } }
+            base.Dispose(disposing);
+        }
+    }
+
+    // "Capri is working on your task": each step of a mouse and keyboard job as it happens, in her speech box look.
+    internal sealed class TaskPanel : Overlay
+    {
+        private const int Columns = 36;
+        private const int MostRows = 7;
+        private const string Speaker = "CAPRI: ";
+        private readonly Timer ticks = new Timer();
+        private readonly System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+        private readonly List<JobStep> steps = new List<JobStep>();
+        private object owner;
+        private string words = "";
+        private string busy;
+        private string outcome;
+        private string ending = "";
+        private double endedAt = -1;
+        private Rectangle area;
+        private float scale = 1;
+        private string drawn;
+
+        internal TaskPanel() : base("Capri task")
+        {
+            ticks.Interval = 50;
+            ticks.Tick += delegate { Step(); };
+        }
+
+        [DllImport("user32.dll")] private static extern bool SetWindowDisplayAffinity(IntPtr window, uint affinity);
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams value = base.CreateParams;
+                value.ExStyle |= 0x00000020;
+                return value;
+            }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            // Her own screenshots skip the panel, and clicks go straight through it.
+            try { SetWindowDisplayAffinity(Handle, 0x11); } catch (EntryPointNotFoundException) { }
+        }
+
+        internal bool Showing { get { return owner != null; } }
+
+        internal string Outcome { get { return outcome; } }
+
+        internal int Rows { get { return steps.Count; } }
+
+        private double Now { get { return watch.Elapsed.TotalSeconds; } }
+
+        internal void Begin(object job, string task, Rectangle screen)
+        {
+            if (job != owner) { steps.Clear(); words = task ?? ""; }
+            owner = job;
+            outcome = null;
+            ending = "";
+            endedAt = -1;
+            busy = null;
+            area = screen;
+            using (Graphics graphics = Graphics.FromHwnd(IntPtr.Zero)) scale = Math.Max(1f, graphics.DpiX / 96f);
+            ticks.Start();
+            Step();
+        }
+
+        internal void Busy(object job, string what)
+        {
+            if (job != owner || outcome != null) return;
+            busy = what;
+            Step();
+        }
+
+        internal void Add(object job, JobStep step)
+        {
+            if (job != owner || step == null) return;
+            if (steps.Count > 0 && !steps[steps.Count - 1].Finished) steps[steps.Count - 1] = step;
+            else steps.Add(step);
+            busy = null;
+            Step();
+        }
+
+        internal void End(object job, string how, string said)
+        {
+            if (job != owner || owner == null) return;
+            outcome = how ?? "failed";
+            ending = System.Text.RegularExpressions.Regex.Replace(said ?? "", @"\s+", " ").Trim();
+            busy = null;
+            endedAt = Now;
+            if (steps.Count > 0 && !steps[steps.Count - 1].Finished) steps.RemoveAt(steps.Count - 1);
+            Step();
+        }
+
+        internal void Stop()
+        {
+            ticks.Stop();
+            owner = null;
+            steps.Clear();
+            if (Visible) Hide();
+        }
+
+        private void Step()
+        {
+            if (owner == null) { ticks.Stop(); return; }
+            double stay = outcome == "done" ? 4 : outcome == "waiting" || outcome == "asked" ? 8 : 6;
+            double gone = outcome == null ? 0 : (Now - endedAt - stay) / 0.4;
+            if (gone >= 1) { Stop(); return; }
+            bool caret = outcome == null && (int)(Now * 2.5) % 2 == 0;
+            double fade = 1 - Math.Max(0, gone);
+            string shown = outcome + "|" + busy + "|" + steps.Count + "|" + (steps.Count > 0 ? steps[steps.Count - 1].Label + steps[steps.Count - 1].Finished : "") + "|" + caret + "|" + fade.ToString("0.00") + "|" + area;
+            if (shown == drawn && Visible) return;
+            drawn = shown;
+            Bitmap image = Frame(words, steps, busy, outcome, ending, caret, fade, scale);
+            Present(image, new Point(area.Right - image.Width - (int)(8 * scale), area.Bottom - image.Height - (int)(8 * scale)));
+        }
+
+        internal static Bitmap Frame(string task, IList<JobStep> steps, string busy, string outcome, string ending, bool caret, double fade, float s)
+        {
+            string status = Speaker + (outcome == null ? "working on your task." : ending.Length > 0 ? ending : outcome == "done" ? "done." : "stopped.");
+            System.Text.StringBuilder every = new System.Text.StringBuilder(task + status + busy);
+            foreach (JobStep step in steps) every.Append(step.Label);
+            using (Font text = Look.Mono(14 * s, FontStyle.Regular, GraphicsUnit.Pixel, every.ToString()))
+            using (Font heard = Look.Mono(14 * s, FontStyle.Italic, GraphicsUnit.Pixel, every.ToString()))
+            using (Font bold = Look.Mono(14 * s, FontStyle.Bold, GraphicsUnit.Pixel, every.ToString()))
+            {
+                float cw = Look.CharWidth(text), line = 19 * s, margin = 12 * s;
+                List<string> you = Look.Wrap("> you: " + System.Text.RegularExpressions.Regex.Replace(task ?? "", @"\s+", " ").Trim(), Columns);
+                if (you.Count > 2) { you.RemoveRange(2, you.Count - 2); you[1] = you[1].Substring(0, Math.Min(you[1].Length, Columns - 3)) + "..."; }
+                List<string> said = Look.Wrap(status, Columns);
+                if (said.Count > 3) { said.RemoveRange(3, said.Count - 3); said[2] = said[2].Substring(0, Math.Min(said[2].Length, Columns - 3)) + "..."; }
+                int hidden = steps.Count > MostRows ? steps.Count - (MostRows - 1) : 0;
+                List<string> rows = new List<string>();
+                List<Color> inks = new List<Color>();
+                if (hidden > 0) { rows.Add("  +" + hidden + " earlier steps"); inks.Add(Look.Dim); }
+                for (int i = hidden > 0 ? steps.Count - (MostRows - 1) : 0; i < steps.Count; i++)
+                {
+                    rows.Add((steps[i].Finished ? "• " : "> ") + steps[i].Label + (steps[i].Finished ? "" : "..."));
+                    inks.Add(steps[i].Failed ? Look.Red : steps[i].Finished ? Look.Dim : Look.Neon);
+                }
+                bool thinking = outcome == null && busy != null;
+                if (thinking) { rows.Add("> " + busy); inks.Add(Look.Neon); }
+                for (int i = 0; i < rows.Count; i++) if (rows[i].Length > Columns) rows[i] = rows[i].Substring(0, Columns - 3) + "...";
+                bool running = outcome == null;
+                float panelWidth = 30 * s + Columns * cw;
+                float panelHeight = 12 * s + line * (you.Count + said.Count + rows.Count) + (rows.Count > 0 ? 6 * s : 0) + (running ? line : 0) + 8 * s;
+                Bitmap image = new Bitmap((int)Math.Ceiling(panelWidth + margin * 2), (int)Math.Ceiling(panelHeight + margin * 2), PixelFormat.Format32bppPArgb);
+                int a = (int)(255 * Math.Max(0, Math.Min(1, fade)));
+                if (a == 0) return image;
+                RectangleF panel = new RectangleF(margin, margin, panelWidth, panelHeight);
+                using (Graphics graphics = Graphics.FromImage(image))
+                using (GraphicsPath path = Look.Plate(panel, 10 * s, -1, panel.Top + panel.Height / 2, 0, true))
+                {
+                    graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                    using (Pen glow = new Pen(Color.FromArgb(46 * a / 255, Look.Cyan), 7 * s)) graphics.DrawPath(glow, path);
+                    using (Brush fill = new SolidBrush(Color.FromArgb(238 * a / 255, Look.Panel))) graphics.FillPath(fill, path);
+                    graphics.SetClip(path);
+                    using (Pen scan = new Pen(Color.FromArgb(9 * a / 255, 255, 255, 255), Math.Max(1, s)))
+                        for (float row = panel.Top; row < panel.Bottom; row += 3 * s) graphics.DrawLine(scan, panel.Left, row, panel.Right, row);
+                    graphics.ResetClip();
+                    using (Pen edge = new Pen(Color.FromArgb(a, Look.Cyan), 2 * s)) graphics.DrawPath(edge, path);
+                    float x = panel.Left + 15 * s, y = panel.Top + 12 * s;
+                    using (Brush dim = new SolidBrush(Color.FromArgb(a, Look.Dim)))
+                        foreach (string row in you) { graphics.DrawString(row, heard, dim, x, y, StringFormat.GenericTypographic); y += line; }
+                    using (Brush red = new SolidBrush(Color.FromArgb(a, Look.Red)))
+                    using (Brush ink = new SolidBrush(Color.FromArgb(a, Look.Neon)))
+                        for (int i = 0; i < said.Count; i++)
+                        {
+                            int name = i == 0 ? Math.Min(said[i].Length, Speaker.Length - 1) : 0;
+                            if (name > 0) graphics.DrawString(said[i].Substring(0, name), bold, red, x, y, StringFormat.GenericTypographic);
+                            graphics.DrawString(said[i].Substring(name), text, ink, x + name * cw, y, StringFormat.GenericTypographic);
+                            y += line;
+                        }
+                    if (rows.Count > 0) y += 6 * s;
+                    for (int i = 0; i < rows.Count; i++)
+                    {
+                        using (Brush ink = new SolidBrush(Color.FromArgb(a, inks[i]))) graphics.DrawString(rows[i], text, ink, x, y, StringFormat.GenericTypographic);
+                        if (thinking && caret && i == rows.Count - 1)
+                            using (Brush block = new SolidBrush(Color.FromArgb(a, Look.Neon))) graphics.FillRectangle(block, x + rows[i].Length * cw + 2 * s, y + s, cw * 0.85f, line - 5 * s);
+                        y += line;
+                    }
+                    if (running)
+                        using (Font small = Look.Mono(12 * s, FontStyle.Regular, GraphicsUnit.Pixel))
+                        using (Brush dim = new SolidBrush(Color.FromArgb(a, Look.Dim)))
+                            graphics.DrawString("ESC STOPS ME", small, dim, panel.Right - 15 * s - graphics.MeasureString("ESC STOPS ME", small, PointF.Empty, StringFormat.GenericTypographic).Width, y + 2 * s, StringFormat.GenericTypographic);
+                }
+                return image;
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) ticks.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
     internal sealed class SpeechBox : Overlay
     {
         internal event Action Dismissed;
@@ -478,6 +1843,12 @@ namespace CapriDesktop
         {
             base.OnMouseUp(e);
             if (e.Button == MouseButtons.Left && Dismissed != null) Dismissed();
+        }
+
+        internal static int Fit(string text)
+        {
+            int length = (text ?? "").Length;
+            return length > 420 ? 56 : length > 220 ? 44 : Columns;
         }
 
         internal static float PanelWidth(float s)
@@ -517,17 +1888,19 @@ namespace CapriDesktop
 
         private Bitmap Render(float s, Point head, Point feet, Rectangle area, bool cursorOn, out Point at)
         {
-            using (Font text = Look.Mono(14 * s, FontStyle.Regular))
-            using (Font heard = Look.Mono(14 * s, FontStyle.Italic))
-            using (Font bold = Look.Mono(14 * s, FontStyle.Bold))
+            string all = Speaker + (Reply ?? "") + (Heard ?? "");
+            using (Font text = Look.Mono(14 * s, FontStyle.Regular, GraphicsUnit.Pixel, all))
+            using (Font heard = Look.Mono(14 * s, FontStyle.Italic, GraphicsUnit.Pixel, all))
+            using (Font bold = Look.Mono(14 * s, FontStyle.Bold, GraphicsUnit.Pixel, all))
             {
                 float cw = Look.CharWidth(text);
                 float line = 19 * s;
                 float margin = 12 * s;
                 float top = 10 * s;
                 float tail = 16 * s;
-                List<string> lines = Look.Wrap(Speaker + (Reply ?? ""), Columns);
-                float panelWidth = 24 * s + Columns * cw + 14 * s;
+                int columns = Fit(Speaker + (Reply ?? ""));
+                List<string> lines = Look.Wrap(Speaker + (Reply ?? ""), columns);
+                float panelWidth = 24 * s + columns * cw + 14 * s;
                 float panelHeight = 13 * s + line * (1 + lines.Count) + 10 * s;
                 int width = (int)Math.Ceiling(panelWidth + margin * 2);
                 int height = (int)Math.Ceiling(top + panelHeight + tail + 4 * s);
@@ -558,7 +1931,7 @@ namespace CapriDesktop
                     float x = panel.Left + 24 * s;
                     float row2 = panel.Top + 12 * s;
                     string you = Prompt + (Heard ?? "");
-                    if (you.Length > Columns) you = you.Substring(0, Columns - 3) + "...";
+                    if (you.Length > columns) you = you.Substring(0, columns - 3) + "...";
                     using (Brush dim = new SolidBrush(Look.Dim)) graphics.DrawString(you, heard, dim, x, row2, StringFormat.GenericTypographic);
                     row2 += line;
                     int remaining = Speaker.Length + (State == TalkState.Thinking ? (Reply ?? "").Length : Math.Max(0, Revealed));

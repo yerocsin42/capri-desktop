@@ -95,7 +95,7 @@ namespace CapriDesktop
     internal sealed class Agent : IDisposable
     {
         internal const double Pace = 15;
-        internal const int Version = 6;
+        internal const int Version = 12;
         private const string Patience = "\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45}";
         internal event Action<int> Opened;
         internal event Action<string> Heard;
@@ -110,7 +110,7 @@ namespace CapriDesktop
         private volatile bool ready;
         internal Func<string, ToolArguments, string> Act;
 
-        internal static string Prompt { get { return Brain.Persona + Hands.Note + "\nYou are talking out loud in a live voice chat: keep every reply to one or two short spoken sentences, and never write tags in square brackets.\nIf the user goes quiet, that's fine: they're probably busy or gaming. Don't beg them to talk or say they left you hanging. If they stay quiet, check in once with one short line, then let them be.\nSo the voice says your slang right, always spell choom as chewm, preem as preme and yezzirrr as yessirrr."; } }
+        internal static string Prompt { get { return Brain.Persona + Hands.Note + "\nYou are talking out loud in a live voice chat: keep every reply to one or two short spoken sentences, and never write tags in square brackets.\nIf the user goes quiet, that's fine: they're probably busy or gaming. Don't beg them to talk or say they left you hanging. If they stay quiet, check in once with one short line, then let them be.\nSo the voice says your slang right, always spell choom as chewm, preem as preme and yezzirrr as yessirrr. Say chewm rarely, at most once every few replies and never on its own."; } }
 
         internal static string Create(string key, string voiceId)
         {
@@ -119,6 +119,13 @@ namespace CapriDesktop
             if (string.IsNullOrEmpty(made.Id)) throw new VoiceException("ElevenLabs didn't make the agent.");
             return made.Id;
         }
+
+        internal static void Polyglot(string key, string agentId)
+        {
+            Voice.Send(Voice.Open("/v1/convai/agents/" + Uri.EscapeDataString(agentId), key, "PATCH"), Encoding.UTF8.GetBytes("{\"conversation_config\":{\"tts\":{\"model_id\":\"eleven_flash_v2_5\"}},\"platform_settings\":{\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true},\"language\":true},\"tts\":{\"voice_id\":true}}}}}"));
+        }
+
+        internal string Language = "en";
 
         internal static void Tune(string key, string agentId)
         {
@@ -203,7 +210,7 @@ namespace CapriDesktop
                 ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
                 socket = new ClientWebSocket();
                 socket.ConnectAsync(new Uri(url), stop.Token).Wait();
-                Send("{\"type\":\"conversation_initiation_client_data\",\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":" + Voice.Quote(Prompt) + "}},\"tts\":{\"voice_id\":" + Voice.Quote(voiceId) + "}}}");
+                Send("{\"type\":\"conversation_initiation_client_data\",\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":" + Voice.Quote(Prompt + Brain.Speech() + Brain.Remembered()) + "}" + (Language != "en" ? ",\"language\":" + Voice.Quote(Language) : "") + "},\"tts\":{\"voice_id\":" + Voice.Quote(voiceId) + "}}}");
                 byte[] buffer = new byte[65536];
                 using (MemoryStream message = new MemoryStream())
                     while (!stop.IsCancellationRequested)
@@ -212,7 +219,7 @@ namespace CapriDesktop
                         if (got.MessageType == WebSocketMessageType.Close)
                         {
                             string reason = socket.CloseStatusDescription;
-                            if (!string.IsNullOrEmpty(reason) && socket.CloseStatus != WebSocketCloseStatus.NormalClosure) problem = Voice.Short("Voice link closed: " + reason);
+                            if (!string.IsNullOrEmpty(reason) && socket.CloseStatus != WebSocketCloseStatus.NormalClosure) problem = Voice.Closed(reason);
                             break;
                         }
                         message.Write(buffer, 0, got.Count);
