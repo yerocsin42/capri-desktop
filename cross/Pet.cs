@@ -25,6 +25,16 @@ namespace CapriDesktop
         [DataMember] internal bool Placed;
         [DataMember] internal double Size = 240;
         [DataMember] internal string Model;
+        [DataMember] internal string Language;
+        [DataMember] internal string Nickname;
+        [DataMember] internal int Replies;
+        [DataMember] internal int Recall;
+        [DataMember] internal int Wander;
+        [DataMember] internal bool NoDance;
+        [DataMember] internal int? Sounds;
+        [DataMember] internal string VoiceId;
+        [DataMember] internal bool Silent;
+        [DataMember] internal int Typing;
     }
 
     internal sealed class Clip
@@ -103,10 +113,18 @@ namespace CapriDesktop
         internal const double PerchTop = 0.17;
         internal const double PerchRight = 0.69;
         private const int BlinkFrom = 9;
+        private const double StandX = 0.35;
+        private const double StandY = 0.99;
+        private static readonly double[] WanderPaces = { 3, 1, 0.45, 0.18 };
+        internal static readonly string[] WanderNames = { "Off", "Rarely", "Sometimes", "Often", "Restless" };
+        private static readonly string[] Lengths = { "Short", "Medium", "Long" };
+        private static readonly int[] Recalls = { 8, 16, 32 };
+        private static readonly string[] SoundNames = { "Off", "Quiet", "Normal", "Loud" };
+        private static readonly int[] SoundLevels = { 0, 30, 60, 100 };
         internal const string Offline = "My brain's offline. Install Ollama from ollama.com, then run: ollama pull gemma4:e4b";
         internal const string DiscordPage = "https://discord.gg/F4fDHfGtFk";
-        internal static readonly double[] Sizes = { 170, 240, 320, 440 };
-        private static readonly string[] SizeNames = { "Small", "Medium", "Large", "Huge" };
+        internal static readonly double[] Sizes = { 140, 170, 240, 320, 440, 560 };
+        private static readonly string[] SizeNames = { "Tiny", "Small", "Medium", "Large", "Huge", "Giant" };
         internal readonly Brain Brain = new Brain();
         internal readonly Talk Talk;
         internal Desk Desk = Desk.Make();
@@ -123,7 +141,55 @@ namespace CapriDesktop
         private readonly Clip perchBlinkGlitch = new Clip("perch_blink_glitch", 4, 8, 1);
         private readonly Clip perchGlitch = new Clip("perch_glitch", 10, 15, 1);
         private readonly Clip mouth = new Clip("mouth", 5, 12, 1.11);
+        private readonly Clip walk = new Clip("walk", 12, 12, 1.11);
+        private readonly Clip dance = new Clip("dance", 16, 16, 1.11);
+        private readonly Clip perchDance = new Clip("perch_dance", 16, 16, 1);
+        private readonly Clip arrive = new Clip("arrive", 14, 15, 1.11);
+        private readonly Clip leave = new Clip("leave", 12, 15, 1.11);
+        private readonly Clip perchArrive = new Clip("perch_arrive", 14, 15, 1);
+        private readonly Clip perchLeave = new Clip("perch_leave", 12, 15, 1);
+        private readonly Clip grin = new Clip("grin", 16, 8, 1.11);
+        internal static readonly string[] PetLines = { "Heh. Okay, I'll allow it.", "Pets logged. Morale up twelve percent.", "Careful, choom. I bite viruses." };
+        private readonly List<double> petTurns = new List<double>();
+        private int petX;
+        private int petWay;
+        private double petAt = -60;
+        private int petLine;
+        private int petTicket;
         private readonly Body body = new Body();
+        private readonly List<MenuItem> wanderPicks = new List<MenuItem>();
+        private readonly List<MenuItem> languagePicks = new List<MenuItem>();
+        private readonly List<MenuItem> replyPicks = new List<MenuItem>();
+        private readonly List<MenuItem> recallPicks = new List<MenuItem>();
+        private readonly List<MenuItem> soundPicks = new List<MenuItem>();
+        private MenuItem danceItem;
+        private MenuItem musicItem;
+        private MenuItem brainMenu;
+        internal Func<bool> MusicPlaying = Music.Playing;
+        private bool musicOn;
+        private bool musicBusy;
+        private double musicAt;
+        private bool walking;
+        private int walkTo;
+        private double walkStep;
+        private double walkCarry;
+        private bool dropAfter;
+        private bool quitting;
+        private bool away;
+        private bool opened;
+        private readonly Voice voice = new Voice();
+        private VoiceListing voices;
+        private string voiceProblem;
+        private bool listing;
+        private MenuItem voiceMenu;
+        private MenuItem typingItem;
+        private const int VoiceWait = 8000;
+        private const string KeyHeard = "(voice key)";
+        private const string NameHeard = "(nickname)";
+        private bool dancing;
+        private Action outro;
+        private double outroAt;
+        private double nextWander = -1;
         private readonly DispatcherTimer frames = new DispatcherTimer();
         private readonly Stopwatch clock = Stopwatch.StartNew();
         private readonly Random random = new Random();
@@ -156,6 +222,26 @@ namespace CapriDesktop
             folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Capri");
             Saved = Program.Smoke != null ? new Settings() : Load();
             Brain.LogPath = Path.Combine(Program.Smoke ?? folder, "errors.txt");
+            Brain.BrainMenu = "in my right-click menu under Brain";
+            Brain.Bin = OperatingSystem.IsMacOS() ? "Trash" : "trash";
+            Brain.MemoryPath = Path.Combine(Program.Smoke ?? folder, "me.md");
+            Brain.Language = Brain.LanguageCode(Saved.Language) == "en" ? null : Saved.Language;
+            Brain.Nickname = Brain.Nick(Saved.Nickname).Length == 0 ? null : Brain.Nick(Saved.Nickname);
+            Brain.Wordiness = Math.Max(0, Math.Min(2, Saved.Replies));
+            Brain.Recall = Saved.Recall == 16 || Saved.Recall == 32 ? Saved.Recall : 8;
+            Saved.Wander = Math.Max(0, Math.Min(4, Saved.Wander));
+            Sfx.Level = Math.Max(0, Math.Min(100, Saved.Sounds ?? 60));
+            if (Program.Smoke == null) Sfx.Out = Limbs.Sound;
+            if (Program.Smoke == null) Brain.Load(Path.Combine(folder, "chat.json"));
+            Limbs.Attach(Brain);
+            voice.Key = ReadVoiceKey();
+            voice.VoiceId = string.IsNullOrEmpty(Saved.VoiceId) ? null : Saved.VoiceId;
+            if (Program.Smoke == null) { Voice.Playback = Limbs.Speak; Voice.Silence = Limbs.Hush; }
+            if (Program.Smoke == null)
+            {
+                Sfx.TypeOut = delegate(short[] samples) { Limbs.Speak(Voice.Wave(samples, Sfx.Rate)); };
+                Sfx.Untyped = Limbs.Hush;
+            }
             Title = "Capri";
             SystemDecorations = SystemDecorations.None;
             Background = Brushes.Transparent;
@@ -177,6 +263,8 @@ namespace CapriDesktop
             frames.Tick += delegate { Tick(); };
             Opened += delegate
             {
+                if (opened) return;
+                opened = true;
                 try
                 {
                     double points = Desk.Points;
@@ -187,6 +275,11 @@ namespace CapriDesktop
                 frames.Start();
                 FindBrain();
                 if (Program.Smoke != null) smoke = new Smoke(this, Program.Smoke);
+                else
+                {
+                    int ticket = asking;
+                    DispatcherTimer.RunOnce(() => Greet(ticket, DateTime.Now.Hour), TimeSpan.FromMilliseconds(1800));
+                }
             };
         }
 
@@ -197,9 +290,16 @@ namespace CapriDesktop
         internal double BodySize { get { return body.Size; } }
         internal Clip Showing { get { return clip; } }
         internal Clip PerchGlitch { get { return perchGlitch; } }
-        internal IList<Clip> Clips { get { return new[] { idle, blink, blinkGlitch, glitch, dangle, perch, perchBlink, perchBlinkGlitch, perchGlitch, mouth }; } }
+        internal IList<Clip> Clips { get { return new[] { idle, blink, blinkGlitch, glitch, dangle, perch, perchBlink, perchBlinkGlitch, perchGlitch, mouth, walk, dance, perchDance, arrive, leave, perchArrive, perchLeave, grin }; } }
+        internal Clip Arrival { get { return arrive; } }
+        internal Clip PerchArrival { get { return perchArrive; } }
+        internal Clip SeatDance { get { return perchDance; } }
+        internal bool Arriving { get { return clip == arrive || clip == perchArrive; } }
+        internal bool Walking { get { return walking; } }
+        internal bool Leaving { get { return outro != null; } }
+        internal bool Dancing { get { return dancing; } set { dancing = value; Sync(); } }
         internal PixelPoint Anchor { get { return anchor; } }
-        internal PixelPoint Hip { get { return new PixelPoint(anchor.X + Px(body.Size * SitX), anchor.Y + Px(body.Size * SitY)); } }
+        internal PixelPoint Hip { get { return walking && seat != null ? new PixelPoint(anchor.X + Px(body.Size * StandX), anchor.Y + Px(body.Size * StandY)) : new PixelPoint(anchor.X + Px(body.Size * SitX), anchor.Y + Px(body.Size * SitY)); } }
         internal int Headroom { get { return (int)Math.Ceiling(body.Size * (SitY - PerchTop) * DesktopScaling); } }
         internal int Feet { get { return anchor.Y + Px(body.Size * 0.99); } }
         internal PixelPoint FeetPoint { get { return new PixelPoint(anchor.X + Px(body.Size * 0.58), Feet); } }
@@ -214,6 +314,8 @@ namespace CapriDesktop
         private int Px(double dip) { return (int)Math.Round(dip * DesktopScaling); }
 
         internal PixelPoint Seated(int x, int y) { return new PixelPoint(x - Px(body.Size * SitX), y - Px(body.Size * SitY)); }
+
+        private PixelPoint Standing(int x, int y) { return new PixelPoint(x - Px(body.Size * StandX), y - Px(body.Size * StandY)); }
 
         internal void Move(PixelPoint to)
         {
@@ -250,40 +352,78 @@ namespace CapriDesktop
 
         private void Place()
         {
-            Screen screen = Screens.Primary ?? (Screens.All.Count > 0 ? Screens.All[0] : null);
+            Screen saved = Saved.Placed ? Screens.ScreenFromPoint(new PixelPoint(Saved.X + Px(body.Size / 2), Saved.Y + Px(body.Size / 2))) : null;
+            Screen screen = saved ?? Screens.Primary ?? (Screens.All.Count > 0 ? Screens.All[0] : null);
             if (screen == null) return;
-            if (Saved.Placed && Screens.ScreenFromPoint(new PixelPoint(Saved.X + Px(body.Size / 2), Saved.Y + Px(body.Size / 2))) != null)
-            {
-                Move(new PixelPoint(Saved.X, Saved.Y));
-                Fall();
-                return;
-            }
             PixelRect area = screen.WorkingArea;
-            Move(new PixelPoint(area.Right - Px(body.Size * PerchRight) - Px(40), area.Y));
-            Fall();
+            Move(new PixelPoint(area.X + (area.Width - Px(body.Size)) / 2, area.Y + (area.Height - Px(body.Size)) / 2));
+            Arrive();
         }
 
         internal void Bring()
         {
             Screen screen = Screens.Primary ?? ScreenHere();
-            if (screen == null) return;
+            if (screen == null || quitting) return;
+            Halt();
+            away = false;
+            if (!IsVisible) Show();
+            walking = false;
+            seat = null;
+            falling = false;
             PixelRect area = screen.WorkingArea;
             Move(new PixelPoint(area.X + area.Width / 2 - Px(body.Size / 2), area.Y));
-            Fall();
+            Arrive();
+        }
+
+        internal bool Away { get { return away; } }
+
+        internal void HideAway()
+        {
+            if (away || quitting) return;
+            away = true;
+            Talk.Dismiss();
+            GlitchOut(delegate { seat = null; walking = false; Hide(); });
+        }
+
+        internal void ComeBack()
+        {
+            if (!away || quitting) return;
+            Halt();
+            away = false;
+            if (!IsVisible) Show();
+            walking = false;
+            seat = null;
+            falling = false;
+            Arrive();
+        }
+
+        internal int Arrivals;
+
+        private void Arrive(bool quiet = false)
+        {
+            Arrivals++;
+            Play(arrive);
+            dropAfter = true;
+            if (!quiet) Sfx.Play(Cue.Arrive);
         }
 
         private void Tick()
         {
             double now = Now;
+            if (outro != null && now >= outroAt) { Action next = outro; outro = null; next(); }
+            if (away && !IsVisible) { if (smoke != null) smoke.Tick(now); return; }
             if (!dragging)
             {
                 if (falling) Tumble(now);
                 else if (seat != null) HoldSeat(now);
             }
-            if (now >= nextCheck)
+            if (walking) Walk(now);
+            if (now >= nextCheck && !away)
             {
                 nextCheck = now + 0.25;
                 CheckSeat(now);
+                CheckWander(now);
+                CheckMusic(now);
             }
             Advance(now);
             Talk.Update(now);
@@ -300,13 +440,29 @@ namespace CapriDesktop
 
         private void Advance(double now)
         {
-            bool seated = clip == perch || clip == perchGlitch;
+            bool seated = clip == perch || clip == perchGlitch || clip == perchDance || clip == perchArrive || clip == perchLeave;
             bool perched = seat != null;
-            if (perched && !seated) Play(perch);
+            if (perched && !seated && !walking) Play(perch);
             if ((!perched && seated) || (clip == dangle && !dragging && !falling)) Play(idle);
             int index = (int)((now - clipStart) * clip.Fps);
-            if (clip == glitch && index >= glitch.Count) { Play(idle); index = 0; }
-            if (clip == perchGlitch && index >= perchGlitch.Count) { Play(perch); index = 0; }
+            if (clip == leave || clip == perchLeave) index = Math.Min(index, clip.Count - 1);
+            if ((clip == glitch && index >= glitch.Count) || (clip == grin && index >= grin.Count * 2)) { Play(idle); index = 0; }
+            if (clip == arrive && index >= arrive.Count)
+            {
+                Play(idle);
+                index = 0;
+                if (dropAfter) { dropAfter = false; Fall(); }
+            }
+            if ((clip == perchGlitch && index >= perchGlitch.Count) || (clip == perchArrive && index >= perchArrive.Count)) { Play(perch); index = 0; }
+            if (dropAfter && clip != arrive && clip != glitch)
+            {
+                dropAfter = false;
+                if (seat == null && !dragging && !falling) Fall();
+            }
+            bool still = !walking && !dragging && !falling && outro == null && Talk.Quiet;
+            bool grooving = dancing || (musicOn && !Saved.NoDance);
+            if (grooving && still && (clip == idle || clip == perch)) { Play(clip == perch ? perchDance : dance); index = 0; }
+            if ((!grooving || !still) && (clip == dance || clip == perchDance)) { Play(clip == perchDance ? perch : idle); index = 0; }
             if (clip == idle || clip == perch)
             {
                 int cycle = index / clip.Count;
@@ -391,6 +547,7 @@ namespace CapriDesktop
 
         internal void Fall()
         {
+            walking = false;
             seat = null;
             fallTo = null;
             falling = true;
@@ -415,6 +572,7 @@ namespace CapriDesktop
         private void Land(Ledge ledge)
         {
             fallTo = null;
+            walking = false;
             if (ledge.Window != 0)
             {
                 Spot spot = Find(ledge.Window);
@@ -447,7 +605,8 @@ namespace CapriDesktop
             seatLost = -1;
             PixelRect bounds = spot.Bounds;
             if (bounds == seat.Bounds) return;
-            int dx = bounds.Width == seat.Bounds.Width ? bounds.X - seat.Bounds.X : 0;
+            EndWalk();
+            int dx =bounds.Width == seat.Bounds.Width ? bounds.X - seat.Bounds.X : 0;
             int x = Math.Max(bounds.X + Px(8), Math.Min(Hip.X + dx, bounds.Right - Px(8)));
             seat.Bounds = bounds;
             seat.Left = bounds.X;
@@ -466,6 +625,8 @@ namespace CapriDesktop
 
         internal void StandUp()
         {
+            Halt();
+            walking = false;
             seat = null;
             coveredSince = -1;
             seatLost = -1;
@@ -476,6 +637,8 @@ namespace CapriDesktop
 
         private void SitHere()
         {
+            Halt();
+            EndWalk();
             PixelPoint hip = Hip;
             Land(new Ledge { Left = hip.X - Px(8), Right = hip.X + Px(8), Y = hip.Y, Floor = true, Free = true });
         }
@@ -494,7 +657,7 @@ namespace CapriDesktop
         protected override void OnPointerPressed(PointerPressedEventArgs e)
         {
             base.OnPointerPressed(e);
-            if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
+            if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed || outro != null) return;
             Point at = e.GetPosition(this);
             if (!Opaque(at)) return;
             pressed = true;
@@ -508,7 +671,7 @@ namespace CapriDesktop
         {
             base.OnPointerMoved(e);
             pointer = e.GetPosition(this);
-            if (!pressed) return;
+            if (!pressed) { Stroke(this.PointToScreen(pointer)); return; }
             PixelPoint at = this.PointToScreen(pointer);
             int dx = at.X - downAt.X;
             int dy = at.Y - downAt.Y;
@@ -533,6 +696,81 @@ namespace CapriDesktop
             else React();
         }
 
+        internal int Pets { get { return petTicket; } }
+
+        internal bool Smiling { get { return seat != null ? clip == perch && blinkWith == perchBlink : clip == grin; } }
+
+        internal Point? BodySpot()
+        {
+            for (double y = Bounds.Height / 4; y < Bounds.Height * 3 / 4; y += 3)
+                for (double x = 20; x < Bounds.Width - 20; x += 3)
+                    if (Opaque(new Point(x - 12, y)) && Opaque(new Point(x + 12, y))) return new Point(x, y);
+            return null;
+        }
+
+        internal void Stroke(PixelPoint cursor)
+        {
+            if (pressed || dragging || falling || outro != null || Talk.Typing || !Opaque(this.PointToClient(cursor))) { petTurns.Clear(); petWay = 0; return; }
+            int dx = cursor.X - petX;
+            if (Math.Abs(dx) < 6) return;
+            double now = Now;
+            int way = Math.Sign(dx);
+            petX = cursor.X;
+            if (petWay != 0 && way != petWay) petTurns.Add(now);
+            petWay = way;
+            petTurns.RemoveAll(at => now - at > 1.5);
+            if (petTurns.Count < 4 || now - petAt < 20) return;
+            petTurns.Clear();
+            petAt = now;
+            Petted();
+        }
+
+        private void Petted()
+        {
+            EndWalk();
+            if (seat != null) { Play(perch); blinkWith = perchBlink; }
+            else Play(grin);
+            int ticket = ++petTicket;
+            DispatcherTimer.RunOnce(() => PetLine(ticket), TimeSpan.FromMilliseconds(1300));
+        }
+
+        internal void Greet(int ticket, int hour)
+        {
+            string line = Brain.Greeting(hour);
+            if (line == null || ticket != asking || outro != null || !Talk.Quiet) return;
+            byte[] hello = Hello(Brain.GreetingClip(hour));
+            if (hello == null) { Reply(++asking, "startup", line); return; }
+            ++asking;
+            Talk.Answer("startup", line, Voice.Seconds(hello));
+            voice.Play(hello);
+        }
+
+        internal static byte[] Hello(string name)
+        {
+            using (Stream clip = typeof(Pet).Assembly.GetManifestResourceStream("Capri.Voice.hello-" + name + ".wav"))
+            {
+                if (clip == null) return null;
+                using (MemoryStream copy = new MemoryStream()) { clip.CopyTo(copy); return copy.ToArray(); }
+            }
+        }
+
+        internal void PetLine(int ticket)
+        {
+            if (ticket != petTicket || outro != null || !Talk.Quiet) return;
+            if (clip == grin) Play(idle);
+            string line = PetLines[petLine++ % PetLines.Length];
+            Talk.Answer("pets you", line);
+            TypeAlong(line, ticket);
+        }
+
+        internal void ForgetPets()
+        {
+            petTicket++;
+            petAt = -60;
+            petTurns.Clear();
+            Play(seat != null ? perch : idle);
+        }
+
         internal void React()
         {
             Play(seat != null ? perchGlitch : glitch);
@@ -545,6 +783,9 @@ namespace CapriDesktop
 
         internal void Grab()
         {
+            Halt();
+            walking = false;
+            dropAfter = false;
             seat = null;
             fallTo = null;
             falling = false;
@@ -567,6 +808,7 @@ namespace CapriDesktop
 
         internal void Resize(double size)
         {
+            EndWalk();
             PixelPoint hip = Hip;
             PixelPoint middle = Middle;
             body.Size = size;
@@ -585,6 +827,73 @@ namespace CapriDesktop
             talk.Click += delegate { Talk.Open(); };
             MenuItem sit = new MenuItem { Header = "Sit here" };
             sit.Click += delegate { if (seat != null && seat.Free) StandUp(); else SitHere(); };
+            MenuItem move = new MenuItem { Header = "Move" };
+            for (int i = 0; i < WanderNames.Length; i++)
+            {
+                int level = i;
+                MenuItem pick = new MenuItem { Header = i == 0 ? "Stay put" : "Wander: " + WanderNames[i], ToggleType = MenuItemToggleType.Radio, GroupName = "wander" };
+                pick.Click += delegate { SetWander(level); };
+                wanderPicks.Add(pick);
+                move.Items.Add(pick);
+            }
+            move.Items.Add(new Separator());
+            musicItem = new MenuItem { Header = "Dance to music", ToggleType = MenuItemToggleType.CheckBox };
+            musicItem.Click += delegate { SetDanceToMusic(Saved.NoDance); };
+            move.Items.Add(musicItem);
+            danceItem = new MenuItem { Header = "Dance", ToggleType = MenuItemToggleType.CheckBox };
+            danceItem.Click += delegate { Dancing = !dancing; };
+            move.Items.Add(danceItem);
+            brainMenu = new MenuItem { Header = "Brain" };
+            brainMenu.Items.Add(new MenuItem { Header = "Looking for models...", IsEnabled = false });
+            MenuItem settings = new MenuItem { Header = "Settings" };
+            MenuItem language = new MenuItem { Header = "Language" };
+            for (int i = 0; i < Brain.Languages.GetLength(0); i++)
+            {
+                string name = Brain.Languages[i, 1];
+                MenuItem pick = new MenuItem { Header = Brain.Languages[i, 0], ToggleType = MenuItemToggleType.Radio, GroupName = "language", Tag = name };
+                pick.Click += delegate { SetLanguage(name); };
+                languagePicks.Add(pick);
+                language.Items.Add(pick);
+            }
+            MenuItem replies = new MenuItem { Header = "Reply length" };
+            MenuItem recall = new MenuItem { Header = "Chat memory" };
+            for (int i = 0; i < Lengths.Length; i++)
+            {
+                int level = i;
+                MenuItem reply = new MenuItem { Header = Lengths[i], ToggleType = MenuItemToggleType.Radio, GroupName = "replies" };
+                reply.Click += delegate { SetReplies(level); };
+                replyPicks.Add(reply);
+                replies.Items.Add(reply);
+                MenuItem keep = new MenuItem { Header = Lengths[i], ToggleType = MenuItemToggleType.Radio, GroupName = "recall" };
+                keep.Click += delegate { SetRecall(Recalls[level]); };
+                recallPicks.Add(keep);
+                recall.Items.Add(keep);
+            }
+            MenuItem sounds = new MenuItem { Header = "Sounds" };
+            for (int i = 0; i < SoundNames.Length; i++)
+            {
+                int level = SoundLevels[i];
+                MenuItem pick = new MenuItem { Header = SoundNames[i], ToggleType = MenuItemToggleType.Radio, GroupName = "sounds" };
+                pick.Click += delegate { SetSounds(level); };
+                soundPicks.Add(pick);
+                sounds.Items.Add(pick);
+            }
+            sounds.Items.Add(new Separator());
+            typingItem = new MenuItem { Header = "Typing sound", ToggleType = MenuItemToggleType.CheckBox };
+            typingItem.Click += delegate { SetTyping(!TypingSound); };
+            sounds.Items.Add(typingItem);
+            MenuItem notes = new MenuItem { Header = "Open her notes (me.md)" };
+            notes.Click += delegate { OpenNotes(); };
+            MenuItem nickname = new MenuItem { Header = "What should she call you?" };
+            nickname.Click += delegate { AskNickname(); };
+            settings.Items.Add(nickname);
+            settings.Items.Add(language);
+            settings.Items.Add(replies);
+            settings.Items.Add(recall);
+            settings.Items.Add(sounds);
+            voiceMenu = new MenuItem { Header = "Voice" };
+            settings.Items.Add(voiceMenu);
+            settings.Items.Add(notes);
             MenuItem sizes = new MenuItem { Header = "Size" };
             for (int i = 0; i < Sizes.Length; i++)
             {
@@ -599,11 +908,308 @@ namespace CapriDesktop
             quit.Click += delegate { Quit(); };
             menu.Items.Add(talk);
             menu.Items.Add(sit);
+            menu.Items.Add(move);
             menu.Items.Add(sizes);
+            menu.Items.Add(brainMenu);
+            menu.Items.Add(settings);
             menu.Items.Add(discord);
             menu.Items.Add(new Separator());
             menu.Items.Add(quit);
+            menu.Opening += delegate { Sync(); RefreshBrains(); RefreshVoice(); };
             return menu;
+        }
+
+        private void Sync()
+        {
+            if (danceItem == null) return;
+            for (int i = 0; i < wanderPicks.Count; i++) wanderPicks[i].IsChecked = i == Saved.Wander;
+            danceItem.IsChecked = dancing;
+            musicItem.IsChecked = !Saved.NoDance;
+            string language = Brain.Language ?? "English";
+            foreach (MenuItem pick in languagePicks) pick.IsChecked = (string)pick.Tag == language;
+            for (int i = 0; i < replyPicks.Count; i++) replyPicks[i].IsChecked = i == Brain.Wordiness;
+            for (int i = 0; i < recallPicks.Count; i++) recallPicks[i].IsChecked = Recalls[i] == Brain.Recall;
+            for (int i = 0; i < soundPicks.Count; i++) soundPicks[i].IsChecked = SoundLevels[i] == Sfx.Level;
+            typingItem.IsChecked = TypingSound;
+        }
+
+        internal string Picked
+        {
+            get
+            {
+                List<string> on = new List<string>();
+                foreach (List<MenuItem> group in new[] { wanderPicks, languagePicks, replyPicks, recallPicks, soundPicks })
+                    foreach (MenuItem pick in group) if (pick.IsChecked) on.Add(pick.Header.ToString());
+                if (musicItem.IsChecked) on.Add("Dance to music");
+                if (danceItem.IsChecked) on.Add("Dance");
+                return string.Join(" | ", on);
+            }
+        }
+
+        internal void SetDanceToMusic(bool on)
+        {
+            Saved.NoDance = !on;
+            Save();
+            Sync();
+        }
+
+        private void CheckMusic(double now)
+        {
+            if (Saved.NoDance || musicBusy || now < musicAt || Program.Smoke != null) return;
+            musicAt = now + 2;
+            musicBusy = true;
+            Func<bool> playing = MusicPlaying;
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                bool on = false;
+                try { on = playing(); }
+                catch (Exception) { }
+                Dispatcher.UIThread.Post(delegate { musicBusy = false; HearMusic(on); });
+            });
+        }
+
+        internal void HearMusic(bool on) { musicOn = on; }
+
+        internal void SetWander(int level)
+        {
+            Saved.Wander = Math.Max(0, Math.Min(4, level));
+            nextWander = -1;
+            Save();
+            Sync();
+        }
+
+        internal void AskNickname()
+        {
+            ComeBack();
+            Talk.AskFor(NameHeard, Brain.Nickname == null ? "What should I call you? Type a name and press Enter." : "I call you " + Brain.Nickname + ". Type a new name and press Enter, or choom to go back.", SetNickname);
+        }
+
+        internal void SetNickname(string typed)
+        {
+            string name = Brain.Nick(typed);
+            bool callable = Brain.Callable(name);
+            if (callable)
+            {
+                Brain.Nickname = name.Length == 0 ? null : name;
+                Saved.Nickname = Brain.Nickname;
+                Save();
+            }
+            Reply(++asking, NameHeard, callable ? Brain.Renamed(name) : Brain.NotCalling);
+        }
+
+        internal void SetLanguage(string language)
+        {
+            Brain.Language = Brain.LanguageCode(language) == "en" ? null : language;
+            Saved.Language = Brain.Language;
+            Brain.Forget();
+            Save();
+            Sync();
+        }
+
+        internal void SetReplies(int level)
+        {
+            Brain.Wordiness = Math.Max(0, Math.Min(2, level));
+            Saved.Replies = Brain.Wordiness;
+            Save();
+            Sync();
+        }
+
+        internal void SetRecall(int count)
+        {
+            Brain.Recall = count == 16 || count == 32 ? count : 8;
+            Saved.Recall = Brain.Recall;
+            Save();
+            Sync();
+        }
+
+        internal void SetSounds(int level)
+        {
+            Sfx.Level = Math.Max(0, Math.Min(100, level));
+            Saved.Sounds = Sfx.Level;
+            Save();
+            Sync();
+            Sfx.Play(Cue.Hop);
+        }
+
+        private void RefreshBrains()
+        {
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                string[] found = null;
+                try { found = Brain.InstalledModels(); }
+                catch (Exception) { }
+                Dispatcher.UIThread.Post(delegate { ShowBrains(found); });
+            });
+        }
+
+        internal void ShowBrains(string[] found)
+        {
+            brainMenu.Items.Clear();
+            if (found == null || found.Length == 0)
+            {
+                brainMenu.Items.Add(new MenuItem { Header = "No models yet. Install Ollama, then pull one.", IsEnabled = false });
+                return;
+            }
+            foreach (string name in found)
+            {
+                string model = name;
+                MenuItem pick = new MenuItem { Header = model, ToggleType = MenuItemToggleType.Radio, GroupName = "brain", IsChecked = model == Brain.Model };
+                pick.Click += delegate { PickBrain(model); };
+                brainMenu.Items.Add(pick);
+            }
+        }
+
+        internal int BrainChoices { get { return brainMenu.Items.Count; } }
+
+        internal void PickBrain(string model)
+        {
+            if (string.IsNullOrEmpty(model) || model == Brain.Model) return;
+            Brain.Cancel();
+            Brain.Model = model;
+            Brain.Forget();
+            Saved.Model = model;
+            Save();
+        }
+
+        internal string OpenNotes()
+        {
+            string path = Brain.MemoryPath;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                if (!File.Exists(path)) File.WriteAllText(path, Brain.NotesHead);
+            }
+            catch (Exception) { return null; }
+            if (Program.Smoke == null) Browse(path);
+            return path;
+        }
+
+        internal static int WalkTarget(int at, int from, int to, int size, double side, double length)
+        {
+            int shortest = size / 2;
+            int longest = size * 3;
+            bool right = side < 0.5;
+            if ((right ? to - at : at - from) < shortest) right = !right;
+            int room = Math.Min(longest, right ? to - at : at - from);
+            if (room < shortest) return at;
+            int step = shortest + (int)((room - shortest) * length);
+            return right ? at + step : at - step;
+        }
+
+        internal bool Stroll()
+        {
+            if (walking || falling || dragging || outro != null || seat == null || seat.Free) return false;
+            PixelPoint hip = Hip;
+            PixelRect area = WorkAt(hip);
+            if (seat.Y - Px(body.Size * StandY) < ScreenAt(hip).Y) return false;
+            int from = Math.Max(seat.Left, area.X) + Px(body.Size * 0.1) + Px(8);
+            int to = Math.Min(seat.Right, area.Right) - Px(body.Size * 0.41) - Px(8);
+            int target = WalkTarget(hip.X, from, to, Px(body.Size), random.NextDouble(), random.NextDouble());
+            if (target == hip.X) return false;
+            PixelPoint standing = Standing(hip.X, seat.Y);
+            walkTo = standing.X + target - hip.X;
+            walking = true;
+            Move(standing);
+            walkStep = Now;
+            walkCarry = 0;
+            Play(walk);
+            return true;
+        }
+
+        private void Walk(double now)
+        {
+            double step = Math.Max(0, Math.Min(0.05, now - walkStep));
+            walkStep = now;
+            int gap = walkTo - anchor.X;
+            walkCarry += body.Size * 0.42 * step * DesktopScaling;
+            int stride = (int)walkCarry;
+            walkCarry -= stride;
+            if (Math.Abs(gap) <= stride) { Move(new PixelPoint(walkTo, anchor.Y)); EndWalk(); return; }
+            Move(new PixelPoint(anchor.X + Math.Sign(gap) * stride, anchor.Y));
+        }
+
+        private void EndWalk()
+        {
+            if (!walking) return;
+            PixelPoint hip = Hip;
+            walking = false;
+            if (seat != null) { Move(Seated(hip.X, seat.Y)); Play(perchGlitch); }
+            else Play(idle);
+            Save();
+        }
+
+        private void CheckWander(double now)
+        {
+            if (Saved.Wander <= 0) { nextWander = -1; return; }
+            if (dragging || pressed || falling || walking || outro != null || quitting || seat == null || seat.Free || !Talk.Quiet) return;
+            double pace = WanderPaces[Saved.Wander - 1];
+            if (nextWander < 0) nextWander = now + (20 + random.NextDouble() * 40) * pace;
+            if (now < nextWander) return;
+            nextWander = now + (45 + random.NextDouble() * 75) * pace;
+            if (random.NextDouble() < 0.5 && Blink()) return;
+            Wander();
+        }
+
+        internal bool Blink()
+        {
+            if (walking || falling || dragging || outro != null || quitting || seat == null || seat.Free) return false;
+            PixelPoint hip = Hip;
+            PixelRect area = WorkAt(hip);
+            int from = Math.Max(seat.Left, area.X) + Px(body.Size * 0.1) + Px(8);
+            int to = Math.Min(seat.Right, area.Right) - Px(body.Size * 0.41) - Px(8);
+            int target = WalkTarget(hip.X, from, to, Px(body.Size), random.NextDouble(), random.NextDouble());
+            if (target == hip.X) return false;
+            Ledge spot = seat;
+            GlitchOut(delegate { Hop(spot, target); }, true);
+            return true;
+        }
+
+        internal bool Wander()
+        {
+            if (outro != null || quitting) return false;
+            List<Ledge> spots = new List<Ledge>();
+            foreach (Ledge ledge in Ledges())
+            {
+                if (ledge.Right - ledge.Left < Px(body.Size / 2)) continue;
+                if (seat != null && ledge.Window == seat.Window && ledge.Floor == seat.Floor && ledge.Y == seat.Y) continue;
+                if (ledge.Y - Headroom < ScreenAt(new PixelPoint(ledge.Left, ledge.Y)).Y) continue;
+                spots.Add(ledge);
+            }
+            if (spots.Count == 0) return false;
+            Ledge spot = spots[random.Next(spots.Count)];
+            int margin = Px(body.Size / 4);
+            int x = spot.Left + margin + random.Next(Math.Max(1, spot.Right - spot.Left - 2 * margin));
+            GlitchOut(delegate { Hop(spot, x); }, true);
+            return true;
+        }
+
+        private void Hop(Ledge spot, int x)
+        {
+            walking = false;
+            seat = null;
+            Move(Seated(x, spot.Y));
+            Land(spot);
+            if (seat == spot) Play(perchArrive);
+            else Arrive(true);
+        }
+
+        internal void GlitchOut(Action then, bool hop = false)
+        {
+            EndWalk();
+            falling = false;
+            fallTo = null;
+            dropAfter = false;
+            Play(seat != null ? perchLeave : leave);
+            Sfx.Play(hop ? Cue.Hop : Cue.Leave);
+            outro = then;
+            outroAt = clipStart + (clip.Count + 1) / clip.Fps;
+        }
+
+        private void Halt()
+        {
+            if (outro == null || quitting) return;
+            outro = null;
+            if (clip == leave || clip == perchLeave) Play(seat != null ? perch : idle);
         }
 
         internal static void Browse(string url)
@@ -642,12 +1248,29 @@ namespace CapriDesktop
             if (text.Length > 240) text = text.Substring(0, 240);
             int ticket = ++asking;
             Brain.Cancel();
+            voice.Stop();
             string blocked = Safety.Screen(text);
-            if (blocked != null) { Talk.Answer(text, blocked); return; }
+            if (blocked != null) { Reply(ticket, text, blocked); return; }
+            bool askPlease;
+            string heard = text;
+            text = Hands.Manners(text, out askPlease);
+            if (askPlease) { Reply(ticket, heard, Hands.SayPlease); return; }
+            string tool;
+            ToolArguments args;
+            bool noted;
+            try { noted = Hands.Heard(text, out tool, out args) && tool == "remember"; }
+            catch (Exception) { noted = false; tool = null; args = null; }
+            if (noted)
+            {
+                string done = Hands.Do(tool, args);
+                Brain.Remember(text, done);
+                Reply(ticket, text, done);
+                return;
+            }
             Func<string, string> think = Think;
             if (think == null)
             {
-                if (Brain.Model == null) { Talk.Answer(text, Offline); FindBrain(); return; }
+                if (Brain.Model == null) { Reply(ticket, text, Offline); FindBrain(); return; }
                 think = Brain.Ask;
             }
             Talk.Thinking(text);
@@ -658,8 +1281,257 @@ namespace CapriDesktop
                 catch (BrainException error) { said = error.Message == Brain.Offline ? Offline : error.Told ? error.Message : "My brain couldn't answer: " + error.Message; }
                 catch (Exception error) { said = Brain.Explain(error) ?? "That reply was cancelled. Try again."; }
                 if (string.IsNullOrWhiteSpace(said)) said = "My brain sent an empty reply. Try again.";
-                Dispatcher.UIThread.Post(delegate { if (ticket == asking) Talk.Answer(text, said); });
+                Dispatcher.UIThread.Post(delegate { if (ticket == asking) Reply(ticket, text, said); });
             });
+        }
+
+        internal bool Speaks { get { return voice.Ready && !Saved.Silent; } }
+
+        private void Reply(int ticket, string heard, string said)
+        {
+            if (!Speaks || Voice.Spoken(said).Length == 0) { Talk.Answer(heard, said); TypeAlong(said, ticket); return; }
+            Talk.Thinking(heard);
+            bool[] shown = { false };
+            DispatcherTimer.RunOnce(delegate
+            {
+                if (ticket != asking || shown[0]) return;
+                shown[0] = true;
+                Talk.Answer(heard, said);
+                TypeAlong(said, ticket);
+            }, TimeSpan.FromMilliseconds(VoiceWait));
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                byte[] wav = null;
+                string problem = null;
+                try { wav = voice.Speak(said); }
+                catch (VoiceException error) { problem = Mac(error.Message); }
+                catch (Exception error) { problem = Voice.Short("Voice glitched: " + error.Message); }
+                Dispatcher.UIThread.Post(delegate
+                {
+                    voiceProblem = problem;
+                    if (ticket != asking || shown[0]) return;
+                    shown[0] = true;
+                    double seconds = wav == null ? 0 : Voice.Seconds(wav);
+                    Talk.Answer(heard, said, seconds);
+                    if (seconds >= 0.2) voice.Play(wav);
+                    else TypeAlong(said, ticket);
+                });
+            });
+        }
+
+        private static string Mac(string problem) { return problem == Voice.Rejected ? "ElevenLabs rejected the key. Settings > Voice > New key." : problem; }
+
+        private string KeyFile { get { return Path.Combine(Program.Smoke ?? folder, "voice-key"); } }
+
+        private string ReadVoiceKey()
+        {
+            try
+            {
+                string key = File.ReadAllText(KeyFile).Trim();
+                return key.Length == 0 ? null : key;
+            }
+            catch (Exception) { return null; }
+        }
+
+        private void WriteVoiceKey(string key)
+        {
+            string path = KeyFile;
+            try
+            {
+                if (key == null) { File.Delete(path); return; }
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                FileStreamOptions options = new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write };
+                if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+                using (FileStream stream = new FileStream(path, options))
+                {
+                    if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(stream.SafeFileHandle, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                    using (StreamWriter writer = new StreamWriter(stream)) writer.Write(key);
+                }
+            }
+            catch (Exception error) { Brain.Log(path, -1, "Couldn't save the voice key: " + error.Message); }
+        }
+
+        internal void AskVoiceKey()
+        {
+            ComeBack();
+            Talk.AskKey("Paste your ElevenLabs API key and press Enter. It stays on this computer.");
+        }
+
+        internal void SaveVoiceKey(string key)
+        {
+            key = (key ?? "").Trim();
+            if (key.Length == 0) return;
+            int ticket = ++asking;
+            voice.Stop();
+            Talk.Thinking(KeyHeard);
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                VoiceListing found = null;
+                string problem = null;
+                int status = 0;
+                try { found = Voice.Fetch(key); }
+                catch (VoiceException error) { problem = error.Message; status = error.Status; }
+                catch (Exception error) { problem = Voice.Short("Couldn't read your ElevenLabs voices: " + error.Message); }
+                Dispatcher.UIThread.Post(delegate
+                {
+                    if (status == 401) { if (ticket == asking) Talk.Answer(KeyHeard, Voice.Unsaved(problem)); return; }
+                    voice.Key = key;
+                    WriteVoiceKey(key);
+                    voiceProblem = problem == null ? null : Mac(problem);
+                    if (found != null)
+                    {
+                        voices = found;
+                        if (found.Voices.Count > 0 && (voice.VoiceId == null || !Lists(found, voice.VoiceId))) voice.VoiceId = found.Voices[0].Id;
+                    }
+                    Saved.VoiceId = voice.VoiceId;
+                    Saved.Silent = false;
+                    Save();
+                    if (ticket != asking) return;
+                    if (problem != null) Talk.Answer(KeyHeard, "Key saved, but " + voiceProblem);
+                    else if (voice.VoiceId == null) Talk.Answer(KeyHeard, "Key saved, but your ElevenLabs account has no voices yet. Add one at elevenlabs.io.");
+                    else Reply(ticket, KeyHeard, "Key saved. I'll talk as " + VoiceName() + ". Change it under Settings > Voice.");
+                });
+            });
+        }
+
+        private static bool Lists(VoiceListing found, string id)
+        {
+            foreach (VoiceEntry entry in found.Voices) if (entry.Id == id) return true;
+            return false;
+        }
+
+        private string VoiceName()
+        {
+            if (voice.VoiceId == null) return null;
+            if (voices != null) foreach (VoiceEntry entry in voices.Voices) if (entry.Id == voice.VoiceId && !string.IsNullOrEmpty(entry.Name)) return entry.Name;
+            return voice.VoiceId;
+        }
+
+        internal string VoiceStatus { get { return (voice.Key == null ? "no key" : "key " + Voice.Tail(voice.Key)) + " | " + (VoiceName() ?? "no voice") + " | " + (Speaks ? "speaking" : "quiet"); } }
+
+        internal bool VoiceWorking { get { return Speaks && voiceProblem == null; } }
+
+        internal bool TypingSound { get { return Saved.Typing == 1 || (Saved.Typing == 0 && !VoiceWorking); } }
+
+        internal void SetTyping(bool on)
+        {
+            Saved.Typing = on ? 1 : 2;
+            Sfx.Typing = on;
+            Save();
+            Sfx.Type("click clack", Talk.LettersPerSecond, 1);
+        }
+
+        internal void AutoTyping() { Saved.Typing = 0; }
+
+        private void TypeAlong(string said, int ticket)
+        {
+            Sfx.Typing = TypingSound;
+            Sfx.Type(said, Talk.Pace, ticket);
+        }
+
+        internal void SetSpeak(bool on)
+        {
+            Saved.Silent = !on;
+            if (!on) voice.Stop();
+            Save();
+        }
+
+        internal void ChooseVoice(string id)
+        {
+            voice.VoiceId = id;
+            Saved.VoiceId = id;
+            Save();
+        }
+
+        internal void ForgetVoice()
+        {
+            voice.Stop();
+            voice.Key = null;
+            voices = null;
+            voiceProblem = null;
+            WriteVoiceKey(null);
+        }
+
+        private void ListVoices()
+        {
+            string key = voice.Key;
+            if (key == null || listing) return;
+            listing = true;
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                VoiceListing found = null;
+                string problem = null;
+                try { found = Voice.Fetch(key); }
+                catch (VoiceException error) { problem = Mac(error.Message); }
+                catch (Exception error) { problem = Voice.Short("Couldn't read your ElevenLabs voices: " + error.Message); }
+                Dispatcher.UIThread.Post(delegate
+                {
+                    listing = false;
+                    if (voice.Key != key) return;
+                    if (found != null) voices = found;
+                    voiceProblem = problem;
+                    RefreshVoice();
+                });
+            });
+        }
+
+        internal string VoiceMenu
+        {
+            get
+            {
+                RefreshVoice();
+                List<string> shown = new List<string>();
+                foreach (object item in voiceMenu.Items)
+                {
+                    MenuItem entry = item as MenuItem;
+                    if (entry == null) shown.Add("-");
+                    else shown.Add((entry.IsChecked ? "*" : "") + entry.Header + (entry.IsEnabled ? "" : " (off)"));
+                }
+                return string.Join(" | ", shown);
+            }
+        }
+
+        private void RefreshVoice()
+        {
+            if (voiceMenu == null) return;
+            voiceMenu.Items.Clear();
+            if (voice.Key == null)
+            {
+                MenuItem add = new MenuItem { Header = "Add ElevenLabs key..." };
+                add.Click += delegate { AskVoiceKey(); };
+                voiceMenu.Items.Add(add);
+                return;
+            }
+            MenuItem speak = new MenuItem { Header = "Use ElevenLabs", ToggleType = MenuItemToggleType.CheckBox, IsChecked = Speaks, IsEnabled = voice.VoiceId != null };
+            speak.Click += delegate { SetSpeak(Saved.Silent); };
+            voiceMenu.Items.Add(speak);
+            voiceMenu.Items.Add(new Separator());
+            if (voices == null)
+            {
+                voiceMenu.Items.Add(new MenuItem { Header = "Loading voices...", IsEnabled = false });
+                ListVoices();
+            }
+            else
+            {
+                int shown = 0;
+                foreach (VoiceEntry entry in voices.Voices)
+                {
+                    if (shown++ >= 30) break;
+                    string id = entry.Id;
+                    MenuItem pick = new MenuItem { Header = string.IsNullOrEmpty(entry.Name) ? id : entry.Name, ToggleType = MenuItemToggleType.Radio, GroupName = "voice", IsChecked = id == voice.VoiceId };
+                    pick.Click += delegate { ChooseVoice(id); };
+                    voiceMenu.Items.Add(pick);
+                }
+                if (voices.Voices.Count == 0) voiceMenu.Items.Add(new MenuItem { Header = "No voices on this key", IsEnabled = false });
+            }
+            voiceMenu.Items.Add(new Separator());
+            MenuItem renew = new MenuItem { Header = "New key..." };
+            renew.Click += delegate { AskVoiceKey(); };
+            MenuItem remove = new MenuItem { Header = "Remove key ending " + Voice.Tail(voice.Key) };
+            remove.Click += delegate { ForgetVoice(); };
+            voiceMenu.Items.Add(renew);
+            voiceMenu.Items.Add(remove);
+            if (voiceProblem != null) voiceMenu.Items.Add(new MenuItem { Header = voiceProblem, IsEnabled = false });
         }
 
         private Settings Load()
@@ -687,11 +1559,17 @@ namespace CapriDesktop
 
         internal void Quit()
         {
-            Save();
-            frames.Stop();
+            if (quitting) return;
+            quitting = true;
             Brain.Cancel();
+            voice.Stop();
             Talk.Dismiss();
-            desktop.Shutdown(0);
+            GlitchOut(delegate
+            {
+                Save();
+                frames.Stop();
+                desktop.Shutdown(0);
+            });
         }
 
         internal void Finish(int code)

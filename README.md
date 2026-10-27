@@ -65,7 +65,11 @@ She sits on your windows and chats. Voice, the Mainframe and doing things for yo
 
 1. Download [Mac (Apple Silicon)](https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-mac-apple-silicon.zip), [Mac (Intel)](https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-mac-intel.zip) or [Linux](https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-linux-x64.tar.gz)
 2. Install [Ollama](https://ollama.com), then run `ollama pull gemma4:e4b` for her brain
-3. **Mac:** unzip it and open Capri. If macOS says it can't check her, open System Settings → Privacy & Security and click **Open Anyway**. Needs macOS 15 or newer
+3. **Mac:** unzip it, drag Capri into Applications, then open Terminal and run this once. Needs macOS 15 or newer
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Capri.app
+   ```
+   Apple hasn't approved (notarized) her yet, so macOS blocks her or calls her "damaged" until you do. That line only clears the downloaded-from-the-internet flag on Capri
 4. **Linux:** unpack it and run `Capri/Capri`. She sits on windows on X11; on Wayland she sits on the bottom of your screen
 
 ## How to use her
@@ -85,12 +89,13 @@ Just ask her for things, like "open Spotify", "play Blinding Lights", "pause", "
 | Shift + drop | sit her right where you drop her |
 | Ctrl + drop | she hangs on; click her to let go |
 | Mic button | mute your mic in voice chat |
-| Ctrl + Alt + V | start or stop voice chat |
-| Ctrl + Alt + N | mute your mic |
+| Ctrl + Alt + V | start or stop voice chat (click its hint in the Mainframe to change it) |
+| Ctrl + Alt + N | mute your mic (click its hint in the Mainframe to change it) |
 | Ctrl + Alt + C | get her off your cursor |
 | Right-click, Move | she hops between your open windows |
 | Watch my screen | in the Mainframe: she comments as you play |
-| Speak replies | in the Mainframe: turn off to save ElevenLabs credits |
+| FREE VOICE / ELEVENLABS | in the Mainframe under VOICE: FREE VOICE runs on your PC and costs nothing; ELEVENLABS sounds amazing and uses your ElevenLabs credits |
+| Help | in the Mainframe: opens the help page |
 
 </details>
 
@@ -106,10 +111,14 @@ Just ask her for things, like "open Spotify", "play Blinding Lights", "pause", "
 - Mischief mode: screen glitches, stealing your cursor, "you've been hacked" notes
 - Mac and Linux: her voice, the Mainframe and doing things for you
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build her, test her and send a pull request.
+
 ## Licence
 
 Free for anything non-commercial: use her, share her, change her. No selling her or putting her in paid products. Full terms in [LICENSE.md](LICENSE.md) (PolyForm Noncommercial 1.0.0).
 
 Have fun and more updates to come!
 
-<sub>Setup guide based on Dancer's guide in the Discord. Font: Share Tech Mono (OFL).</sub>
+<sub>Setup guide based on Dancer's guide in the Discord. Font: Share Tech Mono (OFL). Free voice: Kokoro-82M (Apache-2.0). Her own ears: [NVIDIA Parakeet TDT 0.6B v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) ([CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)), int8 export by sherpa-onnx. Both run with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache-2.0).</sub>

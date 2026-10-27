@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="description" content="Capri help: install, the Mainframe, her brain, her voice, voice chat, settings and fixes.">
+  <title>Capri help</title>
+  <link rel="icon" type="image/x-icon" href="../assets/chip.ico">
+  <link rel="stylesheet" href="../style.css">
+  <script src="../guide.js" defer></script>
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <a href="../" aria-label="Capri home"><img class="chip" src="../assets/chip.png" alt="Capri's chip" width="72" height="50"></a>
+      <div class="links">
+        <a class="guide-link" href="../setup/" aria-label="Setup guide"><span class="guide-long">Setup guide</span><span class="guide-short">Guide</span></a>
+        <a class="download" href="https://github.com/yerocsin42/capri-desktop/releases/download/v0.7.0/Capri-Setup.exe" data-api="https://capri-reactions.yerocsin42.workers.dev/download"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v10m-4-4 4 4 4-4M3 13v4h14v-4"/></svg><span>Download</span></a>
+        <a class="discord" href="https://discord.gg/F4fDHfGtFk" target="_blank" rel="noopener noreferrer" aria-label="Discord"><svg viewBox="0 0 24 24" aria-hidden="true"><path id="discord-mark" d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg></a>
+        <a class="github" href="https://github.com/yerocsin42/capri-desktop" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .75a11.25 11.25 0 0 0-3.56 21.92c.56.1.77-.24.77-.54v-2.1c-3.13.68-3.79-1.33-3.79-1.33-.51-1.3-1.25-1.65-1.25-1.65-1.02-.7.08-.69.08-.69 1.13.08 1.72 1.16 1.72 1.16 1 1.72 2.62 1.22 3.26.93.1-.73.39-1.22.71-1.5-2.5-.29-5.13-1.25-5.13-5.57 0-1.23.44-2.23 1.16-3.02-.12-.28-.5-1.43.11-2.98 0 0 .95-.3 3.1 1.15a10.83 10.83 0 0 1 5.64 0c2.15-1.45 3.1-1.15 3.1-1.15.61 1.55.23 2.7.11 2.98.72.79 1.16 1.79 1.16 3.02 0 4.33-2.64 5.28-5.15 5.56.4.35.76 1.03.76 2.08v3.11c0 .3.2.65.78.54A11.25 11.25 0 0 0 12 .75Z"/></svg></a>
+      </div>
+    </header>
+    <main class="guide help">
+      <h1>Capri <em>help</em></h1>
+      <nav class="guide-jump" aria-label="Topics"><a href="#install">Install</a><a href="#first-run">First run</a><a href="#mainframe">Mainframe</a><a href="#brain">Brain</a><a href="#voice">Voice</a><a href="#voice-chat">Voice chat</a><a href="#do">Doing things</a><a href="#screen">Screen</a><a href="#notes">Notes</a><a href="#moving">Moving her</a><a href="#updates">Updates</a><a href="#privacy">Privacy</a><a href="#mac-linux">Mac + Linux</a><a href="#older">Older versions</a><a href="#fixes">Fixes</a><a href="#get-help">Get help</a></nav>
+
+      <section id="install" class="step">
+        <h2>Install</h2>
+        <h3>Windows <small>10 or 11, 64-bit</small></h3>
+        <ol class="moves">
+          <li><a class="download inline" href="https://github.com/yerocsin42/capri-desktop/releases/download/v0.7.0/Capri-Setup.exe" data-api="https://capri-reactions.yerocsin42.workers.dev/download"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v10m-4-4 4 4 4-4M3 13v4h14v-4"/></svg><span>Download</span></a></li>
+          <li>Open <code>Capri-Setup.exe</code></li>
+          <li>“Windows protected your PC”? <b>More info</b> → <b>Run anyway</b></li>
+          <li><b>Install Capri</b></li>
+          <li>“Installing the local speech model”: her free voice, about 316 MB. <b>Skip</b> gets it later</li>
+        </ol>
+        <dl class="keys">
+          <dt>Admin</dt><dd>not needed, installs for your Windows user</dd>
+          <dt>Folder</dt><dd><code>%LOCALAPPDATA%\Capri</code></dd>
+          <dt>Shortcuts</dt><dd>Start menu, plus desktop if you tick it</dd>
+          <dt>Startup</dt><dd>she doesn't start with Windows</dd>
+          <dt>Needs</dt><dd>nothing else, not Ollama, not Claude Code</dd>
+        </dl>
+        <p class="note">Windows warns because Capri is new and not signed yet. Got Capri from this site or GitHub? Then antivirus alerts like Wacatac, Zusy or MachineLearning/Anomalous are false alarms on a new app. Restore the file and allow it. The code is open on <a href="https://github.com/yerocsin42/capri-desktop" target="_blank" rel="noopener noreferrer">GitHub</a>.</p>
+
+        <h3 id="checksum">Check your download</h3>
+        <ol class="moves">
+          <li>Open PowerShell in Downloads, run <code>Get-FileHash Capri-Setup.exe</code></li>
+          <li>Match it with <code>SHA256SUMS.txt</code> on the <a href="https://github.com/yerocsin42/capri-desktop/releases/latest" target="_blank" rel="noopener noreferrer">release page</a></li>
+        </ol>
+
+        <h3 id="mac">Mac <small>preview, macOS 15+</small></h3>
+        <ol class="moves">
+          <li>Download <a href="https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-mac-apple-silicon.zip">Apple Silicon</a> or <a href="https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-mac-intel.zip">Intel</a></li>
+          <li>Unzip, drag Capri into <b>Applications</b></li>
+          <li>Terminal: <code>xattr -dr com.apple.quarantine /Applications/Capri.app</code></li>
+          <li>Open Capri</li>
+          <li>Install <a href="https://ollama.com" target="_blank" rel="noopener noreferrer">Ollama</a>, run <code>ollama pull gemma4:e4b</code></li>
+        </ol>
+        <p class="note">Apple hasn't approved (notarized) Capri yet, so macOS calls her “damaged” until you run that line. It only clears the downloaded-from-the-internet flag on Capri. No Dock icon is normal.</p>
+
+        <h3 id="linux">Linux <small>preview, x64</small></h3>
+        <ol class="moves">
+          <li>Download <a href="https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-linux-x64.tar.gz">Capri-linux-x64.tar.gz</a>, unpack it</li>
+          <li>Run <code>Capri/Capri</code></li>
+          <li>Install <a href="https://ollama.com" target="_blank" rel="noopener noreferrer">Ollama</a>, run <code>ollama pull gemma4:e4b</code></li>
+        </ol>
+        <p class="note">X11: she sits on windows. Wayland: bottom of the screen only.</p>
+      </section>
+
+      <section id="first-run" class="step">
+        <h2>First run</h2>
+        <ol class="moves">
+          <li>She glitches in and drops onto a window or the taskbar</li>
+          <li>The <b>Capri Mainframe</b> opens by itself</li>
+          <li><b>NORMAL</b> → <b>Set up her brain</b>. Slow PC? <b>HIGHER</b> → <b>Free key</b></li>
+          <li>She talks with her free voice. Best voice: <b>ELEVENLABS</b> under VOICE</li>
+        </ol>
+        <dl class="keys">
+          <dt>Pencil</dt><dd>hover her, press it, type, Enter</dd>
+          <dt>Wave</dt><dd>voice chat, free without a key</dd>
+          <dt>Right-click</dt><dd>her menu</dd>
+          <dt>Greeting</dt><dd>her own recorded voice, no key or credits</dd>
+          <dt>Next time</dt><dd>the Mainframe starts minimized: right-click her → <b>Open Capri Mainframe</b></dd>
+        </dl>
+      </section>
+
+      <section id="mainframe" class="step">
+        <h2>The Mainframe</h2>
+        <p class="note">Right-click her → <b>Open Capri Mainframe</b>. The X only hides it. <b>Settings</b> at the top opens every other setting beside it.</p>
+
+        <h3>BRAIN</h3>
+        <p class="note">Pick one. Only one brain runs at a time. Each row keeps its own key.</p>
+        <dl class="keys">
+          <dt>NORMAL</dt><dd>free, local model. Start with this!</dd>
+          <dt>HIGHER</dt><dd>free NVIDIA key</dd>
+          <dt>MAX INTELLIGENCE</dt><dd>ChatGPT or Claude key, needs credits</dd>
+          <dt>Model menu</dt><dd>pick another model</dd>
+          <dt>Refresh</dt><dd>look for her brain again, like after opening Ollama</dd>
+          <dt>Set up her brain</dt><dd>download her built-in brain</dd>
+          <dt>Key box</dt><dd>on HIGHER and MAX: paste a key → <b>Connect</b></dd>
+          <dt>Forget</dt><dd>red when the box is empty: removes that row's key</dd>
+          <dt>Free key</dt><dd>opens NVIDIA to make a free key</dd>
+        </dl>
+
+        <h3>VOICE</h3>
+        <p class="note">Pick one. Switching never deletes your key.</p>
+        <dl class="keys">
+          <dt>FREE VOICE</dt><dd>free, runs on your PC, no credits</dd>
+          <dt>ELEVENLABS</dt><dd>sounds amazing, uses your ElevenLabs credits</dd>
+          <dt>Setup guide</dt><dd>opens the voice steps</dd>
+          <dt>Free voice</dt><dd>Her own, Bright, Sly or Sharp. <b>Get free voice</b> if it's missing</dd>
+          <dt>Key box</dt><dd>on ELEVENLABS: paste the key → <b>Connect</b></dd>
+          <dt>Voice ID</dt><dd>on ELEVENLABS: paste it or pick from your voices</dd>
+          <dt>Model</dt><dd>Default model, or v4</dd>
+          <dt>Mic</dt><dd>pick your mic</dd>
+          <dt>Test</dt><dd>she says a test line</dd>
+          <dt>Ctrl + Alt + V</dt><dd>voice chat on or off, click the hint to change</dd>
+          <dt>Ctrl + Alt + N</dt><dd>mute your mic, click the hint to change</dd>
+        </dl>
+
+        <h3>CAPRI</h3>
+        <dl class="keys">
+          <dt>Hide Capri</dt><dd>she stays in the tray</dd>
+          <dt>Bring here</dt><dd>to your mouse pointer</dd>
+          <dt>Ride cursor</dt><dd>she follows your mouse</dd>
+          <dt>Check for updates</dt><dd>check now</dd>
+          <dt>Help</dt><dd>opens this page</dd>
+          <dt>Quit Capri</dt><dd>closes her</dd>
+        </dl>
+
+        <h3 id="settings">Settings</h3>
+        <dl class="keys">
+          <dt>Size</dt><dd>Tiny to Giant</dd>
+          <dt>Pop in on me</dt><dd>she pops up now and then, even over games</dd>
+          <dt>Always on top</dt><dd>above other windows</dd>
+          <dt>Watch my screen</dt><dd>she comments, Every 10 s to 10 min</dd>
+          <dt>Language</dt><dd>20 languages for her replies</dd>
+          <dt>What should she call you?</dt><dd>type a nickname → <b>Save</b>. <code>choom</code> resets it</dd>
+          <dt>Open her notes</dt><dd>me.md, what she remembers</dd>
+          <dt>Volume</dt><dd>her voice, Mute to 150%</dd>
+          <dt>Sounds</dt><dd>her effects, Off to 100%</dd>
+          <dt>Bubble</dt><dd>Quick, Normal, Long</dd>
+          <dt>Typing sound</dt><dd>while her text types out</dd>
+          <dt>Wander</dt><dd>Off to Restless</dd>
+          <dt>Sleep</dt><dd>Never to 30 min</dd>
+          <dt>Dance to music</dt><dd>when songs play</dd>
+          <dt>Glitch in at startup</dt><dd>tendrils and sound when she starts</dd>
+          <dt>Replies</dt><dd>Short, Medium, Long</dd>
+          <dt>Memory</dt><dd>how much chat she keeps in mind</dd>
+          <dt>Custom model name</dt><dd>any pulled Ollama model or model id on your key → <b>Use</b></dd>
+        </dl>
+
+        <h3 id="menu">Right-click menu</h3>
+        <dl class="keys">
+          <dt>Size</dt><dd>Small, Medium, Large, Huge, Giant</dd>
+          <dt>Move</dt><dd>Wander around, Dance to music, Ride cursor, Sit on windows, Sit here, Hang here, Bring to this screen</dd>
+          <dt>Help</dt><dd>Help page, Join the Discord, Copy error details, Check for updates</dd>
+          <dt>Tray icon</dt><dd>same menu. Double-click: bring her back. Hidden? Check the ^ by the clock</dd>
+        </dl>
+      </section>
+
+      <section id="brain" class="step">
+        <h2>Her brain</h2>
+        <dl class="keys">
+          <dt>Most PCs</dt><dd><b>NORMAL</b> → <b>Set up her brain</b>: free, private, offline after the download</dd>
+          <dt>Slow PC</dt><dd><b>HIGHER</b> → <b>Free key</b>: fast, nothing to download, needs internet</dd>
+          <dt>Ollama</dt><dd><b>NORMAL</b>, open it → <b>Refresh</b></dd>
+          <dt>Smartest</dt><dd><b>MAX INTELLIGENCE</b>: OpenAI, Claude or DeepSeek key with credits</dd>
+        </dl>
+        <p class="note">She uses the row you picked. NORMAL runs Ollama if it's open, else her built-in brain. A row without its key uses NORMAL until you connect one.</p>
+        <img class="shot" src="../assets/guide-brain.png" alt="Capri Mainframe with the Set up her brain button and the three brain rows: NORMAL, HIGHER with the Free key button, and MAX INTELLIGENCE" width="380" height="385" loading="lazy">
+
+        <h3>Built-in brain <small>picked for your PC</small></h3>
+        <dl class="keys">
+          <dt>Gemma 4 E4B</dt><dd>4.6 GB: 7 GB+ graphics card and 12 GB+ RAM</dd>
+          <dt>Gemma 4 E2B</dt><dd>3.1 GB: 7 GB+ RAM or 4 GB+ graphics card</dd>
+          <dt>Qwen3 4B</dt><dd>2.5 GB: other PCs, can't see your screen</dd>
+        </dl>
+        <p class="note">Stopped downloads pick up where they left off. Her “eyes” (about 560 MB) download the first time she watches your screen.</p>
+
+        <h3 id="free-key">Free NVIDIA key</h3>
+        <ol class="moves">
+          <li>Mainframe → <b>Free key</b>, or <a href="https://build.nvidia.com/settings/api-keys" target="_blank" rel="noopener noreferrer">build.nvidia.com</a></li>
+          <li>Sign in or make a free account. NVIDIA may ask to verify your phone</li>
+          <li><b>Generate API Key</b>, copy it. It starts with <code>nvapi-</code></li>
+          <li>Pick <b>HIGHER</b>, paste it in the box → <b>Connect</b></li>
+        </ol>
+        <p class="note">Best pick: <code>z-ai/glm-5.3-flash</code>. If a model doesn't answer, she switches to another for that reply. Your pick stays.</p>
+
+        <h3>RAM and storage</h3>
+        <dl class="stuck">
+          <dt>“Not enough free RAM”</dt><dd>Close apps, browser tabs or games, then try again. Or use the free NVIDIA key.</dd>
+          <dt>“Your storage is full”</dt><dd>Free up space on C: or empty the Recycle Bin, then <b>Set up her brain</b> again.</dd>
+          <dt>Games lag</dt><dd>Use the free NVIDIA key while you play.</dd>
+        </dl>
+      </section>
+
+      <section id="voice" class="step">
+        <h2>Her voice <small>free, or ElevenLabs</small></h2>
+        <dl class="keys">
+          <dt>FREE VOICE</dt><dd>the installer adds it. Missing? <b>Get free voice</b> under VOICE. Windows 64-bit only</dd>
+          <dt>ELEVENLABS</dt><dd>her best voice, from your own account:</dd>
+        </dl>
+        <ol class="moves">
+          <li>Make a voice in <a href="https://elevenlabs.io" target="_blank" rel="noopener noreferrer">ElevenLabs</a>: <b>Voice Design</b> with the <a href="../setup/#voice">setup guide's prompt</a>, or clone her (paid plan)</li>
+          <li><b>Voices</b> → <b>My Voices</b> → <b>⋯</b> → <b>Copy Voice ID</b></li>
+          <li><b>Developers</b> → <b>API Keys</b> → <b>Create Key</b>, turn <b>Restrict key</b> off, copy it</li>
+          <li>Mainframe VOICE: <b>ELEVENLABS</b>, paste the key → <b>Connect</b></li>
+          <li>Paste the Voice ID, Model → <b>v4</b>, <b>Test</b></li>
+        </ol>
+        <p class="note">Keys start with <code>sk_</code>. About one credit per letter she says. Free credits refill each month. ElevenLabs voice chat uses credits too. Her free voice uses none.</p>
+        <h3>Keeping Restrict key on?</h3>
+        <p class="note">The key needs these:</p>
+        <img class="fit" src="../assets/guide-el-permissions.png" alt="A key's permissions: Text to Speech and Models Access, ElevenAgents and Voices Read, ElevenAgents Write" width="362" height="355" loading="lazy">
+      </section>
+
+      <section id="voice-chat" class="step">
+        <h2>Voice chat</h2>
+        <dl class="keys">
+          <dt>Start, stop</dt><dd>the wave, or <b>Ctrl + Alt + V</b></dd>
+          <dt>Mute mic</dt><dd><b>Ctrl + Alt + N</b>, or the mic button</dd>
+          <dt>Free</dt><dd><b>FREE VOICE</b> picked, or no key: you talk, she answers with her free voice. Her ears download the first time</dd>
+          <dt>ElevenLabs</dt><dd><b>ELEVENLABS</b> picked, a Voice ID, a mic</dd>
+          <dt>Resting</dt><dd>quiet for a while? Just talk and she picks up</dd>
+        </dl>
+        <p class="note">ElevenLabs voice chat makes a voice agent called “Capri” in your ElevenLabs account, and your voice goes to ElevenLabs while it's on. Free voice chat hears English on your PC. She doesn't comment on your screen during voice chat. Other languages are new and not well tested.</p>
+      </section>
+
+      <section id="do" class="step">
+        <h2>Things she can do <small>Windows</small></h2>
+        <dl class="keys">
+          <dt>“Open Spotify”</dt><dd>apps and games from your Start menu, and sites</dd>
+          <dt>“Play Chippin' In”</dt><dd>Spotify, or YouTube without it. Name the artist</dd>
+          <dt>“Pause”, “next”</dt><dd>also “turn it up”, “what's playing?”</dd>
+          <dt>“Close Discord”</dt><dd>switch to, minimize or close apps and tabs</dd>
+          <dt>“Mute my mic”</dt><dd>Discord mute, also “deafen me”</dd>
+          <dt>“Clip that”</dt><dd>also screenshots, recording, Task Manager, emoji</dd>
+          <dt>“Send hi to Sam”</dt><dd>on Discord or another app: she types it and sends it</dd>
+          <dt>“Google the weather”</dt><dd>opens a Google search</dd>
+          <dt>“Remember …”</dt><dd>saves it to her notes</dd>
+        </dl>
+        <p class="note">For jobs her own pink pointer clicks, and your mouse stays put. Only <b>Esc</b> stops her. “Write” or “draft” leaves a message unsent. She asks before buying anything and never types passwords. She can't touch your files.</p>
+      </section>
+
+      <section id="screen" class="step">
+        <h2>Watch my screen</h2>
+        <ol class="moves">
+          <li>Mainframe → <b>Settings</b> → <b>Watch my screen</b></li>
+          <li><b>Every</b>: how often she looks</li>
+        </ol>
+        <p class="note">Any time: say “check my screen” and she looks right then.</p>
+        <p class="note">She skips unchanged, blank or loading screens, and stays quiet in voice chat or after 10 minutes away. Qwen3 4B and DeepSeek can't see. Use the free NVIDIA key with <code>z-ai/glm-5.3-flash</code>.</p>
+      </section>
+
+      <section id="notes" class="step">
+        <h2>Notes, nickname, language</h2>
+        <dl class="keys">
+          <dt>“Remember …”</dt><dd>saves to her notes, she reads them every chat</dd>
+          <dt>“Forget …”</dt><dd>takes it out. “Forget everything about me” wipes them</dd>
+          <dt>Open her notes</dt><dd>Settings: me.md in Notepad, edit anything</dd>
+          <dt>Nickname</dt><dd>Settings → “What should she call you?” → <b>Save</b></dd>
+          <dt>Language</dt><dd>Settings → <b>Language</b>, starts a fresh chat</dd>
+          <dt>Chat history</dt><dd>kept a week, even after a restart</dd>
+        </dl>
+        <p class="note">She won't save names, addresses, schools, passwords or phone numbers.</p>
+      </section>
+
+      <section id="moving" class="step">
+        <h2>Moving her</h2>
+        <dl class="keys">
+          <dt>Drag</dt><dd>sit her on a window, the taskbar or an icon</dd>
+          <dt>Shift + drop</dt><dd>sit her right there</dd>
+          <dt>Ctrl + drop</dt><dd>she hangs on, click her to let go</dd>
+          <dt>Double-click</dt><dd>she rides your cursor</dd>
+          <dt>Ctrl + Alt + C</dt><dd>get her off your cursor</dd>
+          <dt>Pet her</dt><dd>rub your cursor back and forth over her</dd>
+          <dt>Wander</dt><dd>Move → <b>Wander around</b>, she hops between windows</dd>
+          <dt>Dance</dt><dd>she dances to music by herself. Move → <b>Dance to music</b> turns it off</dd>
+          <dt>Other screen</dt><dd>Move → <b>Bring to this screen</b></dd>
+          <dt>Hide, show</dt><dd><b>Hide Capri</b>. Double-click the tray icon to bring her back</dd>
+        </dl>
+        <p class="note">She sits on windows that aren't maximized or full screen. She falls asleep when you're away. Move the mouse to wake her.</p>
+      </section>
+
+      <section id="updates" class="step">
+        <h2>Updates and uninstall</h2>
+        <dl class="keys">
+          <dt>Windows</dt><dd>she checks every 3 hours. “Capri update ready” → right-click her → <b>Restart to update</b></dd>
+          <dt>Check now</dt><dd>Mainframe → <b>Check for updates</b></dd>
+          <dt>Mac, Linux</dt><dd>download the new file and replace the old one</dd>
+          <dt>What's new</dt><dd>the <a href="../">main page</a> changelog, <a href="https://github.com/yerocsin42/capri-desktop/releases" target="_blank" rel="noopener noreferrer">GitHub releases</a>, the Discord</dd>
+        </dl>
+        <h3 id="uninstall">Uninstall</h3>
+        <ol class="moves">
+          <li>Right-click her → <b>Quit Capri</b></li>
+          <li>Windows Settings → Apps → Installed apps → Capri → <b>Uninstall</b></li>
+          <li><b>Remove Capri</b></li>
+        </ol>
+        <p class="note">Your settings, notes and chat stay in <code>%LOCALAPPDATA%\Capri</code>. Delete that folder to remove everything. Used voice chat? Delete the “Capri” agent in ElevenLabs too.</p>
+      </section>
+
+      <section id="privacy" class="step">
+        <h2>Privacy</h2>
+        <dl class="keys">
+          <dt>Stays on your PC</dt><dd>built-in brain and Ollama chats, her free voice, notes, chat history, settings, your keys</dd>
+          <dt>Brain key</dt><dd>your messages, notes and recent chat go to that company. Screen pictures too, if you watch</dd>
+          <dt>ElevenLabs</dt><dd>what she says. In voice chat: your voice and words</dd>
+          <dt>Dancing</dt><dd>reads your sound level in memory, nothing recorded</dd>
+          <dt>Analytics</dt><dd>none</dd>
+        </dl>
+        <p class="note">She also connects to GitHub for updates, Hugging Face for her brain download, and DuckDuckGo and YouTube to find songs.</p>
+      </section>
+
+      <section id="mac-linux" class="step">
+        <h2>Mac and Linux <small>preview</small></h2>
+        <dl class="keys">
+          <dt>Works</dt><dd>sitting, chatting, Ollama brain, her ElevenLabs voice, notes, wander, dancing, apps, Spotify</dd>
+          <dt>Not yet</dt><dd>Mainframe, voice chat, built-in brain, NVIDIA key, shortcuts, screen watching, mouse jobs, auto-updates</dd>
+          <dt>Brain</dt><dd>right-click her → <b>Brain</b>, pick an Ollama model</dd>
+          <dt>Voice</dt><dd>right-click her → <b>Settings</b> → <b>Voice</b> → <b>Add ElevenLabs key...</b></dd>
+          <dt>Settings</dt><dd>all in her right-click menu</dd>
+          <dt>Files</dt><dd><code>~/.config/Capri</code></dd>
+        </dl>
+        <p class="note">On Mac, macOS asks “Capri wants to control Spotify” the first time. Press OK.</p>
+      </section>
+
+      <section id="older" class="step">
+        <h2>On 0.6.2 or older?</h2>
+        <dl class="keys">
+          <dt>Speak replies</dt><dd>turns ElevenLabs on or off. No free voice yet</dd>
+          <dt>0.6.9 tests</dt><dd><b>Use ElevenLabs</b> box instead of the FREE VOICE and ELEVENLABS rows</dd>
+          <dt>No Settings</dt><dd>no language, nickname, notes or custom hotkeys yet</dd>
+          <dt>Size</dt><dd>four buttons: Small, Medium, Large, Huge</dd>
+          <dt>Voice chat</dt><dd>English only</dd>
+          <dt>Mac, Linux</dt><dd>no voice</dd>
+        </dl>
+        <p class="note">Update to get everything on this page. Your version is at the top of the Mainframe.</p>
+      </section>
+
+      <section id="fixes" class="step">
+        <h2>Fixes</h2>
+
+        <h3>Install</h3>
+        <dl class="stuck">
+          <dt>“Item Not Found”, or the installer vanished</dt><dd>Chrome or Edge: <b>Ctrl + J</b> → <b>Keep</b>. Antivirus: restore it from quarantine. Open it from Downloads.</dd>
+          <dt>Antivirus flags it</dt><dd>From this site or GitHub? A false alarm on a new, unsigned app. Restore and allow it, or <a href="#checksum">check the download</a>.</dd>
+          <dt>Capri vanished after installing</dt><dd>Your antivirus removed Capri.exe. Restore it, allow it, run the installer again.</dd>
+          <dt>Opera: “Insufficient permissions”</dt><dd>Use Chrome or Edge, or download from <a href="https://github.com/yerocsin42/capri-desktop/releases/latest" target="_blank" rel="noopener noreferrer">GitHub</a>.</dd>
+          <dt>“Quit Capri from her tray menu, then install again.”</dt><dd>Right-click her → <b>Quit Capri</b>, then install.</dd>
+          <dt>Mac: “damaged” or “can't be opened”</dt><dd>Run the <a href="#mac">xattr line</a>, then open her again. Needs macOS 15+.</dd>
+          <dt>Mac or Linux: no Mainframe</dt><dd>There isn't one yet. Right-click her.</dd>
+          <dt>Linux: brain offline</dt><dd>Run <code>ollama pull gemma4:e4b</code>, then right-click her → <b>Brain</b>.</dd>
+        </dl>
+
+        <h3>Brain</h3>
+        <dl class="stuck">
+          <dt>“My brain's offline.”</dt><dd>Mainframe → <b>Set up her brain</b>, or <b>Free key</b>.</dd>
+          <dt>Download keeps stopping</dt><dd>Check your internet → <b>Try again</b>. It picks up where it stopped.</dd>
+          <dt>“Brain crashed loading” or “loaded too slowly”</dt><dd>Close games → <b>Refresh</b>. Or use the free NVIDIA key.</dd>
+          <dt>Slow replies</dt><dd>Games share your PC's power. Use the free NVIDIA key.</dd>
+          <dt>“Waiting for NVIDIA”</dt><dd>Pick another model, like <code>z-ai/glm-5.3-flash</code>.</dd>
+          <dt>“Key rejected.”</dt><dd><b>Forget</b>, copy the key again, paste it → <b>Connect</b>.</dd>
+          <dt>“No credits on this key.”</dt><dd>OpenAI, Claude and DeepSeek need paid credits. Or use <b>Free key</b>.</dd>
+          <dt>“That model isn't on your key.”</dt><dd>Pick another model.</dd>
+          <dt>“My brain sent gibberish.” or <code>&lt;unused49&gt;</code></dt><dd>She retries on your CPU by herself. Keeps happening? Use the free NVIDIA key.</dd>
+          <dt>She forgets what you said</dt><dd>Mainframe Settings → <b>Memory</b> → <b>Long</b>.</dd>
+          <dt>She makes things up</dt><dd>Small brains on your PC guess. The free NVIDIA key is smarter.</dd>
+          <dt>PC freezes</dt><dd>Try the free NVIDIA key, then tell us in the Discord.</dd>
+        </dl>
+
+        <h3>Voice</h3>
+        <dl class="stuck">
+          <dt>“ElevenLabs rejected the key”</dt><dd>That isn't the key. Keys start with <code>sk_</code>. Make a new one and paste it.</dd>
+          <dt>“Key is missing permissions” or “Key can't do that”</dt><dd>Make a new key with <b>Restrict key</b> turned off. <b>Forget</b> the old one, paste the new one.</dd>
+          <dt>“Voice not found”</dt><dd>Paste the Voice ID from My Voices, not the name. Library voices go in My Voices first.</dd>
+          <dt>“Out of ElevenLabs credits”</dt><dd>Credits refill each month. Pick <b>FREE VOICE</b> meanwhile. “10,000 / 10,000” means all used.</dd>
+          <dt>“ElevenLabs has restricted your account”</dt><dd>Sign in at elevenlabs.io to see why. Pick <b>FREE VOICE</b> meanwhile.</dd>
+          <dt>“Free tier usage disabled”</dt><dd>Turn off your VPN and try again.</dd>
+          <dt>“ElevenLabs sent a reply Capri couldn't read.”</dt><dd>ElevenLabs may be blocked where you are, or by a VPN. Try without one, then send <a href="#get-help">Copy error details</a>.</dd>
+          <dt>Test shows words, no sound</dt><dd>“Voice link online” isn't proof she played. Set your speakers as the Windows default (Settings → System → Sound). Check Mainframe Settings → <b>Volume</b>. Quit and reopen Capri.</dd>
+          <dt>FREE VOICE, but she only types</dt><dd>Her free voice isn't installed. <b>Get free voice</b> under VOICE.</dd>
+          <dt>“Can't open your speakers”</dt><dd>Turn on speakers in Settings → System → Sound. Or close the app holding them, or untick exclusive mode.</dd>
+        </dl>
+
+        <h3>Voice chat</h3>
+        <dl class="stuck">
+          <dt>She can't hear you</dt><dd>Pick your mic under VOICE. Check it isn't muted. Windows Settings → Privacy &amp; security → Microphone → let desktop apps use it.</dd>
+          <dt>“Can't open my voice link.”</dt><dd>Open the Mainframe. The reason and the fix are under VOICE.</dd>
+          <dt>Free voice chat when you want ElevenLabs</dt><dd>Pick <b>ELEVENLABS</b>. Voice chat follows your VOICE pick.</dd>
+          <dt>“My ears are still downloading”</dt><dd>First time only. She says when she can hear you.</dd>
+          <dt>“Voice chat needs my Voice ID”</dt><dd>Pick a voice in the Voice ID box.</dd>
+          <dt>Ctrl + Alt + V does nothing</dt><dd>Another app may use it. Click the hint in the Mainframe and pick new keys.</dd>
+        </dl>
+
+        <h3>Screen and Mainframe</h3>
+        <dl class="stuck">
+          <dt>She never comments</dt><dd>Settings → <b>Watch my screen</b>. She skips screens that haven't changed.</dd>
+          <dt>“Couldn't read the screen.”</dt><dd>Pick a model that can see, like <code>z-ai/glm-5.3-flash</code>.</dd>
+          <dt>“This brain can't see.”</dt><dd>Use the free NVIDIA key.</dd>
+          <dt>“The screen capture is black.”</dt><dd>Set the game to borderless or windowed.</dd>
+          <dt>Mainframe squashed or cut off</dt><dd>Try Windows Settings → System → Display → Scale → 100%, reopen Capri, and tell us your scale in the Discord.</dd>
+        </dl>
+
+        <h3>Moving her</h3>
+        <dl class="stuck">
+          <dt>She's gone</dt><dd>Double-click her tray icon (maybe under the ^), press <b>Ctrl + Alt + V</b>, or open Capri again.</dd>
+          <dt>Stuck on your cursor</dt><dd><b>Ctrl + Alt + C</b>.</dd>
+          <dt>She won't wander</dt><dd>Turn on <b>Wander around</b>, use your PC for a bit, give it a couple of minutes. Not from a Sit here spot. Needs windows that aren't maximized.</dd>
+          <dt>Floating in mid-air</dt><dd>Move → <b>Sit on windows</b>.</dd>
+          <dt>Behind your game</dt><dd>Set the game to borderless or windowed. Settings → <b>Always on top</b>.</dd>
+          <dt>She doesn't dance</dt><dd>Turn on <b>Dance to music</b>. Give her a few seconds to find the beat.</dd>
+        </dl>
+
+        <h3>Doing things</h3>
+        <dl class="stuck">
+          <dt>Wrong song</dt><dd>Say the song and the artist.</dd>
+          <dt>Spotify opens but doesn't play</dt><dd>Press the green Play button.</dd>
+          <dt>“No app called X is installed”</dt><dd>Use the name from your Start menu.</dd>
+          <dt>“Mute my mic” doesn't work</dt><dd>She uses Discord's default keys (Ctrl + Shift + M). Set them back in Discord.</dd>
+          <dt>Jobs go wrong</dt><dd>Pick a bigger model, or a Claude key. <b>Esc</b> stops her.</dd>
+          <dt>She won't play a song</dt><dd>Some words in song names are blocked. Play it yourself.</dd>
+        </dl>
+
+        <h3>Updates</h3>
+        <dl class="stuck">
+          <dt>“Windows couldn't verify the update signature.”</dt><dd>Download the latest <code>Capri-Setup.exe</code> and install it. Don't get around the check.</dd>
+          <dt>Old version won't update</dt><dd>Install the latest <code>Capri-Setup.exe</code> over it.</dd>
+        </dl>
+      </section>
+
+      <section id="get-help" class="step">
+        <h2>Still stuck?</h2>
+        <ol class="moves">
+          <li>Right-click her → <b>Help</b> → <b>Copy error details</b></li>
+          <li>Paste it in the Discord with your Windows and Capri version, the exact message, what still works and what you tried</li>
+        </ol>
+        <p class="note">It's made to leave out your keys, but read it before you post. Mac and Linux: send <code>errors.txt</code> from <code>~/.config/Capri</code>.</p>
+        <a class="discord-join" href="https://discord.gg/F4fDHfGtFk" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#discord-mark"/></svg>Join the Discord</a>
+      </section>
+
+      <p class="credit">Something out of date? Tell us in the Discord.</p>
+    </main>
+  </div>
+</body>
+</html>

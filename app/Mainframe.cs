@@ -14,13 +14,35 @@ namespace CapriDesktop
         private static readonly Color Edge = Color.FromArgb(52, 60, 74);
         private static readonly Color Track = Color.FromArgb(30, 36, 46);
         private const int Wide = 380;
-        private static readonly int Tall = Companion.FreeChatOn ? 708 : 680;
+        private const int Tall = 594;
         private static readonly int[] Gaps = { 10, 15, 30, 60, 90, 120, 180, 300, 600 };
         private static readonly string[] GapNames = { "10 s", "15 s", "30 s", "1 min", "1.5 min", "2 min", "3 min", "5 min", "10 min" };
         private const int SetupHeight = 118;
-        private const int KeyRow = 72;
-        internal const string KeyNote = "No key needed, she runs on your PC. Keys are for low-power PCs or if her brain won't run.";
-        private static readonly int VoiceHeight = Companion.FreeChatOn ? 224 : 196;
+        private const int PageTall = 560;
+        // Settings opens a second column to the right, so every setting shows at once.
+        private const int Column = 380;
+        private const int Far = 30000;
+        private static readonly int[][] PageBars = { new[] { 0, 58, 206 }, new[] { 0, 220, 376 }, new[] { 0, 386, 538 }, new[] { Column, 58, 146 }, new[] { Column, 162, 250 }, new[] { Column, 266, 424 } };
+        private static readonly int[] Volumes = { 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 125, 150 };
+        private static readonly string[] VolumeNames = { "Mute", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%", "125%", "150%" };
+        private static readonly int[] SizeSteps = { 140, 170, 200, 240, 280, 320, 380, 440, 500, 560 };
+        private static readonly string[] SizeNames = { "Tiny", "Small", "Small+", "Medium", "Medium+", "Large", "Large+", "Huge", "Huge+", "Giant" };
+        private static readonly int[] Sleeps = { 0, 60, 120, 300, 600, 1800 };
+        private static readonly string[] SleepNames = { "Never", "1 min", "2 min", "5 min", "10 min", "30 min" };
+        private static readonly string[] BubbleNames = { "Quick", "Normal", "Long" };
+        private static readonly string[] SoundNames = { "Off", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%" };
+        private static readonly string[] WanderNames = { "Off", "Rarely", "Sometimes", "Often", "Restless" };
+        private static readonly string[] Lengths = { "Short", "Medium", "Long" };
+        private static readonly int[] Recalls = { 8, 16, 32 };
+        private const int VoiceHeight = 252;
+        // While her free voice or ears download, a row with the brain setup's dotted bar opens here and pushes the rest down.
+        private const int InstallAt = 395;
+        private const int InstallRow = 40;
+        // The ElevenLabs key row. Unless ELEVENLABS is picked with a key saved, one row under it folds away and the rest moves up.
+        private const int KeyAt = 262;
+        private const int KeyFold = 36;
+        private float voiceFilled = -1;
+        private readonly Label installNote;
         private readonly Companion capri;
         private readonly Label brainName;
         private readonly Label brainNote;
@@ -31,15 +53,26 @@ namespace CapriDesktop
         private readonly string[] stepText = new string[3];
         private readonly Key setup;
         private readonly Label hint;
-        private readonly Label keyNote;
+        private readonly Label tierNote;
+        private readonly Rung[] rungs = new Rung[3];
+        private int tier;
+        private readonly Entry nickname;
         private readonly Key showHide;
         private readonly Key perch;
-        private readonly Key[] sizes;
-        private readonly Toggle motion;
+        private readonly Slider sizeSlider;
+        private readonly Label sizeName;
+        private readonly Toggle popIns;
         private readonly Toggle onTop;
         private readonly Toggle watch;
-        private readonly Toggle speak;
-        private readonly Toggle freeVoice;
+        private readonly Label voiceHead;
+        private readonly Rung[] voiceRungs = new Rung[2];
+        private bool eleven;
+        private bool wantEleven;
+        private int arrangedFold = -1;
+        private readonly Key freeVoices;
+        private readonly ContextMenuStrip freeMenu;
+        private readonly Key freeSetup;
+        private bool freeReady;
         private readonly Slider gap;
         private readonly Label gapName;
         private readonly Entry keyEntry;
@@ -53,6 +86,10 @@ namespace CapriDesktop
         private readonly Key keyHelp;
         private readonly Label shortcut;
         private bool shortcutReady;
+        private bool muteReady = true;
+        private int capturing;
+        private string talkName = "Ctrl + Alt + V";
+        private string muteName = "Ctrl + Alt + N";
         private readonly Label muteShortcut;
         private readonly Key mics;
         private readonly ContextMenuStrip micMenu;
@@ -68,6 +105,35 @@ namespace CapriDesktop
         private bool loaded;
         private bool syncing;
         internal bool Quitting;
+        private readonly Key more;
+        private readonly Key minimize;
+        private readonly Key close;
+        private readonly Label build;
+        private readonly List<KeyValuePair<Control, int>> mainLeft = new List<KeyValuePair<Control, int>>();
+        private readonly List<KeyValuePair<Control, int>> pageLeft = new List<KeyValuePair<Control, int>>();
+        private readonly Dictionary<Control, bool> stops = new Dictionary<Control, bool>();
+        private bool paged;
+        private readonly Key languages;
+        private readonly ContextMenuStrip languageMenu;
+        private readonly Slider volume;
+        private readonly Label volumeName;
+        private readonly Slider sounds;
+        private readonly Slider sleepAfter;
+        private readonly Slider bubble;
+        private readonly Label bubbleName;
+        private readonly Toggle intro;
+        private readonly Toggle typing;
+        private readonly Label sleepName;
+        private readonly Label soundsName;
+        private readonly Slider wander;
+        private readonly Label wanderName;
+        private readonly Toggle dance;
+        private readonly Slider replies;
+        private readonly Label repliesName;
+        private readonly Slider recall;
+        private readonly Label recallName;
+        private readonly Entry custom;
+        private readonly Label customNote;
 
         internal Mainframe(Companion owner, Icon icon, string version)
         {
@@ -85,16 +151,20 @@ namespace CapriDesktop
             DoubleBuffered = true;
             ClientSize = new Size(Wide, Tall + SetupHeight + KeyRow);
             Caption("MAINFRAME", 26, 20, Look.Mono(13f, FontStyle.Bold, GraphicsUnit.Point), Look.Ink);
-            Label build = Caption("v" + version, 200, 20, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
+            build = Caption("v" + version, 200, 20, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
             build.AutoSize = false;
             build.TextAlign = ContentAlignment.MiddleRight;
-            build.Bounds = new Rectangle(200, 20, 92, 22);
-            Key minimize = Make("", 300, 20, 26, 22, delegate { WindowState = FormWindowState.Minimized; });
+            build.Bounds = new Rectangle(230, 20, 62, 22);
+            minimize = Make("", 300, 20, 26, 22, delegate { WindowState = FormWindowState.Minimized; });
             minimize.Glyph = 1;
             minimize.AccessibleName = "Minimize";
-            Key close = Make("", 330, 20, 26, 22, delegate { Close(); });
+            close = Make("", 330, 20, 26, 22, delegate { Close(); });
             close.Glyph = 2;
             close.AccessibleName = "Close";
+            more = Make("Settings", 146, 20, 84, 22, delegate { ShowSettings(!paged); });
+            more.Accent = Look.Cyan;
+            more.Loud = true;
+            int header = Controls.Count;
             Caption("BRAIN >", 28, 58, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
             brainName = Caption("", 28, 78, Look.Mono(10.5f, FontStyle.Bold, GraphicsUnit.Point), Look.Ink);
             brainNote = Caption("", 28, 100, Font, Look.Dim);
@@ -107,30 +177,67 @@ namespace CapriDesktop
             setup.Accent = Look.Cyan;
             setup.Loud = true;
             hint = Caption("Have Ollama? Open it, then press Refresh.", 28, 264, Look.Mono(9f, FontStyle.Italic, GraphicsUnit.Point), Look.Dim);
-            textEntry = Input(28, 170, 244);
+            tierNote = Caption("Pick one. Only one brain runs at a time.", 28, 168, Look.Mono(8.5f, FontStyle.Italic, GraphicsUnit.Point), Look.Dim);
+            string[,] tiers = { { "NORMAL", "Free · local model" }, { "HIGHER", "Free · NVIDIA API" }, { "MAX INTELLIGENCE", "ChatGPT or Claude API" } };
+            for (int i = 0; i < rungs.Length; i++)
+            {
+                int picked = i;
+                Rung rung = new Rung();
+                rung.Text = tiers[i, 0];
+                rung.Hint = tiers[i, 1];
+                rung.Font = Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point);
+                rung.HintFont = Font;
+                rung.AccessibleName = tiers[i, 0] + ", " + tiers[i, 1];
+                rung.Bounds = new Rectangle(28, 184 + 24 * i, i == 1 ? 232 : 328, 24);
+                rung.CheckedChanged += delegate { if (!syncing && rungs[picked].Checked) capri.ChooseTier(picked); };
+                Controls.Add(rung);
+                rungs[i] = rung;
+            }
+            rungs[0].Flag = "Start with this!";
+            rungs[0].FlagFont = Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point);
+            freeKey = Make("Free key", 266, 209, 90, 22, delegate { capri.OpenFreeKeyPage(); });
+            textEntry = Input(28, 262, 244);
             textEntry.Box.UseSystemPasswordChar = true;
-            textEntry.Box.AccessibleName = "NVIDIA, OpenAI, Anthropic or DeepSeek API key";
-            textEntry.Cue = "Optional: NVIDIA/GPT/Claude/DeepSeek";
-            textConnect = Make("Connect", 280, 170, 76, 28, delegate { ConnectText(); });
-            freeKey = Make("Free key", 256, 54, 100, 22, delegate { capri.OpenFreeKeyPage(); });
-            keyNote = Caption(KeyNote, 28, 202, Look.Mono(8.5f, FontStyle.Italic, GraphicsUnit.Point), Look.Dim);
+            textEntry.Box.AccessibleName = "NVIDIA API key";
+            textEntry.Cue = "Paste your free NVIDIA key";
+            textConnect = Make("Connect", 280, 262, 76, 28, delegate { ConnectText(); });
             textEntry.Box.TextChanged += delegate { RelabelText(); };
             textEntry.Box.KeyDown += delegate(object sender, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; ConnectText(); } };
-            Lower(Caption("VOICE >", 28, 184, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow));
-            keyHelp = Lower(Make("Get a key", 256, 180, 100, 22, delegate { capri.OpenKeyPage(); }));
+            voiceHead = Lower(Caption("VOICE >", 28, 184, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow));
             shortcut = Caption("Ctrl + Alt + V to talk", 156, 182, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
             shortcut.AutoSize = false;
             shortcut.TextAlign = ContentAlignment.MiddleRight;
             shortcut.Bounds = new Rectangle(156, 182, 200, 20);
+            shortcut.Cursor = Cursors.Hand;
+            shortcut.Click += delegate { PickKeys(false); };
             Lower(shortcut);
-            keyEntry = Lower(Input(28, 206, 244));
+            string[,] voiceTiers = { { "FREE VOICE", "Free · runs on your PC" }, { "ELEVENLABS", "Sounds amazing · paid" } };
+            for (int i = 0; i < voiceRungs.Length; i++)
+            {
+                bool paid = i == 1;
+                Rung rung = new Rung();
+                // A pair of its own: a self-checking radio button would untick the BRAIN tiers too.
+                rung.AutoCheck = false;
+                rung.TabStop = true;
+                rung.Text = voiceTiers[i, 0];
+                rung.Hint = voiceTiers[i, 1];
+                rung.Font = Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point);
+                rung.HintFont = Font;
+                rung.AccessibleName = voiceTiers[i, 0] + ", " + voiceTiers[i, 1];
+                rung.Bounds = new Rectangle(28, 208 + 24 * i, paid ? 246 : 328, 24);
+                rung.Click += delegate { if (!syncing) PickVoice(paid); };
+                Controls.Add(rung);
+                voiceRungs[i] = Lower(rung);
+            }
+            keyHelp = Lower(Make("Setup guide", 276, 233, 80, 22, delegate { capri.OpenKeyPage(); }));
+            keyEntry = Lower(Input(28, KeyAt, 244));
             keyEntry.Box.UseSystemPasswordChar = true;
             keyEntry.Box.AccessibleName = "ElevenLabs API key";
-            connect = Lower(Make("Connect", 280, 206, 76, 28, delegate { Connect(); }));
+            connect = Lower(Make("Connect", 280, KeyAt, 76, 28, delegate { Connect(); }));
             keyEntry.Box.TextChanged += delegate { Relabel(); };
             keyEntry.Box.KeyDown += delegate(object sender, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; Connect(); } };
             voiceMenu = Dropdown();
-            voiceEntry = Lower(Input(28, 242, 196));
+            voiceEntry = Lower(Input(28, 298, 196));
             voiceEntry.Chevron = true;
             voiceEntry.Cue = "Voice ID";
             voiceEntry.Box.AccessibleName = "ElevenLabs voice ID";
@@ -138,54 +245,216 @@ namespace CapriDesktop
             voiceEntry.Box.KeyDown += delegate(object sender, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; capri.ChooseVoice(voiceEntry.Box.Text); } };
             voiceEntry.Box.Leave += delegate { capri.ChooseVoice(voiceEntry.Box.Text); };
             speechModelMenu = Dropdown();
-            speechModels = Lower(Make("Default model", 232, 242, 124, 28, delegate { speechModelMenu.Show(speechModels, new Point(0, speechModels.Height)); }));
+            speechModels = Lower(Make("Default model", 232, 298, 124, 28, delegate { speechModelMenu.Show(speechModels, new Point(0, speechModels.Height)); }));
             speechModels.Chevron = true;
+            freeMenu = Dropdown();
+            freeVoices = Lower(Make("Free voice: Her own", 28, 298, 196, 28, delegate { freeMenu.Show(freeVoices, new Point(0, freeVoices.Height)); }));
+            freeVoices.Chevron = true;
+            freeVoices.Visible = false;
+            freeSetup = Lower(Make("Get free voice", 232, 298, 124, 28, delegate { if (capri.SettingUpVoice) capri.CancelFreeVoice(); else capri.SetUpFreeVoice(); }));
+            freeSetup.Accent = Look.Cyan;
+            freeSetup.Loud = true;
+            freeSetup.Visible = false;
             micMenu = Dropdown();
-            mics = Lower(Make("Mic: default", 28, 278, 244, 28, delegate { ShowMics(); }));
+            mics = Lower(Make("Mic: default", 28, 334, 244, 28, delegate { ShowMics(); }));
             mics.Chevron = true;
             mics.AccessibleName = "Microphone";
-            Lower(Make("Test", 280, 278, 76, 28, delegate { capri.TestVoice(); }));
-            muteShortcut = Lower(Caption("Ctrl + Alt + N mutes mic", 28, 313, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim));
-            speak = Lower(Check("Speak replies", 212, 311, 144, delegate { if (!syncing) capri.ToggleSpeaking(); }));
-            freeVoice = Lower(Check("Free voice chat", 28, 339, 328, delegate { if (!syncing) capri.ToggleFreeVoice(); }));
-            freeVoice.Hint = "You talk, she types";
-            freeVoice.HintFont = Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point);
-            freeVoice.Visible = Companion.FreeChatOn;
-            voiceNote = Lower(Caption("", 28, Companion.FreeChatOn ? 367 : 339, Font, Look.Dim));
+            Lower(Make("Test", 280, 334, 76, 28, delegate { capri.TestVoice(); }));
+            muteShortcut = Lower(Caption("Ctrl + Alt + N mutes mic", 28, 369, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim));
+            muteShortcut.Cursor = Cursors.Hand;
+            muteShortcut.Click += delegate { PickKeys(true); };
+            Deactivate += delegate { if (capturing == 0) return; capturing = 0; KeyLabels(); };
+            voiceNote = Lower(Caption("", 28, InstallAt, Font, Look.Dim));
+            installNote = Caption("", 28, InstallAt + 2, Font, Look.Ink);
+            installNote.Visible = false;
             int v = VoiceHeight;
             Lower(Caption("CAPRI >", 28, 184 + v, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow));
             showHide = Lower(Make("Hide Capri", 28, 206 + v, 104, 28, delegate { capri.ToggleHidden(); }));
             Lower(Make("Bring here", 140, 206 + v, 104, 28, delegate { capri.BringHere(); }));
             perch = Lower(Make("Ride cursor", 252, 206 + v, 104, 28, delegate { capri.TogglePerch(); }));
-            Lower(Caption("Size", 28, 251 + v, Font, Look.Dim));
-            sizes = new Key[4];
-            int[] values = { 170, 240, 320, 440 };
-            string[] names = { "Small", "Medium", "Large", "Huge" };
-            for (int i = 0; i < 4; i++)
+            Lower(Make("Check for updates", 28, 250 + v, 150, 28, delegate { capri.CheckUpdates(); }));
+            Key help = Lower(Make("Help", 186, 250 + v, 62, 28, delegate { capri.OpenHelp(); }));
+            help.AccessibleName = "Help: ask Capri on the website";
+            Key quit = Lower(Make("Quit Capri", 256, 250 + v, 100, 28, delegate { capri.Quit(); }));
+            quit.Accent = Look.Red;
+            updateNote = Lower(Caption("", 28, 288 + v, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim));
+            for (int i = header; i < Controls.Count; i++) mainLeft.Add(new KeyValuePair<Control, int>(Controls[i], Controls[i].Left));
+            int first = Controls.Count;
+            Caption("YOU >", 28, 58, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
+            Caption("Language", 28, 86, Font, Look.Dim);
+            languageMenu = Dropdown();
+            for (int i = 0; i < Brain.Languages.GetLength(0); i++)
             {
-                int size = values[i];
-                sizes[i] = Lower(Make(names[i], 84 + i * 68, 246 + v, 64, 26, delegate { capri.SetCharacterSize(size); }));
-                sizes[i].Tag = size;
+                string picked = Brain.Languages[i, 1];
+                ToolStripMenuItem item = Choice(Brain.Languages[i, 0], false, delegate { capri.SetLanguage(picked); Sync(); });
+                item.Tag = picked;
+                languageMenu.Items.Add(item);
             }
-            motion = Lower(Check("Idle motion", 28, 286 + v, 150, delegate { if (!syncing) capri.ToggleMotion(); }));
-            onTop = Lower(Check("Always on top", 186, 286 + v, 170, delegate { if (!syncing) capri.ToggleOnTop(); }));
-            watch = Lower(Check("Watch my screen", 28, 318 + v, 328, delegate { if (!syncing) capri.ToggleWatch(); }));
+            languages = Make("English", 128, 80, 228, 28, delegate { languageMenu.Show(languages, new Point(0, languages.Height)); });
+            languages.Chevron = true;
+            languages.AccessibleName = "Her language";
+            // A label of its own, so the question still shows once a name is saved in the box.
+            Caption("What should she call you?", 28, 118, Font, Look.Dim);
+            nickname = Input(28, 140, 244);
+            nickname.Cue = "Your name or a nickname";
+            nickname.Box.AccessibleName = "What should she call you?";
+            nickname.Box.KeyDown += delegate(object sender, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; UseNickname(); } };
+            Make("Save", 280, 140, 76, 28, delegate { UseNickname(); });
+            Make("Open her notes", 28, 176, 160, 28, delegate { capri.OpenNotes(); });
+            Caption("me.md · her memories", 200, 182, Font, Look.Dim);
+            Caption("VOICE >", 28, 220, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
+            Caption("Volume", 28, 249, Font, Look.Dim);
+            volume = PageSlider(VolumeNames, 242, "Her voice volume");
+            volumeName = Caption("100%", 292, 249, Font, Look.Ink);
+            volume.Changed += delegate { if (syncing) return; volumeName.Text = VolumeNames[volume.Value]; capri.SetVolume(Volumes[volume.Value]); };
+            Caption("Sounds", 28, 285, Font, Look.Dim);
+            sounds = PageSlider(SoundNames, 278, "Sound effects volume");
+            soundsName = Caption("60%", 292, 285, Font, Look.Ink);
+            sounds.Changed += delegate { if (syncing) return; soundsName.Text = SoundNames[sounds.Value]; capri.SetSoundLevel(sounds.Value * 10); };
+            Caption("Bubble", 28, 321, Font, Look.Dim);
+            bubble = PageSlider(BubbleNames, 314, "How long her replies stay up");
+            bubbleName = Caption("Normal", 292, 321, Font, Look.Ink);
+            bubble.Changed += delegate { if (syncing) return; bubbleName.Text = BubbleNames[bubble.Value]; capri.SetBubbleTime(bubble.Value); };
+            typing = Check("Typing sound", 28, 350, 328, delegate { if (!syncing) capri.ToggleTyping(); });
+            typing.Hint = "When she types";
+            typing.HintFont = Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point);
+            Caption("MOVES >", 28, 386, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
+            Caption("Wander", 28, 415, Font, Look.Dim);
+            wander = PageSlider(WanderNames, 408, "How much she wanders");
+            wanderName = Caption("Off", 292, 415, Font, Look.Ink);
+            wander.Changed += delegate { if (syncing) return; wanderName.Text = WanderNames[wander.Value]; capri.SetWanderLevel(wander.Value); };
+            Caption("Sleep", 28, 451, Font, Look.Dim);
+            sleepAfter = PageSlider(SleepNames, 444, "How long until she falls asleep");
+            sleepName = Caption("2 min", 292, 451, Font, Look.Ink);
+            sleepAfter.Changed += delegate { if (syncing) return; sleepName.Text = SleepNames[sleepAfter.Value]; capri.SetSleepAfter(Sleeps[sleepAfter.Value]); };
+            dance = Check("Dance to music", 28, 480, 328, delegate { if (!syncing) capri.ToggleDance(); });
+            dance.Hint = "When songs play";
+            dance.HintFont = Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point);
+            intro = Check("Glitch in at startup", 28, 512, 328, delegate { if (!syncing) capri.ToggleIntro(); });
+            intro.Hint = "Tendrils + sound";
+            intro.HintFont = Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point);
+            const int c = Column;
+            Caption("CAPRI >", 28 + c, 58, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
+            Caption("Size", 28 + c, 87, Font, Look.Dim);
+            sizeSlider = PageSlider(SizeNames, 80, "Her size", c);
+            sizeSlider.Changed += delegate { if (syncing) return; sizeName.Text = SizeNames[sizeSlider.Value]; capri.SetCharacterSize(SizeSteps[sizeSlider.Value]); };
+            sizeName = Caption("Medium", 292 + c, 87, Font, Look.Ink);
+            popIns = Check("Pop in on me", 28 + c, 116, 150, delegate { if (!syncing) capri.TogglePopIns(); });
+            onTop = Check("Always on top", 186 + c, 116, 170, delegate { if (!syncing) capri.ToggleOnTop(); });
+            Caption("WATCH >", 28 + c, 162, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
+            watch = Check("Watch my screen", 28 + c, 186, 328, delegate { if (!syncing) capri.ToggleWatch(); });
             watch.Hint = "She comments now and then";
             watch.HintFont = Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point);
-            Lower(Caption("Every", 28, 353 + v, Font, Look.Dim));
-            gap = new Slider(GapNames);
-            gap.Bounds = new Rectangle(78, 346 + v, 206, 30);
-            Lower(gap);
-            gap.AccessibleName = "Time between glances";
+            Caption("Every", 28 + c, 223, Font, Look.Dim);
+            gap = PageSlider(GapNames, 216, "Time between glances", c);
             gap.Changed += delegate { if (syncing) return; gapName.Text = GapNames[gap.Value]; capri.SetGlanceGap(Gaps[gap.Value]); };
-            Controls.Add(gap);
-            gapName = Lower(Caption("2 min", 292, 353 + v, Font, Look.Ink));
-            Lower(Make("Check for updates", 28, 392 + v, 170, 28, delegate { capri.CheckUpdates(); }));
-            Key quit = Lower(Make("Quit Capri", 256, 392 + v, 100, 28, delegate { capri.Quit(); }));
-            quit.Accent = Look.Red;
-            updateNote = Lower(Caption("", 28, 430 + v, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim));
+            gapName = Caption("2 min", 292 + c, 223, Font, Look.Ink);
+            Caption("BRAIN >", 28 + c, 266, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
+            Caption("Replies", 28 + c, 295, Font, Look.Dim);
+            replies = PageSlider(Lengths, 288, "Reply length", c);
+            repliesName = Caption("Short", 292 + c, 295, Font, Look.Ink);
+            replies.Changed += delegate { if (syncing) return; repliesName.Text = Lengths[replies.Value]; capri.SetWordiness(replies.Value); };
+            Caption("Memory", 28 + c, 331, Font, Look.Dim);
+            recall = PageSlider(Lengths, 324, "How much of the chat she keeps", c);
+            recallName = Caption("Short", 292 + c, 331, Font, Look.Ink);
+            recall.Changed += delegate { if (syncing) return; recallName.Text = Lengths[recall.Value]; capri.SetRecall(Recalls[recall.Value]); };
+            custom = Input(28 + c, 362, 244);
+            custom.Cue = "Custom model name";
+            custom.Box.AccessibleName = "Custom model name";
+            custom.Box.KeyDown += delegate(object sender, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; UseCustom(); } };
+            Make("Use", 280 + c, 362, 76, 28, delegate { UseCustom(); });
+            customNote = Caption("Any Ollama model you've pulled, or a model id on your key.", 28 + c, 398, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
+            customNote.MaximumSize = new Size(328, 0);
+            for (int i = first; i < Controls.Count; i++)
+            {
+                pageLeft.Add(new KeyValuePair<Control, int>(Controls[i], Controls[i].Left));
+                Controls[i].Left += Far;
+                Reachable(Controls[i], false);
+            }
             Searching();
             Sync();
+        }
+
+        private Slider PageSlider(string[] names, int y, string name, int x = 0)
+        {
+            Slider slider = new Slider(names);
+            slider.Bounds = new Rectangle(96 + x, y, 188, 30);
+            slider.AccessibleName = name;
+            Controls.Add(slider);
+            return slider;
+        }
+
+        private void UseNickname()
+        {
+            capri.SetNickname(nickname.Box.Text);
+            nickname.Box.Text = capri.Nickname;
+        }
+
+        internal string NicknameShown { get { return nickname.Box.Text; } }
+
+        internal void TypeNickname(string typed) { nickname.Box.Text = typed; UseNickname(); }
+
+        private void UseCustom()
+        {
+            customNote.Text = capri.ChooseCustomModel(custom.Box.Text, lastInstalled);
+        }
+
+        internal bool SettingsShown { get { return paged; } }
+
+        internal string SizeStatus { get { return sizeName.Text; } }
+
+        internal bool TypingShown { get { return typing.Checked; } }
+
+        internal string SettingsStatus { get { return languages.Text + " | " + volumeName.Text + " | " + soundsName.Text + " | " + wanderName.Text + " | " + sleepName.Text + " | " + (dance.Checked ? "dance" : "-") + " | " + (intro.Checked ? "intro" : "-") + " | " + repliesName.Text + " | " + recallName.Text + " | " + bubbleName.Text; } }
+
+        internal void ShowSettings(bool on)
+        {
+            paged = on;
+            more.Text = on ? "Back" : "Settings";
+            more.Invalidate();
+            foreach (KeyValuePair<Control, int> entry in mainLeft) { entry.Key.Left = Scaled(entry.Value) + (on ? Far : 0); Reachable(entry.Key, !on); }
+            foreach (KeyValuePair<Control, int> entry in pageLeft) { entry.Key.Left = Scaled(entry.Value) + (on ? 0 : Far); Reachable(entry.Key, on); }
+            int edge = on ? Column : 0;
+            build.Left = Scaled(230 + edge);
+            minimize.Left = Scaled(300 + edge);
+            close.Left = Scaled(330 + edge);
+            if (Hidden(ActiveControl)) more.Focus();
+            if (on) Sync();
+            Arrange(expanded);
+            Rectangle area = Screen.FromControl(this).WorkingArea;
+            if (on && Right > area.Right) Left = Math.Max(area.Left, area.Right - Width);
+        }
+
+        private void Reachable(Control control, bool on)
+        {
+            if (!stops.ContainsKey(control)) stops[control] = control.TabStop;
+            control.TabStop = on && stops[control];
+            foreach (Control child in control.Controls) Reachable(child, on);
+        }
+
+        private bool Hidden(Control control)
+        {
+            List<KeyValuePair<Control, int>> hidden = paged ? mainLeft : pageLeft;
+            for (Control top = control; top != null && top != this; top = top.Parent)
+                foreach (KeyValuePair<Control, int> entry in hidden) if (entry.Key == top) return true;
+            return false;
+        }
+
+        internal string TabWalk()
+        {
+            Control from = more;
+            int reached = 0;
+            for (int i = 0; i < 80; i++)
+            {
+                if (!SelectNextControl(from, true, true, true, true)) break;
+                Control at = ActiveControl;
+                if (at == null || at == from || at == more) break;
+                if (Hidden(at)) return "Tab reached a hidden " + (at.AccessibleName ?? at.Text);
+                reached++;
+                from = at;
+            }
+            more.Focus();
+            return reached == 0 ? "Tab reached nothing" : null;
         }
 
         private T Lower<T>(T control) where T : Control
@@ -234,22 +503,34 @@ namespace CapriDesktop
             using (GraphicsPath edge = Look.Plate(new RectangleF(s, s, Width - 2 * s - 1, Height - 2 * s - 1), 12 * s, -1, Height / 2f, 0, true))
             using (Pen cyan = new Pen(Look.Cyan, 2 * s))
                 graphics.DrawPath(cyan, edge);
+            if (paged)
+            {
+                using (Brush red = new SolidBrush(Look.Red))
+                    foreach (int[] bar in PageBars) graphics.FillRectangle(red, (13 + bar[0]) * s, bar[1] * s, 3 * s, (bar[2] - bar[1]) * s);
+                return;
+            }
             int shift = (expanded ? SetupHeight : 0) + KeyRow;
+            int below = voiceFilled >= 0 ? InstallRow : 0;
+            int fold = arrangedFold;
             using (Brush red = new SolidBrush(Look.Red))
             {
                 graphics.FillRectangle(red, 13 * s, 58 * s, 3 * s, ((expanded ? 280 : 162) + KeyRow - 58) * s);
-                graphics.FillRectangle(red, 13 * s, (184 + shift) * s, 3 * s, (396 - 184) * s);
-                graphics.FillRectangle(red, 13 * s, (184 + VoiceHeight + shift) * s, 3 * s, (372 - 184) * s);
+                graphics.FillRectangle(red, 13 * s, (184 + shift) * s, 3 * s, (InstallAt + 29 - 184 + below - fold) * s);
+                graphics.FillRectangle(red, 13 * s, (184 + VoiceHeight + shift + below - fold) * s, 3 * s, (234 - 184) * s);
             }
-            if (expanded)
-            {
-                float pitch = 6 * s;
-                int count = (int)(328 / 6f);
-                int lit = (int)Math.Round(count * filled);
-                using (Brush on = new SolidBrush(Look.Cyan))
-                using (Brush off = new SolidBrush(Track))
-                    for (int i = 0; i < count; i++) graphics.FillRectangle(i < lit ? on : off, 28 * s + i * pitch, 210 * s, pitch - 2 * s, 6 * s);
-            }
+            if (expanded) Dots(graphics, s, 210, filled);
+            if (below > 0) Dots(graphics, s, InstallAt + 24 + shift - fold, voiceFilled);
+        }
+
+        // The dotted bar her brain setup and her voice downloads share.
+        private static void Dots(Graphics graphics, float s, int y, float share)
+        {
+            float pitch = 6 * s;
+            int count = (int)(328 / 6f);
+            int lit = (int)Math.Round(count * share);
+            using (Brush on = new SolidBrush(Look.Cyan))
+            using (Brush off = new SolidBrush(Track))
+                for (int i = 0; i < count; i++) graphics.FillRectangle(i < lit ? on : off, 28 * s + i * pitch, y * s, pitch - 2 * s, 6 * s);
         }
 
         private static void Backdrop(Graphics graphics, Control control, float s)
@@ -276,19 +557,26 @@ namespace CapriDesktop
         private void Arrange(bool setupShown)
         {
             expanded = setupShown;
-            int shift = (setupShown ? SetupHeight : 0) + KeyRow;
-            textEntry.Top = Scaled(170 + shift - KeyRow);
+            int top = setupShown ? SetupHeight : 0, shift = top + KeyRow;
+            tierNote.Top = Scaled(168 + top);
+            for (int i = 0; i < rungs.Length; i++) rungs[i].Top = Scaled(184 + 24 * i + top);
+            freeKey.Top = Scaled(209 + top);
+            textEntry.Top = Scaled(262 + top);
             textConnect.Top = textEntry.Top;
-            keyNote.Top = textEntry.Top + Scaled(32);
-            keyNote.MaximumSize = new Size(Scaled(328), 0);
-            foreach (KeyValuePair<Control, int> entry in lower) entry.Key.Top = Scaled(entry.Value + shift);
+            textEntry.Visible = textConnect.Visible = tier > 0;
+            int below = voiceFilled >= 0 ? InstallRow : 0;
+            int fold = arrangedFold = Fold;
+            foreach (KeyValuePair<Control, int> entry in lower) entry.Key.Top = Scaled(entry.Value + shift + (entry.Value >= InstallAt ? below : 0) - (entry.Value > KeyAt ? fold : 0));
+            installNote.Top = Scaled(InstallAt + 2 + shift - fold);
+            installNote.Visible = below > 0;
             foreach (Label step in steps) step.Visible = setupShown;
             setup.Visible = setupShown;
             refresh.Top = Scaled(setupShown ? 226 : 134);
             brainNote.MaximumSize = new Size(Scaled(328), 0);
             voiceNote.MaximumSize = new Size(Scaled(328), 0);
             updateNote.MaximumSize = new Size(Scaled(328), 0);
-            ClientSize = new Size(Scaled(Wide), Scaled(Tall + shift));
+            customNote.MaximumSize = new Size(Scaled(328), 0);
+            ClientSize = new Size(Scaled(paged ? Wide + Column : Wide), Scaled(paged ? PageTall : Tall + shift + below - fold));
             Invalidate(true);
         }
 
@@ -300,7 +588,7 @@ namespace CapriDesktop
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { modelMenu.Dispose(); voiceMenu.Dispose(); speechModelMenu.Dispose(); micMenu.Dispose(); }
+            if (disposing) { modelMenu.Dispose(); voiceMenu.Dispose(); speechModelMenu.Dispose(); micMenu.Dispose(); languageMenu.Dispose(); freeMenu.Dispose(); }
             base.Dispose(disposing);
         }
 
@@ -316,19 +604,44 @@ namespace CapriDesktop
             syncing = true;
             showHide.Text = capri.IsHidden ? "Show Capri" : "Hide Capri";
             perch.Text = capri.Riding ? "Hop off" : "Ride cursor";
-            foreach (Key option in sizes)
-            {
-                option.Picked = (int)option.Tag == capri.CharacterSize;
-                option.Invalidate();
-            }
-            motion.Checked = capri.Motion;
+            int near = 0;
+            for (int i = 0; i < SizeSteps.Length; i++) if (Math.Abs(SizeSteps[i] - capri.CharacterSize) < Math.Abs(SizeSteps[near] - capri.CharacterSize)) near = i;
+            sizeSlider.Value = near;
+            sizeName.Text = SizeNames[near];
+            popIns.Checked = capri.PopIns;
             onTop.Checked = capri.OnTop;
             watch.Checked = capri.Watching;
-            speak.Checked = capri.Speaking;
-            freeVoice.Checked = capri.FreeVoice;
+            VoiceTier();
             int chosen = Array.IndexOf(Gaps, capri.GlanceGap);
             gap.Value = chosen < 0 ? 5 : chosen;
             gapName.Text = GapNames[gap.Value];
+            if (!nickname.Box.Focused) nickname.Box.Text = capri.Nickname;
+            string language = capri.Language;
+            foreach (ToolStripMenuItem item in languageMenu.Items)
+            {
+                item.Checked = (string)item.Tag == language;
+                if (item.Checked) languages.Text = item.Text;
+            }
+            languages.Invalidate();
+            int loud = 0;
+            for (int i = 0; i < Volumes.Length; i++) if (Math.Abs(Volumes[i] - capri.Volume) < Math.Abs(Volumes[loud] - capri.Volume)) loud = i;
+            volume.Value = loud;
+            volumeName.Text = VolumeNames[loud];
+            sounds.Value = Math.Max(0, Math.Min(10, (capri.SoundLevel + 5) / 10));
+            soundsName.Text = SoundNames[sounds.Value];
+            sleepAfter.Value = Math.Max(0, Array.IndexOf(Sleeps, capri.SleepAfter));
+            sleepName.Text = SleepNames[sleepAfter.Value];
+            wander.Value = capri.WanderLevel;
+            wanderName.Text = WanderNames[wander.Value];
+            dance.Checked = capri.Dancing;
+            bubble.Value = capri.BubbleTime;
+            bubbleName.Text = BubbleNames[bubble.Value];
+            intro.Checked = capri.Intro;
+            typing.Checked = capri.TypingSound;
+            replies.Value = capri.Wordiness;
+            repliesName.Text = Lengths[replies.Value];
+            recall.Value = Math.Max(0, Array.IndexOf(Recalls, capri.Recall));
+            recallName.Text = Lengths[recall.Value];
             syncing = false;
         }
 
@@ -336,11 +649,9 @@ namespace CapriDesktop
 
         internal bool WatchShown { get { return watch.Checked; } }
 
-        internal bool SpeakShown { get { return speak.Checked; } }
+        internal bool ElevenShown { get { return voiceRungs[1].Checked && !voiceRungs[0].Checked; } }
 
-        internal bool FreeVoiceShown { get { return freeVoice.Checked; } }
-
-        internal bool FreeVoiceOffered { get { return freeVoice.Visible; } }
+        internal string VoiceTierStatus { get { return (ElevenShown ? "ELEVENLABS" : "FREE VOICE") + " | " + (eleven ? "key" : "-") + " | " + (!eleven ? "free voice" : keySaved ? "voice id" : "-") + " | fold " + arrangedFold; } }
 
         internal string Overlap()
         {
@@ -402,18 +713,34 @@ namespace CapriDesktop
             Arrange(false);
         }
 
-        internal void ShowTextKey(string tail)
+        private int KeyRow { get { return tier > 0 ? 128 : 94; } }
+
+        internal void ShowTiers(int pick, string nvidiaTail, string paidTail)
         {
+            tier = Math.Max(0, Math.Min(rungs.Length - 1, pick));
+            syncing = true;
+            for (int i = 0; i < rungs.Length; i++) rungs[i].Checked = i == tier;
+            syncing = false;
+            string tail = tier == 1 ? nvidiaTail : tier == 2 ? paidTail : null;
             textSaved = tail != null;
-            freeKey.Visible = !textSaved;
-            keyNote.Visible = !textSaved;
-            textEntry.Cue = textSaved ? "Key saved, ends " + tail : "Optional: NVIDIA/GPT/Claude/DeepSeek";
+            textEntry.Box.AccessibleName = tier == 1 ? "NVIDIA API key" : "OpenAI, Anthropic or DeepSeek API key";
+            textEntry.Cue = textSaved ? (tier == 1 ? "NVIDIA key saved, ends " : "Key saved, ends ") + tail : tier == 1 ? "Paste your free NVIDIA key" : "Paste a ChatGPT or Claude key";
             RelabelText();
+            Arrange(expanded);
         }
 
-        internal bool KeyNoteFits { get { return keyNote.Visible && keyNote.Top >= textEntry.Bottom && keyNote.Bottom <= keyHelp.Top && keyNote.Right <= ClientSize.Width; } }
+        internal bool TiersFit
+        {
+            get
+            {
+                Rectangle last = rungs[rungs.Length - 1].Bounds;
+                bool row = !textEntry.Visible || (textEntry.Top >= last.Bottom && textConnect.Right <= ClientSize.Width);
+                int end = textEntry.Visible ? textEntry.Bottom : last.Bottom;
+                return rungs[0].Top >= tierNote.Bottom && rungs[1].Top >= rungs[0].Bottom && rungs[2].Top >= rungs[1].Bottom && freeKey.Left >= rungs[1].Right && freeKey.Top >= rungs[1].Top && freeKey.Bottom <= rungs[1].Bottom && row && end <= voiceHead.Top && rungs[0].Right <= ClientSize.Width;
+            }
+        }
 
-        internal string TextStatus { get { return brainName.Text + " | " + brainNote.Text + " | " + textEntry.Cue + " | " + textConnect.Text + " | " + (freeKey.Visible ? "free" : "-"); } }
+        internal string TextStatus { get { return "tier " + tier + " | " + brainName.Text + " | " + brainNote.Text + " | " + (textEntry.Visible ? textEntry.Cue + " | " + textConnect.Text : "no key row"); } }
 
         private void ConnectText()
         {
@@ -471,13 +798,58 @@ namespace CapriDesktop
 
         internal void ShowProblem(string problem) { brainNote.Text = problem; }
 
+        internal void ShowInstall(string text, long done, long total)
+        {
+            bool opening = voiceFilled < 0;
+            installNote.Text = total > 0 ? text + " · " + Engine.Amount(done) + " of " + Engine.Amount(total) : text + "...";
+            voiceFilled = total > 0 ? Math.Min(1f, done / (float)total) : 0f;
+            if (opening) Arrange(expanded);
+            else Invalidate(new Rectangle(0, Scaled(InstallAt + 20 + (expanded ? SetupHeight : 0) + KeyRow - arrangedFold), Width, Scaled(14)));
+        }
+
+        internal void HideInstall()
+        {
+            if (voiceFilled < 0) return;
+            voiceFilled = -1;
+            installNote.Text = "";
+            Arrange(expanded);
+        }
+
+        internal string InstallShown { get { return voiceFilled < 0 ? null : installNote.Text + " | " + (int)Math.Round(voiceFilled * 100) + "%"; } }
+
+        internal int CapriRowTop { get { return showHide.Top; } }
+
+        // FREE VOICE shows her free voice picker. ELEVENLABS shows the key box, then the Voice ID and model once a key is saved.
+        private int Fold { get { return eleven && keySaved ? 0 : KeyFold; } }
+
+        private void VoiceTier()
+        {
+            eleven = keySaved ? capri.Speaking : wantEleven;
+            voiceRungs[0].Checked = !eleven;
+            voiceRungs[1].Checked = eleven;
+            keyEntry.Visible = eleven;
+            connect.Visible = eleven;
+            voiceEntry.Visible = eleven && keySaved;
+            speechModels.Visible = eleven && keySaved;
+            freeVoices.Visible = !eleven;
+            freeSetup.Visible = !eleven && !freeReady;
+            if (Fold != arrangedFold) Arrange(expanded);
+        }
+
+        internal void PickVoice(bool paid)
+        {
+            wantEleven = paid;
+            capri.ChooseVoiceTier(paid);
+            if (paid && !keySaved) keyEntry.Box.Focus();
+        }
+
         internal void ShowVoice(string tail, string voiceId, string model, VoiceListing listing)
         {
             keySaved = tail != null;
             keyEntry.Cue = keySaved ? "Key saved, ends " + tail : "Paste ElevenLabs API key";
             Relabel();
-            keyHelp.Visible = !keySaved;
-            shortcut.Visible = keySaved && shortcutReady;
+            shortcut.Visible = keySaved;
+            VoiceTier();
             if (!voiceEntry.Box.Focused || voiceEntry.Box.Text.Trim().Length == 0) voiceEntry.Box.Text = voiceId;
             voiceMenu.Items.Clear();
             voiceEntry.Chevron = listing != null && listing.Voices.Count > 0;
@@ -502,12 +874,73 @@ namespace CapriDesktop
             speechModels.Invalidate();
         }
 
+        internal void ShowFree(bool ready, string chosen, bool busy)
+        {
+            freeReady = ready;
+            freeVoices.Text = "Free voice: " + chosen;
+            freeVoices.Width = Scaled(ready ? 328 : 196);
+            freeSetup.Text = busy ? "Cancel" : "Get free voice";
+            freeSetup.Visible = !eleven && !ready;
+            freeMenu.Items.Clear();
+            foreach (FreeStyle style in LocalVoice.Styles)
+            {
+                string name = style.Name;
+                freeMenu.Items.Add(Choice(name, name == chosen, delegate { capri.ChooseVoiceStyle(name); }));
+            }
+            freeVoices.Invalidate();
+            freeSetup.Invalidate();
+        }
+
+        internal string FreeStatus { get { return (freeVoices.Visible ? freeVoices.Text : "-") + " | " + (freeSetup.Visible ? freeSetup.Text : "-"); } }
+
         internal void ShowShortcut(bool talk, bool mute)
         {
             shortcutReady = talk;
-            shortcut.Visible = keySaved && talk;
-            muteShortcut.Visible = mute;
+            muteReady = mute;
+            shortcut.Visible = keySaved;
+            KeyLabels();
         }
+
+        internal void Hotkeys(string talk, string mute)
+        {
+            talkName = talk;
+            muteName = mute;
+            KeyLabels();
+        }
+
+        internal void PickKeys(bool mute)
+        {
+            capturing = mute ? 2 : 1;
+            KeyLabels();
+        }
+
+        internal void TakeKeys(Keys keys)
+        {
+            Keys key = keys & Keys.KeyCode;
+            if (capturing == 0 || key == Keys.ControlKey || key == Keys.Menu || key == Keys.ShiftKey || key == Keys.LWin || key == Keys.RWin) return;
+            bool mute = capturing == 2;
+            capturing = 0;
+            string problem = key == Keys.Escape ? null : capri.SetHotkey(mute, keys);
+            KeyLabels();
+            if (problem != null) VoiceNote(problem, true);
+            else if (key != Keys.Escape) VoiceNote("Saved. " + (mute ? muteName + " mutes your mic." : talkName + " starts voice chat."), false);
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (capturing == 0) return base.ProcessCmdKey(ref msg, keyData);
+            TakeKeys(keyData);
+            return true;
+        }
+
+        private void KeyLabels()
+        {
+            const string waiting = "Press new keys, Esc cancels";
+            shortcut.Text = capturing == 1 ? waiting : talkName + (shortcutReady ? " to talk" : " is taken");
+            muteShortcut.Text = capturing == 2 ? waiting : muteName + (muteReady ? " mutes mic" : " is taken");
+        }
+
+        internal string KeyStatus { get { return shortcut.Text + " | " + muteShortcut.Text; } }
 
         internal void ShowMic(string name)
         {
@@ -530,13 +963,15 @@ namespace CapriDesktop
             micMenu.Show(mics, new Point(0, mics.Height));
         }
 
-        internal string MicStatus { get { return "mic | " + mics.Text + " | " + (keyHelp.Visible ? "help" : "-") + " | " + (shortcut.Visible ? "keys" : "-") + " | " + (muteShortcut.Visible ? "mute" : "-"); } }
+        internal string MicStatus { get { return "mic | " + mics.Text + " | " + (keyHelp.Visible ? "help" : "-") + " | " + (shortcut.Visible ? (shortcutReady ? "keys" : "taken") : "-") + " | " + (muteShortcut.Visible ? (muteReady ? "mute" : "taken") : "-"); } }
 
         internal void VoiceNote(string text, bool problem)
         {
             voiceNote.Text = text;
             voiceNote.ForeColor = problem ? Look.Red : Look.Dim;
         }
+
+        internal string VoiceNoteText { get { return voiceNote.Text; } }
 
         internal void UpdateNote(string text, bool problem)
         {
@@ -887,6 +1322,48 @@ namespace CapriDesktop
                 RectangleF knob = new RectangleF(thumb - 5 * s, middle - 8 * s, 10 * s, 16 * s);
                 using (Brush fill = new SolidBrush(Field)) graphics.FillRectangle(fill, knob);
                 using (Pen edge = new Pen(hot || Focused || sliding ? Look.Cyan : Look.Ink, 1.6f * s)) graphics.DrawRectangle(edge, knob.X, knob.Y, knob.Width, knob.Height);
+            }
+        }
+
+        private sealed class Rung : RadioButton
+        {
+            private bool hot;
+            internal string Hint;
+            internal Font HintFont;
+            internal string Flag;
+            internal Font FlagFont;
+
+            internal Rung()
+            {
+                SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
+                BackColor = Look.Panel;
+                Cursor = Cursors.Hand;
+            }
+
+            protected override void OnMouseEnter(EventArgs e) { hot = true; Invalidate(); base.OnMouseEnter(e); }
+
+            protected override void OnMouseLeave(EventArgs e) { hot = false; Invalidate(); base.OnMouseLeave(e); }
+
+            // A radio button clicks itself when focus arrives by arrow key or from code. The VOICE pair picks on a real click or Space only.
+            protected override void OnEnter(EventArgs e) { if (AutoCheck) base.OnEnter(e); }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                float s = ((Mainframe)Parent).DeviceScale();
+                Graphics graphics = e.Graphics;
+                Backdrop(graphics, this, s);
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                float side = 13 * s;
+                RectangleF dot = new RectangleF(s, (Height - side) / 2, side, side);
+                using (Brush fill = new SolidBrush(Field)) graphics.FillEllipse(fill, dot);
+                using (Pen edge = new Pen(hot || (Focused && ShowFocusCues) ? Look.Cyan : Edge, 1.4f * s)) graphics.DrawEllipse(edge, dot);
+                if (Checked) using (Brush mark = new SolidBrush(Look.Cyan)) graphics.FillEllipse(mark, dot.X + 3.5f * s, dot.Y + 3.5f * s, dot.Width - 7 * s, dot.Height - 7 * s);
+                int left = (int)(dot.Right + 9 * s);
+                TextFormatFlags flags = TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
+                TextRenderer.DrawText(graphics, Text, Font, new Rectangle(left, 0, Width - left, Height), Checked ? Look.Cyan : Look.Ink, flags);
+                int after = left + TextRenderer.MeasureText(graphics, Text, Font, Size.Empty, flags).Width + (int)(10 * s);
+                if (Hint != null) TextRenderer.DrawText(graphics, Hint, HintFont ?? Font, new Rectangle(after, 0, Math.Max(0, Width - after), Height), Look.Dim, flags);
+                if (Flag != null) TextRenderer.DrawText(graphics, Flag, FlagFont ?? Font, ClientRectangle, Look.Yellow, TextFormatFlags.VerticalCenter | TextFormatFlags.Right | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
             }
         }
 

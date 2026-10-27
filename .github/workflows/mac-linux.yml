@@ -8,7 +8,9 @@ on:
 jobs:
   mac:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 60
+    env:
+      CAN_NOTARIZE: ${{ secrets.MAC_CERT_P12 != '' && secrets.APPLE_APP_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
@@ -34,6 +36,43 @@ jobs:
             cp Capri.icns $app/Contents/Resources/Capri.icns
             codesign --force --deep --sign - $app
           done
+      - name: Sign and notarize
+        if: env.CAN_NOTARIZE == 'true'
+        env:
+          MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -e
+          keychain=$RUNNER_TEMP/capri.keychain-db
+          pass=$(uuidgen)
+          security create-keychain -p "$pass" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$pass" "$keychain"
+          echo "$MAC_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$pass" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity=$(security find-identity -v -p codesigning "$keychain" | grep -m1 "Developer ID Application" | sed 's/.*"\(.*\)"/\1/')
+          test -n "$identity"
+          for arch in arm64 x64; do
+            app=dist/$arch/Capri.app
+            find $app/Contents/MacOS -type f ! -name Capri | while read -r part; do
+              if file -b "$part" | grep -q Mach-O; then codesign --force --timestamp --options runtime --sign "$identity" "$part"; fi
+            done
+            codesign --force --timestamp --options runtime --entitlements cross/mac/Capri.entitlements --sign "$identity" $app/Contents/MacOS/Capri
+            codesign --force --timestamp --options runtime --entitlements cross/mac/Capri.entitlements --sign "$identity" $app
+            codesign --verify --strict --verbose=2 $app
+            ditto -c -k --keepParent $app $RUNNER_TEMP/notarize-$arch.zip
+            xcrun notarytool submit $RUNNER_TEMP/notarize-$arch.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait --timeout 20m
+            xcrun stapler staple $app
+            spctl --assess --type execute --verbose $app
+          done
+          touch dist/notarized
+          security delete-keychain "$keychain"
       - name: Smoke test, Apple Silicon
         timeout-minutes: 5
         run: |
@@ -52,8 +91,11 @@ jobs:
           fi
       - name: Zip
         run: |
-          (cd dist/arm64 && ditto -c -k --keepParent Capri.app ../../Capri-mac-apple-silicon.zip)
-          (cd dist/x64 && ditto -c -k --keepParent Capri.app ../../Capri-mac-intel.zip)
+          for arch in arm64 x64; do
+            if [ ! -f dist/notarized ]; then cp cross/mac/If-Capri-wont-open.txt "dist/$arch/If Capri won't open.txt"; fi
+          done
+          (cd dist/arm64 && ditto -c -k . ../../Capri-mac-apple-silicon.zip)
+          (cd dist/x64 && ditto -c -k . ../../Capri-mac-intel.zip)
       - uses: actions/upload-artifact@v4
         with:
           name: mac

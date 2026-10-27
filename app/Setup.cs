@@ -3,10 +3,14 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
+using System.IO.Compression;
+using System.Net;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Threading;
 using System.Windows.Forms;
+using CapriDesktop;
 using Microsoft.Win32;
 
 namespace CapriSetup
@@ -24,6 +28,7 @@ namespace CapriSetup
             Application.SetCompatibleTextRenderingDefault(false);
             if (args.Length > 0 && args[0] == "--update") return Update(args);
             if (args.Length == 2 && args[0] == "--verify") return Verify(args[1]);
+            if (args.Length == 2 && args[0] == "--verify-voice") return VerifyVoice(args[1]);
             if (args.Length == 1 && args[0] == "--remove-files") return RemoveFiles();
             using (SetupWindow window = new SetupWindow(args.Length == 1 && args[0] == "--uninstall")) Application.Run(window);
             return 0;
@@ -82,14 +87,14 @@ namespace CapriSetup
                 {
                     preview.Show();
                     Application.DoEvents();
-                    using (Bitmap bitmap = new Bitmap(preview.Width, preview.Height))
-                    {
-                        preview.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
-                        bitmap.Save(Path.Combine(output, "installer.png"), System.Drawing.Imaging.ImageFormat.Png);
-                    }
+                    Snap(preview, Path.Combine(output, "installer.png"));
+                    preview.Speaking(127L << 20, VoicePack.Size, Megabytes(127L << 20) + " of " + Megabytes(VoicePack.Size));
+                    Application.DoEvents();
+                    if (!preview.Saying("Installing the local speech model", "This may take some time")) throw new InvalidDataException("The installer doesn't say it's installing the local speech model.");
+                    Snap(preview, Path.Combine(output, "installer-speech.png"));
                     preview.Close();
                 }
-                File.WriteAllText(Path.Combine(output, "packaging-test.txt"), "PASS embedded executable extracted\nPASS PE signature\nPASS SHA-256 computed\nPASS an unmarked Capri.exe is recognised as Capri, other programs aren't\nPASS installer window rendered\nLIMIT installation and uninstallation were not performed\n");
+                File.WriteAllText(Path.Combine(output, "packaging-test.txt"), "PASS embedded executable extracted\nPASS PE signature\nPASS SHA-256 computed\nPASS an unmarked Capri.exe is recognised as Capri, other programs aren't\nPASS installer window rendered\nPASS the installer says it's installing the local speech model, that it may take some time, and that an API key gives a better, faster voice\nLIMIT installation and uninstallation were not performed\n");
                 return 0;
             }
             catch (Exception error) { Directory.CreateDirectory(output); File.WriteAllText(Path.Combine(output, "failure.txt"), error.ToString()); return 1; }
@@ -136,6 +141,104 @@ namespace CapriSetup
                 key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
                 key.SetValue("EstimatedSize", (Payload().Length + new FileInfo(Application.ExecutablePath).Length) / 1024, RegistryValueKind.DWord);
             }
+        }
+
+        private static void Snap(Form form, string path)
+        {
+            using (Bitmap bitmap = new Bitmap(form.Width, form.Height))
+            {
+                form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
+                bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+            }
+        }
+
+        // Fetches the real voice pack into a test folder, the same way an install does.
+        private static int VerifyVoice(string data)
+        {
+            try
+            {
+                data = Path.GetFullPath(data);
+                Directory.CreateDirectory(data);
+                FetchVoice(data, delegate { }, delegate { return false; });
+                if (!VoicePack.Complete(VoicePack.Folder(data))) throw new IOException("The local speech model is missing files after installing.");
+                File.WriteAllText(Path.Combine(data, "voice-test.txt"), "PASS the local speech model downloaded, matched its SHA-256 and unpacked where Capri looks for it\n");
+                return 0;
+            }
+            catch (Exception error) { Directory.CreateDirectory(data); File.WriteAllText(Path.Combine(data, "failure.txt"), error.ToString()); return 1; }
+        }
+
+        internal static string Megabytes(long bytes) { return (bytes >> 20) + " MB"; }
+
+        // Her local speech model goes where Capri's own download puts it, under the same file names, so either can finish
+        // a download the other started.
+        internal static void FetchVoice(string data, Action<string, long, long> progress, Func<bool> stopped)
+        {
+            string folder = VoicePack.Folder(data);
+            if (VoicePack.Complete(folder)) return;
+            string root = Path.GetDirectoryName(folder);
+            Directory.CreateDirectory(root);
+            long needed = VoicePack.Size * 3 + (64L << 20);
+            string drive = Path.GetPathRoot(root);
+            if (new DriveInfo(drive).AvailableFreeSpace < needed) throw new IOException("The local speech model needs " + Megabytes(needed) + " free on " + drive.TrimEnd('\\') + ".");
+            string zip = folder + ".zip";
+            string part = zip + ".part";
+            ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
+            long have = File.Exists(part) ? new FileInfo(part).Length : 0;
+            if (have > VoicePack.Size) { File.Delete(part); have = 0; }
+            int stalls = 0;
+            while (have < VoicePack.Size)
+            {
+                long before = have;
+                try
+                {
+                    HttpWebRequest request = (HttpWebRequest)WebRequest.Create(VoicePack.Url);
+                    request.UserAgent = "Capri-Setup";
+                    request.Timeout = 30000;
+                    request.ReadWriteTimeout = 60000;
+                    if (have > 0) request.AddRange(have);
+                    using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                    {
+                        if (have > 0 && response.StatusCode != HttpStatusCode.PartialContent) have = 0;
+                        using (Stream body = response.GetResponseStream())
+                        using (FileStream file = new FileStream(part, have > 0 ? FileMode.Append : FileMode.Create, FileAccess.Write))
+                        {
+                            byte[] buffer = new byte[1 << 16];
+                            long shown = 0;
+                            int read;
+                            while ((read = body.Read(buffer, 0, buffer.Length)) > 0)
+                            {
+                                if (stopped()) throw new OperationCanceledException();
+                                file.Write(buffer, 0, read);
+                                have += read;
+                                if (have - shown >= (1L << 20)) { shown = have; progress("Downloading", have, VoicePack.Size); }
+                            }
+                        }
+                    }
+                }
+                catch (WebException) { if (stopped()) throw new OperationCanceledException(); }
+                catch (IOException) { if (stopped()) throw new OperationCanceledException(); }
+                if (have < VoicePack.Size)
+                {
+                    stalls = have > before ? 0 : stalls + 1;
+                    if (stalls >= 4) throw new IOException("The download keeps stopping. Check your connection.");
+                    Thread.Sleep(1500 * stalls);
+                }
+            }
+            progress("Checking", VoicePack.Size, VoicePack.Size);
+            string sum;
+            using (SHA256 sha = SHA256.Create())
+            using (FileStream file = File.OpenRead(part)) sum = BitConverter.ToString(sha.ComputeHash(file)).Replace("-", "").ToLowerInvariant();
+            if (have != VoicePack.Size || sum != VoicePack.Sha) { File.Delete(part); throw new IOException("The download came down damaged. Try again from Capri Mainframe."); }
+            if (File.Exists(zip)) File.Delete(zip);
+            File.Move(part, zip);
+            progress("Unpacking", VoicePack.Size, VoicePack.Size);
+            string staging = folder + ".new";
+            if (Directory.Exists(staging)) Directory.Delete(staging, true);
+            ZipFile.ExtractToDirectory(zip, staging);
+            if (!VoicePack.Complete(staging)) throw new IOException("The download is missing files.");
+            if (Directory.Exists(folder)) Directory.Delete(folder, true);
+            Directory.Move(staging, folder);
+            File.Delete(zip);
         }
 
         internal static bool Ours(string path)
@@ -192,8 +295,11 @@ namespace CapriSetup
                 if (File.Exists(uninstaller)) throw new IOException("The uninstaller is still open. Close it and try removing Capri again.");
                 File.Delete(Path.Combine(destination, "Capri.exe"));
                 File.Delete(Path.Combine(destination, ".capri-install"));
-                string brain = Path.Combine(destination, "brain");
-                if (Directory.Exists(brain)) Directory.Delete(brain, true);
+                foreach (string pack in new[] { "brain", "voice", "ears" })
+                {
+                    string folder = Path.Combine(destination, pack);
+                    if (Directory.Exists(folder)) Directory.Delete(folder, true);
+                }
                 DeleteShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Capri.lnk"), destination);
                 DeleteShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Capri.lnk"), destination);
                 Registry.CurrentUser.DeleteSubKeyTree(RegistryPath, false);
@@ -226,6 +332,12 @@ namespace CapriSetup
         private readonly CheckBox desktop;
         private readonly CheckBox launch;
         private readonly Label status;
+        private readonly Label stage;
+        private readonly Label note;
+        private readonly Button cancel;
+        private long got, total;
+        private bool fetching;
+        private volatile bool stopping;
 
         internal SetupWindow(bool uninstall)
         {
@@ -255,13 +367,24 @@ namespace CapriSetup
             Controls.Add(desktop);
             Controls.Add(launch);
             status = LabelAt(removing ? "Your saved position and size will be kept." : "", 34, 350, 604, 22, 9, Color.FromArgb(146, 151, 161));
+            stage = LabelAt("", 34, 278, 604, 28, 12.5f, ForeColor);
+            stage.Visible = false;
+            note = LabelAt("", 34, 310, 604, 22, 9.5f, Color.FromArgb(175, 179, 188));
+            note.Visible = false;
             primary = new Button { Text = removing ? "Remove Capri" : "Install Capri", Bounds = new Rectangle(450, 399, 194, 43), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(239, 58, 78), ForeColor = Color.White, Cursor = Cursors.Hand };
             primary.FlatAppearance.BorderSize = 0;
             primary.Click += Perform;
             Controls.Add(primary);
-            Button cancel = new Button { Text = "Cancel", Bounds = new Rectangle(318, 399, 116, 43), FlatStyle = FlatStyle.Flat, ForeColor = Color.FromArgb(196, 199, 205), BackColor = BackColor };
+            cancel = new Button { Text = "Cancel", Bounds = new Rectangle(318, 399, 116, 43), FlatStyle = FlatStyle.Flat, ForeColor = Color.FromArgb(196, 199, 205), BackColor = BackColor };
             cancel.FlatAppearance.BorderColor = Color.FromArgb(62, 65, 74);
-            cancel.Click += delegate { Close(); };
+            cancel.Click += delegate
+            {
+                if (!fetching) { Close(); return; }
+                // Skipping the speech model still leaves Capri installed; she can fetch it later from her Mainframe.
+                stopping = true;
+                cancel.Enabled = false;
+                status.Text = "Skipping it…";
+            };
             Controls.Add(cancel);
             AcceptButton = primary;
             CancelButton = cancel;
@@ -279,6 +402,17 @@ namespace CapriSetup
             base.OnPaint(e);
             using (Pen line = new Pen(Color.FromArgb(56, 58, 66))) e.Graphics.DrawLine(line, 34, 382, Width - 52, 382);
             using (Pen line = new Pen(Color.FromArgb(239, 58, 78), 3)) e.Graphics.DrawLine(line, 0, 0, ClientSize.Width, 0);
+            if (!fetching || total <= 0) return;
+            int tall = Math.Max(4, status.Height / 5);
+            Rectangle bar = new Rectangle(status.Left, status.Top - tall - 6, status.Width, tall);
+            using (Brush track = new SolidBrush(Color.FromArgb(42, 44, 52))) e.Graphics.FillRectangle(track, bar);
+            using (Brush fill = new SolidBrush(Color.FromArgb(239, 58, 78))) e.Graphics.FillRectangle(fill, new Rectangle(bar.X, bar.Y, (int)(bar.Width * Math.Min(1.0, (double)got / total)), bar.Height));
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            stopping = true;
+            base.OnFormClosing(e);
         }
 
         private void Perform(object sender, EventArgs e)
@@ -289,10 +423,79 @@ namespace CapriSetup
                 if (removing) { Program.BeginUninstall(); Close(); return; }
                 status.Text = "Making a little room for Capri…";
                 Program.Install(desktop.Checked);
-                if (launch.Checked) Process.Start(new ProcessStartInfo(Path.Combine(Program.InstallPath, "Capri.exe")) { UseShellExecute = true });
-                Close();
             }
-            catch (Exception error) { status.Text = "Capri could not finish. Your files are still here."; primary.Enabled = true; MessageBox.Show(error.Message, "Capri", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            catch (Exception error) { status.Text = "Capri could not finish. Your files are still here."; primary.Enabled = true; MessageBox.Show(error.Message, "Capri", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+            if (Environment.Is64BitOperatingSystem && !VoicePack.Complete(VoicePack.Folder(Program.InstallPath))) FetchVoice();
+            else Finish();
+        }
+
+        private void Finish()
+        {
+            if (launch.Checked) Process.Start(new ProcessStartInfo(Path.Combine(Program.InstallPath, "Capri.exe")) { UseShellExecute = true });
+            Close();
+        }
+
+        // Her local speech model comes with the install, and the window says so plainly while it downloads.
+        private void FetchVoice()
+        {
+            Speaking(0, VoicePack.Size, "Starting the download…");
+            Thread worker = new Thread(delegate()
+            {
+                string failed = null;
+                try
+                {
+                    Program.FetchVoice(Program.InstallPath, delegate(string what, long have, long size)
+                    {
+                        string detail = what == "Downloading" ? Program.Megabytes(have) + " of " + Program.Megabytes(size) : what == "Checking" ? "Checking the download…" : "Unpacking…";
+                        Post(delegate { Speaking(have, size, detail); });
+                    }, delegate { return stopping; });
+                }
+                catch (OperationCanceledException) { failed = ""; }
+                catch (Exception error) { failed = error.Message; }
+                Post(delegate { Fetched(failed); });
+            });
+            worker.IsBackground = true;
+            worker.Start();
+        }
+
+        private void Post(Action action)
+        {
+            try { if (!IsDisposed) BeginInvoke(action); } catch (InvalidOperationException) { }
+        }
+
+        internal void Speaking(long have, long size, string detail)
+        {
+            fetching = true;
+            desktop.Visible = false;
+            launch.Visible = false;
+            stage.Text = "Installing the local speech model";
+            note.Text = "This may take some time. For a better sounding, faster voice, get an API key.";
+            stage.Visible = true;
+            note.Visible = true;
+            if (!stopping) cancel.Text = "Skip";
+            primary.Text = "Installing…";
+            primary.Enabled = false;
+            got = have;
+            total = size;
+            if (!stopping) status.Text = detail;
+            Invalidate();
+        }
+
+        internal bool Saying(string heading, string warning) { return stage.Visible && note.Visible && stage.Text == heading && note.Text.StartsWith(warning, StringComparison.Ordinal) && note.Text.IndexOf("API key", StringComparison.Ordinal) >= 0; }
+
+        private void Fetched(string failed)
+        {
+            fetching = false;
+            if (string.IsNullOrEmpty(failed)) { Finish(); return; }
+            stage.Text = "Couldn't install the local speech model";
+            note.Text = "Capri is installed. Get it later in Capri Mainframe, or add an API key.";
+            status.Text = failed;
+            cancel.Visible = false;
+            primary.Text = "Finish";
+            primary.Click -= Perform;
+            primary.Click += delegate { Finish(); };
+            primary.Enabled = true;
+            Invalidate();
         }
 
         protected override void Dispose(bool disposing) { if (disposing && chip.Image != null) chip.Image.Dispose(); base.Dispose(disposing); }

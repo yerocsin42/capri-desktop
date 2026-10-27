@@ -119,7 +119,7 @@ namespace CapriDesktop
             return spans;
         }
 
-        internal static List<Ledge> Find(ICollection<IntPtr> skip, IEnumerable<Rectangle> icons)
+        internal static List<Ledge> Find(ICollection<IntPtr> skip, IEnumerable<Rectangle> icons, IntPtr under = default(IntPtr))
         {
             List<Ledge> found = new List<Ledge>();
             List<Rectangle> above = new List<Rectangle>();
@@ -128,7 +128,7 @@ namespace CapriDesktop
                 if (window.Seat)
                     foreach (int[] span in Open(window.Bounds.Left, window.Bounds.Right, window.Bounds.Top, above))
                         found.Add(new Ledge { Window = window.Window, Bounds = window.Bounds, Left = span[0], Right = span[1], Y = window.Bounds.Top });
-                above.Add(window.Bounds);
+                if (window.Window != under) above.Add(window.Bounds);
             }
             foreach (Rectangle icon in icons)
                 foreach (int[] span in Open(icon.Left, icon.Right, icon.Top + IconInset, above))
