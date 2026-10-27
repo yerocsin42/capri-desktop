@@ -106,6 +106,8 @@ namespace CapriDesktop
         internal const string Confused = "Got lost before I could start that job. " + Bigger;
         internal const string Stalled = "Got stuck on that one. " + Bigger;
         internal const string Exact = "\nTheir exact words: ";
+        // Bypass all permissions in Settings: they've said yes to every step ahead of time, so she never stops to check, even to buy or delete.
+        internal static bool Bypass;
         private const int MostTargets = 70;
 
         internal const string Prompt =
@@ -117,6 +119,7 @@ namespace CapriDesktop
             "Do whatever their job asks without asking first: send the message, join, leave or end the call, post, delete, close or install it. They already asked, and asking again annoys them. Never ask whether to send, post or do something their job says, and never end with a question about it. Only call ask before you buy or pay, or before a send, post, delete or install their job didn't mention; Capri stops you herself before any step that needs their OK.\n" +
             "To send a message, type it into the message box with enter yes.\n" +
             "If the job is clear enough, do it without asking which option they meant: mute means their mic, not deafen. Use shortcuts you know, like ctrl+shift+m to mute and ctrl+shift+d to deafen in Discord.\n" +
+            "When they leave a choice to you, like which video or song, pick one yourself. On YouTube, type searches into its search bar yourself, then scroll down through the results and look at several before you click one.\n" +
             "When the job is done, call done and say what you did in one plain sentence. If you're stuck, call done and say what went wrong.";
 
         // For Claude's own computer tools, which look at screenshots and say where to click.
@@ -129,6 +132,7 @@ namespace CapriDesktop
             "Do whatever their job asks without asking first: send the message, join, leave or end the call, post, delete, close or install it. They already asked, and asking again annoys them. Never ask whether to send, post or do something their job says. Capri stops you herself before any step that needs their OK.\n" +
             "To send a message, click the message box, type it and press Return.\n" +
             "If the job is clear enough, do it without asking which option they meant: mute means their mic, not deafen. Use shortcuts you know, like ctrl+shift+m to mute and ctrl+shift+d to deafen in Discord.\n" +
+            "When they leave a choice to you, like which video or song, pick one yourself. On YouTube, type searches into its search bar yourself, then scroll down through the results and look at several before you click one.\n" +
             "When the job is done, stop calling tools and say what you did in one plain sentence. If you're stuck, say what went wrong in one plain sentence.";
 
         private static readonly string[,] Specs =
@@ -147,7 +151,7 @@ namespace CapriDesktop
               "{\"type\":\"object\",\"properties\":{\"site\":{\"type\":\"string\",\"description\":\"The site's name or address\"},\"search\":{\"type\":\"string\",\"description\":\"Words to search for there, if any\"}},\"required\":[\"site\"]}" },
             { "wait", "Wait for something to load.",
               "{\"type\":\"object\",\"properties\":{\"seconds\":{\"type\":\"string\",\"description\":\"How long, 1 to 5\"}},\"required\":[\"seconds\"]}" },
-            { "ask", "Ask them only before a step that buys or pays, before sending, posting, deleting or installing something their job didn't ask for, or when you can't tell at all what they want. Never ask about a step their job already asked for.",
+            { "ask", "Ask them only before a step that buys or pays, before sending, posting, deleting or installing something their job didn't ask for, or for something only they know, like who to message when they didn't say. When they leave a choice to you, pick it yourself. Never ask about a step their job already asked for.",
               "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\",\"description\":\"The question\"}},\"required\":[\"text\"]}" },
             { "done", "Finish: say what you did, or what went wrong.",
               "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\",\"description\":\"One plain sentence\"}},\"required\":[\"text\"]}" }
@@ -392,9 +396,18 @@ namespace CapriDesktop
             return word;
         }
 
+        internal static string Allowing(string prompt)
+        {
+            if (!Bypass) return prompt;
+            const string ahead = "They turned on Bypass all permissions, so they've said yes to every step ahead of time: never stop to ask about one, even to buy, pay, send, post, delete or install.";
+            return prompt.Replace(" Always call ask before you buy or pay for anything.", "").Replace(" Before you buy or pay for anything, stop and ask.", "")
+                .Replace("Only call ask before you buy or pay, or before a send, post, delete or install their job didn't mention; Capri stops you herself before any step that needs their OK.", ahead)
+                .Replace("Capri stops you herself before any step that needs their OK.", ahead);
+        }
+
         internal static bool Needless(string question)
         {
-            if (Costly.IsMatch(question ?? "")) return false;
+            if (!Bypass && Costly.IsMatch(question ?? "")) return false;
             // "Typed it. Want me to send it?" asks too, so every sentence counts.
             foreach (string sentence in Regex.Split((question ?? "").Trim(), @"(?<=[.!?])\s+")) if (Checking.IsMatch(sentence)) return true;
             return false;
@@ -1240,6 +1253,8 @@ namespace CapriDesktop
             if (Computer.Unsent(asked)) approved.Remove("send");
         }
 
+        internal bool Needs(string danger) { return danger != null && !Computer.Bypass && !approved.Contains(danger); }
+
         internal bool Asking { get { return Waiting.Key != null; } }
 
         internal string Run()
@@ -1271,7 +1286,7 @@ namespace CapriDesktop
                 string nudged = nudge;
                 nudge = "";
                 Show("Thinking");
-                try { written = Think(Computer.Prompt, Computer.Brief(Task, Steps, sight) + (lost > 0 ? "\nYour last reply had no tool call. Reply with only one tool call, or call done." : "") + nudged, calls); }
+                try { written = Think(Computer.Allowing(Computer.Prompt), Computer.Brief(Task, Steps, sight) + (lost > 0 ? "\nYour last reply had no tool call. Reply with only one tool call, or call done." : "") + nudged, calls); }
                 catch (System.Runtime.Serialization.SerializationException) { written = ""; calls.Clear(); }
                 Show(null);
                 if (Computer.Interrupted) return End("stopped", Computer.Why);
@@ -1301,7 +1316,7 @@ namespace CapriDesktop
                 }
                 if (tool == "type" && args.Enter != "yes" && approved.Contains("send") && Computer.ChatBox(args, sight)) args.Enter = "yes";
                 string danger = Computer.Risk(tool, args, sight);
-                if (danger != null && !approved.Contains(danger))
+                if (Needs(danger))
                 {
                     Waiting = new KeyValuePair<string, ToolArguments>(tool, args);
                     WaitingSight = sight;
@@ -1338,7 +1353,7 @@ namespace CapriDesktop
                 if (++turns > Computer.MostTurns) return End("failed", "Ran out of steps. Last one: " + (Steps.Count > 0 ? Steps[Steps.Count - 1] : "none") + ".");
                 Show("Thinking");
                 ClaudeReply reply;
-                try { reply = Drive(Computer.Seeing, Computer.Toolset, Conversation()); }
+                try { reply = Drive(Computer.Allowing(Computer.Seeing), Computer.Toolset, Conversation()); }
                 catch (System.Runtime.Serialization.SerializationException) { return End("failed", "Got a reply from my brain I couldn't read. Try again."); }
                 catch (BrainException error)
                 {
@@ -1420,7 +1435,7 @@ namespace CapriDesktop
                     Target target;
                     string question;
                     string danger = Danger(call.Name, args, member, out target, out question);
-                    if (!resumed && danger != null && !approved.Contains(danger))
+                    if (!resumed && Needs(danger))
                     {
                         Waiting = new KeyValuePair<string, ToolArguments>(call.Name, args);
                         risk = danger;

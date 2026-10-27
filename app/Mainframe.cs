@@ -18,11 +18,11 @@ namespace CapriDesktop
         private static readonly int[] Gaps = { 10, 15, 30, 60, 90, 120, 180, 300, 600 };
         private static readonly string[] GapNames = { "10 s", "15 s", "30 s", "1 min", "1.5 min", "2 min", "3 min", "5 min", "10 min" };
         private const int SetupHeight = 118;
-        private const int PageTall = 560;
+        private const int PageTall = 630;
         // Settings opens a second column to the right, so every setting shows at once.
         private const int Column = 380;
         private const int Far = 30000;
-        private static readonly int[][] PageBars = { new[] { 0, 58, 206 }, new[] { 0, 220, 376 }, new[] { 0, 386, 538 }, new[] { Column, 58, 146 }, new[] { Column, 162, 250 }, new[] { Column, 266, 424 } };
+        private static readonly int[][] PageBars = { new[] { 0, 58, 206 }, new[] { 0, 220, 376 }, new[] { 0, 386, 538 }, new[] { Column, 58, 146 }, new[] { Column, 162, 250 }, new[] { Column, 266, 424 }, new[] { Column, 446, 530 }, new[] { 0, 552, 612 } };
         private static readonly int[] Volumes = { 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 125, 150 };
         private static readonly string[] VolumeNames = { "Mute", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%", "125%", "150%" };
         private static readonly int[] SizeSteps = { 140, 170, 200, 240, 280, 320, 380, 440, 500, 560 };
@@ -61,8 +61,15 @@ namespace CapriDesktop
         private readonly Key perch;
         private readonly Slider sizeSlider;
         private readonly Label sizeName;
-        private readonly Toggle popIns;
+        private readonly Toggle checkIns;
         private readonly Toggle onTop;
+        private readonly Toggle startup;
+        private readonly Toggle cursor;
+        private readonly Toggle bypass;
+        private readonly Key talkKeys;
+        private readonly Key muteKeys;
+        private readonly Key typeKeys;
+        private readonly Key hideKeys;
         private readonly Toggle watch;
         private readonly Label voiceHead;
         private readonly Rung[] voiceRungs = new Rung[3];
@@ -91,6 +98,10 @@ namespace CapriDesktop
         private int capturing;
         private string talkName = "Ctrl + Alt + V";
         private string muteName = "Ctrl + Alt + N";
+        private string typeName = "Ctrl + Alt + T";
+        private string hideName = "Ctrl + Alt + H";
+        private bool typeReady = true;
+        private bool hideReady = true;
         private readonly Label muteShortcut;
         private readonly Key mics;
         private readonly ContextMenuStrip micMenu;
@@ -210,7 +221,7 @@ namespace CapriDesktop
             shortcut.TextAlign = ContentAlignment.MiddleRight;
             shortcut.Bounds = new Rectangle(156, 182, 200, 20);
             shortcut.Cursor = Cursors.Hand;
-            shortcut.Click += delegate { PickKeys(false); };
+            shortcut.Click += delegate { PickKeys(0); };
             Lower(shortcut);
             string[,] voiceTiers = { { "OFF", "Silent · text only" }, { "FREE VOICE", "Free · runs on your PC" }, { "ELEVENLABS", "Sounds amazing · paid" } };
             for (int i = 0; i < voiceRungs.Length; i++)
@@ -264,7 +275,7 @@ namespace CapriDesktop
             Lower(Make("Test", 280, 358, 76, 28, delegate { capri.TestVoice(); }));
             muteShortcut = Lower(Caption("Ctrl + Alt + N mutes mic", 28, 393, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim));
             muteShortcut.Cursor = Cursors.Hand;
-            muteShortcut.Click += delegate { PickKeys(true); };
+            muteShortcut.Click += delegate { PickKeys(1); };
             Deactivate += delegate { if (capturing == 0) return; capturing = 0; KeyLabels(); };
             voiceNote = Lower(Caption("", 28, InstallAt, Font, Look.Dim));
             installNote = Caption("", 28, InstallAt + 2, Font, Look.Ink);
@@ -341,7 +352,7 @@ namespace CapriDesktop
             sizeSlider = PageSlider(SizeNames, 80, "Her size", c);
             sizeSlider.Changed += delegate { if (syncing) return; sizeName.Text = SizeNames[sizeSlider.Value]; capri.SetCharacterSize(SizeSteps[sizeSlider.Value]); };
             sizeName = Caption("Medium", 292 + c, 87, Font, Look.Ink);
-            popIns = Check("Pop in on me", 28 + c, 116, 150, delegate { if (!syncing) capri.TogglePopIns(); });
+            checkIns = Check("Check in on me", 28 + c, 116, 150, delegate { if (!syncing) capri.ToggleCheckIns(); });
             onTop = Check("Always on top", 186 + c, 116, 170, delegate { if (!syncing) capri.ToggleOnTop(); });
             Caption("WATCH >", 28 + c, 162, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
             watch = Check("Watch my screen", 28 + c, 186, 328, delegate { if (!syncing) capri.ToggleWatch(); });
@@ -367,6 +378,21 @@ namespace CapriDesktop
             Make("Use", 280 + c, 362, 76, 28, delegate { UseCustom(); });
             customNote = Caption("Any Ollama model you've pulled, or a model id on your key.", 28 + c, 398, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
             customNote.MaximumSize = new Size(328, 0);
+            Caption("HABITS >", 28 + c, 446, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
+            startup = Check("Start with Windows", 28 + c, 470, 328, delegate { if (!syncing) capri.ToggleStartup(); });
+            startup.Hint = "When you sign in";
+            startup.HintFont = Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point);
+            cursor = Check("Use her cursor", 28 + c, 502, 150, delegate { if (!syncing) capri.ToggleCursor(); });
+            bypass = Check("Bypass all permissions", 186 + c, 502, 170, delegate { if (!syncing) capri.ToggleBypass(); });
+            Caption("KEYS >", 28, 556, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
+            talkKeys = Make("Talk: Ctrl + Alt + V", 96, 550, 250, 28, delegate { PickKeys(0); });
+            talkKeys.AccessibleName = "Her talk key. Click, then press new keys";
+            muteKeys = Make("Mute mic: Ctrl + Alt + N", 358, 550, 250, 28, delegate { PickKeys(1); });
+            muteKeys.AccessibleName = "Her mute key. Click, then press new keys";
+            typeKeys = Make("Type: Ctrl + Alt + T", 96, 584, 250, 28, delegate { PickKeys(2); });
+            typeKeys.AccessibleName = "Her typing key. Click, then press new keys";
+            hideKeys = Make("Hide/show: Ctrl + Alt + H", 358, 584, 250, 28, delegate { PickKeys(3); });
+            hideKeys.AccessibleName = "Her hide key. Click, then press new keys";
             for (int i = first; i < Controls.Count; i++)
             {
                 pageLeft.Add(new KeyValuePair<Control, int>(Controls[i], Controls[i].Left));
@@ -406,6 +432,10 @@ namespace CapriDesktop
         internal string SizeStatus { get { return sizeName.Text; } }
 
         internal bool TypingShown { get { return typing.Checked; } }
+
+        internal string HabitsStatus { get { return startup.Checked ? "startup" : "-"; } }
+
+        internal string JobsStatus { get { return (cursor.Checked ? "cursor" : "-") + " | " + (bypass.Checked ? "bypass" : "-"); } }
 
         internal string SettingsStatus { get { return languages.Text + " | " + volumeName.Text + " | " + soundsName.Text + " | " + wanderName.Text + " | " + sleepName.Text + " | " + (dance.Checked ? "dance" : "-") + " | " + (intro.Checked ? "intro" : "-") + " | " + repliesName.Text + " | " + recallName.Text + " | " + bubbleName.Text; } }
 
@@ -610,8 +640,11 @@ namespace CapriDesktop
             for (int i = 0; i < SizeSteps.Length; i++) if (Math.Abs(SizeSteps[i] - capri.CharacterSize) < Math.Abs(SizeSteps[near] - capri.CharacterSize)) near = i;
             sizeSlider.Value = near;
             sizeName.Text = SizeNames[near];
-            popIns.Checked = capri.PopIns;
+            checkIns.Checked = capri.CheckIns;
             onTop.Checked = capri.OnTop;
+            startup.Checked = capri.StartsWithWindows;
+            cursor.Checked = capri.UsesCursor;
+            bypass.Checked = capri.Bypassing;
             watch.Checked = capri.Watching;
             VoiceTier();
             int chosen = Array.IndexOf(Gaps, capri.GlanceGap);
@@ -909,16 +942,26 @@ namespace CapriDesktop
             KeyLabels();
         }
 
-        internal void Hotkeys(string talk, string mute)
+        internal void ShowKeys(bool type, bool hide)
         {
-            talkName = talk;
-            muteName = mute;
+            typeReady = type;
+            hideReady = hide;
             KeyLabels();
         }
 
-        internal void PickKeys(bool mute)
+        internal void Hotkeys(string talk, string mute, string type, string hide)
         {
-            capturing = mute ? 2 : 1;
+            talkName = talk;
+            muteName = mute;
+            typeName = type;
+            hideName = hide;
+            KeyLabels();
+        }
+
+        // Which of her keys to change: 0 talk, 1 mute mic, 2 type to her, 3 hide or show her.
+        internal void PickKeys(int slot)
+        {
+            capturing = slot + 1;
             KeyLabels();
         }
 
@@ -926,12 +969,12 @@ namespace CapriDesktop
         {
             Keys key = keys & Keys.KeyCode;
             if (capturing == 0 || key == Keys.ControlKey || key == Keys.Menu || key == Keys.ShiftKey || key == Keys.LWin || key == Keys.RWin) return;
-            bool mute = capturing == 2;
+            int slot = capturing - 1;
             capturing = 0;
-            string problem = key == Keys.Escape ? null : capri.SetHotkey(mute, keys);
+            string problem = key == Keys.Escape ? null : capri.SetHotkey(slot, keys);
             KeyLabels();
             if (problem != null) VoiceNote(problem, true);
-            else if (key != Keys.Escape) VoiceNote("Saved. " + (mute ? muteName + " mutes your mic." : talkName + " starts voice chat."), false);
+            else if (key != Keys.Escape) VoiceNote("Saved. " + (slot == 0 ? talkName + " starts voice chat." : slot == 1 ? muteName + " mutes your mic." : slot == 2 ? typeName + " opens her typing box." : hideName + " hides or shows her."), false);
         }
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -946,10 +989,16 @@ namespace CapriDesktop
             const string waiting = "Press new keys, Esc cancels";
             shortcut.Text = capturing == 1 ? waiting : talkName + (shortcutReady ? " to talk" : " is taken");
             muteShortcut.Text = capturing == 2 ? waiting : muteName + (muteReady ? " mutes mic" : " is taken");
+            if (hideKeys == null) return;
+            talkKeys.Text = capturing == 1 ? waiting : "Talk: " + talkName + (shortcutReady ? "" : " (taken)");
+            muteKeys.Text = capturing == 2 ? waiting : "Mute mic: " + muteName + (muteReady ? "" : " (taken)");
+            typeKeys.Text = capturing == 3 ? waiting : "Type: " + typeName + (typeReady ? "" : " (taken)");
+            hideKeys.Text = capturing == 4 ? waiting : "Hide/show: " + hideName + (hideReady ? "" : " (taken)");
         }
 
         internal string TierNote { get { return tierNote.Text; } }
         internal string KeyStatus { get { return shortcut.Text + " | " + muteShortcut.Text; } }
+        internal string KeysShown { get { return talkKeys.Text + " | " + muteKeys.Text + " | " + typeKeys.Text + " | " + hideKeys.Text; } }
 
         internal void ShowMic(string name)
         {

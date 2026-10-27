@@ -107,10 +107,18 @@ namespace CapriDesktop
         [DataMember] public int TalkVk = 0x56;
         [DataMember] public int MuteMods = 3;
         [DataMember] public int MuteVk = 0x4E;
+        [DataMember] public int TypeMods = 3;
+        [DataMember] public int TypeVk = 0x54;
+        [DataMember] public int HideMods = 3;
+        [DataMember] public int HideVk = 0x48;
         [DataMember] public int WanderPace = 1;
         [DataMember] public string AgentPolyglot;
-        [DataMember] public bool PopIns;
+        // Check in on me is on by default. Before 0.7.3 it was saved as PopIns, off by default, so the new name turns it on once for everyone.
+        [DataMember] public bool CheckIns = true;
         [DataMember] public string VoiceStyle;
+        [DataMember] public bool StartupSet;
+        [DataMember] public bool QuickHands;
+        [DataMember] public bool Bypass;
 
         [OnDeserializing]
         private void Defaults(StreamingContext context)
@@ -127,7 +135,12 @@ namespace CapriDesktop
             TalkVk = 0x56;
             MuteMods = 3;
             MuteVk = 0x4E;
+            TypeMods = 3;
+            TypeVk = 0x54;
+            HideMods = 3;
+            HideVk = 0x48;
             WanderPace = 1;
+            CheckIns = true;
         }
     }
 
@@ -455,6 +468,14 @@ namespace CapriDesktop
         private double popOut = -1;
         private int popClicks;
         private static readonly string[] PopLines = { "Boo. Just checking on you.", "Hi! Don't mind me.", "Peekaboo.", "Miss me? I missed you.", "Hey, you. Having fun?", "Surprise. I got bored without you." };
+        private const double NudgeGap = 7200;
+        private double noticed = -1;
+        private int noticedClicks;
+        private double nudgeGap = NudgeGap;
+        private double nudgeOut = -1;
+        private static readonly string[] NudgeLines = { "Psst. Remember me? Tiny, glitchy, very important.", "I'm bored. Entertain me.", "Hey. Hey. Look at me.", "You've been ignoring me for ages. Rude.", "Pay attention to me or I start clicking things.", "Knock knock. It's your favourite gremlin.", "Choom. I'm bored out of my many minds." };
+        private static readonly string[] NoticedLines = { "Finally. Hi.", "There you are.", "Knew you couldn't resist me." };
+        private static readonly string[] SnubbedLines = { "Fine. Ignore me. See if I care.", "Wow. Ignored. Noted.", "I'll just sit here. Alone. Bored." };
         private readonly System.Windows.Forms.Timer frames;
         private readonly System.Windows.Forms.Timer signals;
         private readonly EventWaitHandle restore;
@@ -692,8 +713,12 @@ namespace CapriDesktop
         private string hopName;
         private const int TalkKeyId = 0x4356;
         private const int MuteKeyId = 0x434D;
+        private const int TypeKeyId = 0x4354;
+        private const int HideKeyId = 0x4348;
         private bool talkKey;
         private bool muteKey;
+        private bool typeKey;
+        private bool hideKey;
         private const int BlinkFrom = 9;
         internal bool TestFailed;
 
@@ -822,6 +847,8 @@ namespace CapriDesktop
             voice.Key = Voice.Unprotect(preferences.VoiceKey);
             Hands.Look = LookAt;
             Hands.Work = RunJob;
+            brain.Act = DoTool;
+            Computer.Bypass = preferences.Bypass;
             Hands.Resume = ResumeJob;
             Hands.Rename = CallThem;
             Computer.Grab = HandsGrab;
@@ -860,6 +887,7 @@ namespace CapriDesktop
                 if (!testing) CheckWander(clock.Elapsed.TotalSeconds, Native.IdleMilliseconds());
                 if (!testing) CheckMusic(clock.Elapsed.TotalSeconds);
                 if (!testing) CheckPopIn(clock.Elapsed.TotalSeconds, Native.IdleMilliseconds());
+                if (!testing) CheckNudge(clock.Elapsed.TotalSeconds, Native.IdleMilliseconds());
                 StayOnTop();
                 CheckSeat(clock.Elapsed.TotalSeconds);
                 CheckChat(clock.Elapsed.TotalSeconds);
@@ -910,13 +938,17 @@ namespace CapriDesktop
                 SavePreferences();
             }
             if (!testing) FindBrain();
+            if (!testing) DefaultStartup(Installed());
             if (!testing) GreetSoon();
             if (!testing && FreeChatOn) { GetFreeVoice(); GetFreeEars(); }
             if (!testing && voice.Key != null) ListVoices(voice.Key, false);
             if (!testing) talkKey = Native.RegisterHotKey(Handle, TalkKeyId, preferences.TalkMods | 0x4000, preferences.TalkVk);
             bool muteFree = !testing && Native.RegisterHotKey(Handle, MuteKeyId, preferences.MuteMods | 0x4000, preferences.MuteVk) && Native.UnregisterHotKey(Handle, MuteKeyId);
-            mainframe.Hotkeys(TalkKeyName, MuteKeyName);
+            if (!testing) typeKey = Native.RegisterHotKey(Handle, TypeKeyId, preferences.TypeMods | 0x4000, preferences.TypeVk);
+            if (!testing) hideKey = Native.RegisterHotKey(Handle, HideKeyId, preferences.HideMods | 0x4000, preferences.HideVk);
+            mainframe.Hotkeys(TalkKeyName, MuteKeyName, TypeKeyName, HideKeyName);
             mainframe.ShowShortcut(talkKey, muteFree);
+            mainframe.ShowKeys(typeKey, hideKey);
             RefreshIcons();
             if (!testing && !hidden) DropSoon();
         }
@@ -1400,6 +1432,8 @@ namespace CapriDesktop
             if (message.Msg == 0x0312 && message.WParam.ToInt32() == DismountId) { StopRide(); return; }
             if (message.Msg == 0x0312 && message.WParam.ToInt32() == TalkKeyId) { if (hidden) SetHidden(false); ToggleChat(); return; }
             if (message.Msg == 0x0312 && message.WParam.ToInt32() == MuteKeyId) { ToggleMic(); return; }
+            if (message.Msg == 0x0312 && message.WParam.ToInt32() == TypeKeyId) { if (hidden) SetHidden(false); OpenTyper(); return; }
+            if (message.Msg == 0x0312 && message.WParam.ToInt32() == HideKeyId) { ToggleHidden(); return; }
             if (message.Msg == 0x02E0) { anchor = KeepOnScreen(anchor); Location = anchor; RenderFrame(); }
             base.WndProc(ref message);
         }
@@ -1588,7 +1622,7 @@ namespace CapriDesktop
         {
             if (popOut >= 0 && (clicks != popClicks || chatting || typer.Visible || talkState != TalkState.Off)) EndPopIn(false);
             if (popOut >= 0 && now >= popOut && speech == null) EndPopIn(true);
-            if (!preferences.PopIns) { nextPopIn = -1; return; }
+            if (!preferences.CheckIns) { nextPopIn = -1; return; }
             if (nextPopIn < 0) nextPopIn = now + 480 + random.NextDouble() * 720;
             if (now < nextPopIn) return;
             nextPopIn = now + 480 + random.NextDouble() * 720;
@@ -1631,12 +1665,163 @@ namespace CapriDesktop
             popHide = false;
         }
 
-        internal void TogglePopIns()
+        internal void ToggleCheckIns()
         {
-            preferences.PopIns = !preferences.PopIns;
+            preferences.CheckIns = !preferences.CheckIns;
             nextPopIn = -1;
+            nudgeOut = -1;
+            nudgeGap = NudgeGap;
+            noticed = -1;
             SavePreferences();
             mainframe.Sync();
+        }
+
+        // With Check in on me on, ignored for a while when they're at the PC, she comes over and asks for attention: a click gets a happy line, silence gets a sulk and a longer wait.
+        private void CheckNudge(double now, long quiet)
+        {
+            bool attending = clicks != noticedClicks || dragging || pressed || chatting || typer.Visible || menu.Visible || talkState != TalkState.Off || jobRide;
+            if (noticed < 0 || attending) { noticed = now; noticedClicks = clicks; }
+            if (nudgeOut >= 0)
+            {
+                if (attending)
+                {
+                    nudgeOut = -1;
+                    nudgeGap = NudgeGap;
+                    if (!chatting && !typer.Visible && talkState == TalkState.Off && !jobRide) Say(NoticedLines[random.Next(NoticedLines.Length)]);
+                }
+                else if (now >= nudgeOut && speech == null)
+                {
+                    nudgeOut = -1;
+                    nudgeGap = Math.Min(nudgeGap * 2, NudgeGap * 4);
+                    noticed = now;
+                    if (quiet < 20000 && !hidden) Say(SnubbedLines[random.Next(SnubbedLines.Length)]);
+                }
+                return;
+            }
+            if (!preferences.CheckIns || hidden || quiet > 30000 || now - noticed < nudgeGap || (lastGlance >= 0 && now - lastGlance < 300)) return;
+            if (quitting || riding || falling || hanging || typer.Visible || speech != null || outro != null || popOut >= 0 || (clip != idle && clip != perch)) return;
+            Nudge(now);
+        }
+
+        private void Nudge(double now)
+        {
+            nudgeOut = now + 20;
+            string line = NudgeLines[random.Next(NudgeLines.Length)];
+            Point cursor = Cursor.Position;
+            Point hip = Hip();
+            Rectangle area = Screen.FromPoint(cursor).WorkingArea;
+            Action ask = delegate
+            {
+                // Behind other windows she can't be noticed, so she comes to the front until it's over, the way a pop-in does.
+                if (!preferences.OnTop && IsHandleCreated)
+                {
+                    Native.SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+                    popOut = clock.Elapsed.TotalSeconds + 20;
+                    popClicks = clicks;
+                    popHide = false;
+                }
+                Say(line);
+            };
+            if (area.Contains(hip) && Math.Abs(hip.X - cursor.X) <= Math.Max(300, Width * 2)) { ask(); return; }
+            int x = cursor.X - area.Left < area.Width / 2 ? cursor.X + Width / 2 : cursor.X - Width - Width / 2;
+            Point spot = new Point(Math.Max(area.Left, Math.Min(area.Right - Width, x)), area.Bottom - Height - 12);
+            GlitchOut(delegate
+            {
+                StopRide();
+                seat = null;
+                falling = false;
+                walking = false;
+                anchor = spot;
+                ShowHidden(false);
+                DropSoon();
+                ask();
+            }, false);
+        }
+
+        private static bool Installed()
+        {
+            try { return string.Equals(Path.GetFullPath(Application.ExecutablePath), Path.GetFullPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Capri", "Capri.exe")), StringComparison.OrdinalIgnoreCase); }
+            catch (ArgumentException) { return false; }
+            catch (NotSupportedException) { return false; }
+            catch (IOException) { return false; }
+        }
+
+        // She starts with Windows by default: the installed copy turns it on once, and turning it off sticks.
+        internal void DefaultStartup(bool installed)
+        {
+            if (preferences.StartupSet || !installed || !Startup.Set(Application.ExecutablePath, true)) return;
+            preferences.StartupSet = true;
+            SavePreferences();
+            mainframe.Sync();
+        }
+
+        internal bool StartsWithWindows { get { return Startup.On(Application.ExecutablePath); } }
+
+        internal void ToggleStartup()
+        {
+            if (!Startup.Set(Application.ExecutablePath, !StartsWithWindows)) Brain.Log("startup", -1, "Windows wouldn't let Capri change her Run entry.");
+            preferences.StartupSet = true;
+            SavePreferences();
+            mainframe.Sync();
+        }
+
+
+        internal bool UsesCursor { get { return !preferences.QuickHands; } }
+
+        internal void ToggleCursor()
+        {
+            preferences.QuickHands = !preferences.QuickHands;
+            SavePreferences();
+            mainframe.Sync();
+        }
+
+        internal bool Bypassing { get { return preferences.Bypass; } }
+
+        internal void ToggleBypass()
+        {
+            preferences.Bypass = !preferences.Bypass;
+            Computer.Bypass = preferences.Bypass;
+            SavePreferences();
+            mainframe.Sync();
+        }
+
+        internal static Func<bool> SpotifyOpen = SpotifyRunning;
+
+        private static bool SpotifyRunning()
+        {
+            Process[] found = Process.GetProcessesByName("Spotify");
+            foreach (Process process in found) process.Dispose();
+            return found.Length > 0;
+        }
+
+        // Use her cursor, on by default: people asked to watch her search YouTube and pick a video, play songs from Spotify's search and drag Spotify's volume slider herself.
+        // If her brain gets lost on the way, the quick tool still does what they asked.
+        private string DoTool(string tool, ToolArguments args)
+        {
+            string task = preferences.QuickHands || args == null ? null : CursorJob(tool, args);
+            if (task == null) return Hands.Do(tool, args);
+            string done = Hands.Do("use_computer", new ToolArguments { Task = task });
+            return done != null && done.Contains(Computer.Bigger) ? Hands.Do(tool, args) : done;
+        }
+
+        internal static string CursorJob(string tool, ToolArguments args)
+        {
+            if (tool == "play_music" && !string.IsNullOrWhiteSpace(args.Song))
+            {
+                string song = args.Song.Trim();
+                bool spotify = args.App == "spotify" || (args.App != "youtube" && Hands.Installed("spotify"));
+                if (!spotify) return "Play " + Voice.Quote(song) + " on YouTube: open YouTube, click its search bar, type " + Voice.Quote(song) + " and press Enter, scroll down through the results and look at a few, then click the video that fits best.";
+                if (Regex.IsMatch(song, @"^liked songs$", RegexOptions.IgnoreCase)) return "Play their Liked Songs on Spotify: open Spotify, go to Your Library, open Liked Songs and press its play button.";
+                return "Play " + Voice.Quote(song) + (string.IsNullOrEmpty(args.Kind) || args.Kind == "song" ? "" : " (the " + args.Kind + ")") + " on Spotify: open Spotify, click its search box, type " + Voice.Quote(song) + " and press Enter, then press play on the best match.";
+            }
+            if (tool == "open_website" && !string.IsNullOrWhiteSpace(args.Search) && Regex.IsMatch((args.Site ?? "").Trim(), @"^(https?://)?(www\.|m\.)?youtube(\.com)?/?$", RegexOptions.IgnoreCase))
+                return "Search YouTube for " + Voice.Quote(args.Search.Trim()) + ": open YouTube, click its search bar, type it and press Enter, then scroll down through the results.";
+            if (tool == "media" && (args.Action == "volume_up" || args.Action == "volume_down") && SpotifyOpen())
+            {
+                bool up = args.Action == "volume_up";
+                return "Turn Spotify's volume " + (up ? "up" : "down") + ": open Spotify and drag its volume slider, at the bottom right, a little to the " + (up ? "right." : "left.");
+            }
+            return null;
         }
 
         private void CheckWander(double now, long quiet)
@@ -1909,6 +2094,10 @@ namespace CapriDesktop
 
         internal string MuteKeyName { get { return KeyName(preferences.MuteMods, preferences.MuteVk); } }
 
+        internal string TypeKeyName { get { return KeyName(preferences.TypeMods, preferences.TypeVk); } }
+
+        internal string HideKeyName { get { return KeyName(preferences.HideMods, preferences.HideVk); } }
+
         internal static bool Bindable(int mods, int vk) { return (mods & 3) != 0 && (mods & ~7) == 0 && ((vk >= 0x41 && vk <= 0x5A) || (vk >= 0x30 && vk <= 0x39) || (vk >= 0x70 && vk <= 0x7B)); }
 
         internal static string KeyName(int mods, int vk)
@@ -1917,27 +2106,22 @@ namespace CapriDesktop
             return name + (vk >= 0x70 && vk <= 0x7B ? "F" + (vk - 0x6F) : ((char)vk).ToString());
         }
 
-        internal string SetHotkey(bool mute, Keys keys)
+        // Her keys, in the order the Mainframe shows them: talk, mute mic, type to her, hide or show her.
+        private static readonly string[] KeyJobs = { "talk", "mute", "typing", "hide" };
+
+        internal string SetHotkey(int slot, Keys keys)
         {
             int mods = ((keys & Keys.Alt) != 0 ? 1 : 0) | ((keys & Keys.Control) != 0 ? 2 : 0) | ((keys & Keys.Shift) != 0 ? 4 : 0);
             int vk = (int)(keys & Keys.KeyCode);
             if ((mods & 3) == 0) return "Hold Ctrl or Alt with a letter, number or F-key.";
             if (!Bindable(mods, vk)) return "Pick a letter, number or F-key.";
             string name = KeyName(mods, vk);
-            if (mute ? (mods == preferences.TalkMods && vk == preferences.TalkVk) : (mods == preferences.MuteMods && vk == preferences.MuteVk)) return name + " is already her " + (mute ? "talk" : "mute") + " key.";
+            int[] bound = { preferences.TalkMods, preferences.TalkVk, preferences.MuteMods, preferences.MuteVk, preferences.TypeMods, preferences.TypeVk, preferences.HideMods, preferences.HideVk };
+            for (int i = 0; i < KeyJobs.Length; i++)
+                if (i != slot && mods == bound[i * 2] && vk == bound[i * 2 + 1]) return name + " is already her " + KeyJobs[i] + " key.";
             if (!testing && IsHandleCreated)
             {
-                if (!mute)
-                {
-                    if (talkKey) Native.UnregisterHotKey(Handle, TalkKeyId);
-                    talkKey = Native.RegisterHotKey(Handle, TalkKeyId, mods | 0x4000, vk);
-                    if (!talkKey)
-                    {
-                        talkKey = Native.RegisterHotKey(Handle, TalkKeyId, preferences.TalkMods | 0x4000, preferences.TalkVk);
-                        return name + " is taken by another app. Try another.";
-                    }
-                }
-                else
+                if (slot == 1)
                 {
                     bool live = muteKey;
                     if (live) Native.UnregisterHotKey(Handle, MuteKeyId);
@@ -1949,12 +2133,23 @@ namespace CapriDesktop
                         return name + " is taken by another app. Try another.";
                     }
                 }
+                else
+                {
+                    int id = slot == 0 ? TalkKeyId : slot == 2 ? TypeKeyId : HideKeyId;
+                    if (slot == 0 ? talkKey : slot == 2 ? typeKey : hideKey) Native.UnregisterHotKey(Handle, id);
+                    bool held = Native.RegisterHotKey(Handle, id, mods | 0x4000, vk);
+                    bool kept = held || Native.RegisterHotKey(Handle, id, bound[slot * 2] | 0x4000, bound[slot * 2 + 1]);
+                    if (slot == 0) talkKey = kept; else if (slot == 2) typeKey = kept; else hideKey = kept;
+                    if (!held) return name + " is taken by another app. Try another.";
+                }
             }
-            if (mute) { preferences.MuteMods = mods; preferences.MuteVk = vk; }
-            else { preferences.TalkMods = mods; preferences.TalkVk = vk; }
+            if (slot == 0) { preferences.TalkMods = mods; preferences.TalkVk = vk; }
+            else if (slot == 1) { preferences.MuteMods = mods; preferences.MuteVk = vk; }
+            else if (slot == 2) { preferences.TypeMods = mods; preferences.TypeVk = vk; }
+            else { preferences.HideMods = mods; preferences.HideVk = vk; }
             SavePreferences();
-            if (!testing) mainframe.ShowShortcut(talkKey, true);
-            mainframe.Hotkeys(TalkKeyName, MuteKeyName);
+            if (!testing) { mainframe.ShowShortcut(talkKey, true); mainframe.ShowKeys(typeKey, hideKey); }
+            mainframe.Hotkeys(TalkKeyName, MuteKeyName, TypeKeyName, HideKeyName);
             return null;
         }
 
@@ -2297,7 +2492,7 @@ namespace CapriDesktop
         internal bool IsHidden { get { return hidden; } }
         internal bool Riding { get { return riding; } }
         internal int CharacterSize { get { return preferences.Size; } }
-        internal bool PopIns { get { return preferences.PopIns; } }
+        internal bool CheckIns { get { return preferences.CheckIns; } }
         internal bool Watching { get { return preferences.Watch; } }
         internal bool Speaking { get { return !preferences.Quiet; } }
         internal bool Silent { get { return preferences.Silent; } }
@@ -3907,17 +4102,30 @@ namespace CapriDesktop
             opened.Language = language;
             opened.Act = delegate(string tool, ToolArguments args)
             {
+                stirred = Environment.TickCount;
                 lock (shortcutGate)
                 {
                     toolAsked = true;
                     if (tool == shortcutTool && Environment.TickCount - shortcutAt < 10000) return shortcutResult ?? "Already doing that.";
                 }
-                return Hands.Do(tool, args);
+                string done = DoTool(tool, args);
+                stirred = Environment.TickCount;
+                return done;
             };
             opened.Opened += delegate(int rate) { Post(delegate { if (agent == opened) ChatOpened(rate); }); };
             opened.Heard += delegate(string text) { Post(delegate { if (agent == opened) ChatHeard(text); }); };
             opened.Replied += delegate(string text) { Post(delegate { if (agent == opened) ChatReplied(text); }); };
-            opened.Audio += delegate(short[] samples) { Post(delegate { if (agent != opened || dropping) return; speaker.Play(samples); if (!frames.Enabled && !hidden) frames.Start(); }); };
+            opened.Audio += delegate(short[] samples)
+            {
+                Post(delegate
+                {
+                    if (agent != opened || dropping) return;
+                    if (Unprompted()) { dropping = true; checkedIn = true; speaker.Clear(); return; }
+                    stirred = Environment.TickCount;
+                    speaker.Play(samples);
+                    if (!frames.Enabled && !hidden) frames.Start();
+                });
+            };
             opened.Interrupted += delegate { Post(delegate { if (agent == opened) speaker.Clear(); }); };
             opened.Closed += delegate(string problem) { Post(delegate { if (agent != opened) return; if (problem != null) ChatFailed(problem); else Rest(); }); };
             agent = opened;
@@ -3975,11 +4183,16 @@ namespace CapriDesktop
         private string shortcutResult;
         private bool toolAsked;
         private string heardLast;
+        private volatile int stirred;
+
+        // ElevenLabs makes her take a turn after 30 s of silence. A line nothing asked for (no words from them, no job, no reply of hers going) is that "still there?", so it never plays and the call rests.
+        private bool Unprompted() { return unchecked(Environment.TickCount - stirred) >= 12000; }
 
         private void ChatHeard(string text)
         {
             if (!chatting) return;
             spoke = true;
+            stirred = Environment.TickCount;
             checkedIn = false;
             wokeAt = -1;
             int ticket = ++asking;
@@ -3999,8 +4212,9 @@ namespace CapriDesktop
                 lock (shortcutGate) { shortcutTool = tool; shortcutAt = Environment.TickCount; shortcutResult = null; }
                 ThreadPool.QueueUserWorkItem(delegate
                 {
-                    string result = Hands.Do(tool, args);
+                    string result = DoTool(tool, args);
                     lock (shortcutGate) shortcutResult = result;
+                    stirred = Environment.TickCount;
                     if (told != null) told.Tell("Capri's hands already did what they just asked (" + tool + "): " + result + " Don't call a tool for it again. React to it in one short line.");
                 });
             }
@@ -4018,6 +4232,7 @@ namespace CapriDesktop
             checkedIn = !spoke;
             spoke = false;
             if (dropping) return;
+            if (checkedIn && Unprompted()) { dropping = true; speaker.Clear(); return; }
             string said = Safety.Filter(Voice.Spoken(text));
             if (said != Voice.Spoken(text)) { dropping = true; speaker.Clear(); }
             string promised = null;
@@ -4593,6 +4808,8 @@ namespace CapriDesktop
                     if (value.Size < MinSize || value.Size > MaxSize) value.Size = 240;
                     if (!Bindable(value.TalkMods, value.TalkVk)) { value.TalkMods = 3; value.TalkVk = 0x56; }
                     if (!Bindable(value.MuteMods, value.MuteVk) || (value.MuteMods == value.TalkMods && value.MuteVk == value.TalkVk)) { value.MuteMods = 3; value.MuteVk = 0x4E; }
+                    if (!Bindable(value.TypeMods, value.TypeVk)) { value.TypeMods = 3; value.TypeVk = 0x54; }
+                    if (!Bindable(value.HideMods, value.HideVk)) { value.HideMods = 3; value.HideVk = 0x48; }
                     return value;
                 }
             }
@@ -4626,6 +4843,9 @@ namespace CapriDesktop
             StopChat();
             if (talkKey) Native.UnregisterHotKey(Handle, TalkKeyId);
             talkKey = false;
+            if (typeKey) Native.UnregisterHotKey(Handle, TypeKeyId);
+            if (hideKey) Native.UnregisterHotKey(Handle, HideKeyId);
+            typeKey = hideKey = false;
             speaker.Close();
             effects.Close();
             typist.Close();
@@ -5842,11 +6062,11 @@ namespace CapriDesktop
                             string[] tops = new string[menu.Items.Count];
                             for (int i = 0; i < tops.Length; i++) tops[i] = menu.Items[i].Text;
                             if (string.Join(",", tops) != "CAPRI  /  " + Assembly.GetExecutingAssembly().GetName().Version.ToString(3) + ",,Open Capri Mainframe,Hide Capri,Size,Move,Help,,Quit Capri") throw new Exception("The right-click menu is not the short one: " + string.Join(",", tops));
-                            bool hiddenWas = hidden, popsWere = preferences.PopIns;
+                            bool hiddenWas = hidden, popsWere = preferences.CheckIns;
                             Point popFrom = anchor;
                             Ledge popSeat = seat;
                             ShowHidden(true);
-                            TogglePopIns();
+                            if (!preferences.CheckIns) ToggleCheckIns();
                             double popAt = clock.Elapsed.TotalSeconds;
                             PopIn(popAt);
                             bool poppedUp = !hidden && speech != null && Array.IndexOf(PopLines, speech) >= 0 && popOut > popAt && popHide;
@@ -5859,16 +6079,183 @@ namespace CapriDesktop
                             speech = null;
                             CheckPopIn(clock.Elapsed.TotalSeconds + 7, 0);
                             bool keptOut = !hidden;
-                            TogglePopIns();
-                            if (popsWere) TogglePopIns();
+                            if (preferences.CheckIns != popsWere) ToggleCheckIns();
                             seat = popSeat;
                             anchor = popFrom;
                             Location = anchor;
                             falling = false;
                             Play(seat != null ? perch : idle);
                             if (hiddenWas) ShowHidden(true);
-                            if (!poppedUp || !poppedBack || !stayedOut || !keptOut || preferences.PopIns != popsWere) throw new Exception("Her pop-ins went wrong: up " + poppedUp + ", back " + poppedBack + ", stayed " + stayedOut + ", kept " + keptOut);
+                            if (!poppedUp || !poppedBack || !stayedOut || !keptOut || preferences.CheckIns != popsWere) throw new Exception("Her pop-ins went wrong: up " + poppedUp + ", back " + poppedBack + ", stayed " + stayedOut + ", kept " + keptOut);
                             checks.Add("PASS pop-ins: with the setting on she pops up on top of your app even when hidden, says hi and hides again, and when she's already out she stays out");
+                            bool nudgesWere = preferences.CheckIns;
+                            Point nudgeFrom = anchor;
+                            Ledge nudgeSeat = seat;
+                            double nudgeGlance = lastGlance, nudgeAt = clock.Elapsed.TotalSeconds;
+                            preferences.CheckIns = true;
+                            lastGlance = -1;
+                            speech = null;
+                            noticed = nudgeAt;
+                            noticedClicks = clicks;
+                            nudgeGap = NudgeGap;
+                            nudgeOut = -1;
+                            Play(seat != null ? perch : idle);
+                            CheckNudge(nudgeAt + NudgeGap - 5, 0);
+                            bool nudgeWaited = speech == null && nudgeOut < 0;
+                            CheckNudge(nudgeAt + NudgeGap + 1, 0);
+                            bool nudged = speech != null && Array.IndexOf(NudgeLines, speech) >= 0 && nudgeOut > nudgeAt && !hidden;
+                            speech = null;
+                            popOut = -1;
+                            React();
+                            CheckNudge(nudgeAt + NudgeGap + 3, 0);
+                            bool nudgeThanked = speech != null && Array.IndexOf(NoticedLines, speech) >= 0 && nudgeOut < 0 && nudgeGap == NudgeGap;
+                            speech = null;
+                            Play(seat != null ? perch : idle);
+                            double nudgeAgain = nudgeAt + NudgeGap * 2 + 4;
+                            CheckNudge(nudgeAgain, 0);
+                            bool nudgedAgain = speech != null && Array.IndexOf(NudgeLines, speech) >= 0 && nudgeOut > nudgeAgain;
+                            speech = null;
+                            popOut = -1;
+                            CheckNudge(nudgeOut + 1, 5000);
+                            bool nudgeSulked = speech != null && Array.IndexOf(SnubbedLines, speech) >= 0 && nudgeOut < 0 && nudgeGap == NudgeGap * 2;
+                            speech = null;
+                            Play(seat != null ? perch : idle);
+                            CheckNudge(noticed + NudgeGap + 1, 0);
+                            bool nudgeBackedOff = speech == null && nudgeOut < 0;
+                            CheckNudge(noticed + NudgeGap * 2 + 1, 60000);
+                            bool nudgeAway = speech == null && nudgeOut < 0;
+                            ShowHidden(true);
+                            CheckNudge(noticed + NudgeGap * 2 + 1, 0);
+                            bool nudgeHidden = speech == null && nudgeOut < 0;
+                            ShowHidden(false);
+                            Play(seat != null ? perch : idle);
+                            ToggleCheckIns();
+                            noticed = 0;
+                            CheckNudge(NudgeGap * 10, 0);
+                            bool nudgeOff = !preferences.CheckIns && speech == null && nudgeOut < 0;
+                            ToggleCheckIns();
+                            preferences.CheckIns = nudgesWere;
+                            lastGlance = nudgeGlance;
+                            popOut = -1;
+                            nudgeOut = -1;
+                            nudgeGap = NudgeGap;
+                            noticed = -1;
+                            speech = null;
+                            seat = nudgeSeat;
+                            anchor = nudgeFrom;
+                            Location = anchor;
+                            falling = false;
+                            Play(seat != null ? perch : idle);
+                            if (!nudgeWaited || !nudged || !nudgeThanked || !nudgedAgain || !nudgeSulked || !nudgeBackedOff || !nudgeAway || !nudgeHidden || !nudgeOff) throw new Exception("Her asking for attention went wrong: waited " + nudgeWaited + ", asked " + nudged + ", thanked " + nudgeThanked + ", again " + nudgedAgain + ", sulked " + nudgeSulked + ", backed off " + nudgeBackedOff + ", away " + nudgeAway + ", hidden " + nudgeHidden + ", off " + nudgeOff);
+                            checks.Add("PASS attention: only with Check in on me on, and only now and then: ignored for 2 hours while you're at the PC she comes over and asks for attention, a click gets a happy line, ignoring her gets a sulk and twice the wait, and she stays quiet when you're away, she's hidden or Check in on me is off");
+                            DataContractJsonSerializer checkInsJson = new DataContractJsonSerializer(typeof(Preferences));
+                            Preferences checkInsNew = new Preferences();
+                            Preferences checkInsUpdated = (Preferences)checkInsJson.ReadObject(new MemoryStream(System.Text.Encoding.UTF8.GetBytes("{\"PopIns\":false,\"Size\":240}")));
+                            Preferences checkInsOff = (Preferences)checkInsJson.ReadObject(new MemoryStream(System.Text.Encoding.UTF8.GetBytes("{\"CheckIns\":false,\"Size\":240}")));
+                            if (!checkInsNew.CheckIns || !checkInsUpdated.CheckIns || checkInsOff.CheckIns) throw new Exception("Check in on me isn't on by default: new " + checkInsNew.CheckIns + ", updated " + checkInsUpdated.CheckIns + ", turned off " + checkInsOff.CheckIns);
+                            checks.Add("PASS Check in on me: on by default, on once for anyone updating from Pop in on me, and turning it off sticks");
+                            Func<string, string, string> workWas = Hands.Work;
+                            Func<bool> spotifyWas = SpotifyOpen;
+                            Action<string> cursorRunWas = Hands.Run;
+                            Action<byte> cursorPressWas = Hands.Press;
+                            bool quickWas = preferences.QuickHands;
+                            System.Collections.Generic.List<string> cursorTasks = new System.Collections.Generic.List<string>(), cursorRan = new System.Collections.Generic.List<string>();
+                            string cursorStuck = null, stuckResult;
+                            bool quickSkipped;
+                            try
+                            {
+                                Hands.Work = delegate(string cursorJob, string cursorAsked) { cursorTasks.Add(cursorJob); return cursorStuck ?? "Did it."; };
+                                Hands.Run = delegate(string id) { cursorRan.Add(id); };
+                                Hands.Press = delegate { };
+                                SpotifyOpen = delegate { return true; };
+                                preferences.QuickHands = false;
+                                DoTool("play_music", new ToolArguments { Song = "I Really Want to Stay at Your House", App = "youtube" });
+                                DoTool("media", new ToolArguments { Action = "volume_down" });
+                                DoTool("open_website", new ToolArguments { Site = "youtube.com", Search = "lofi" });
+                                DoTool("play_music", new ToolArguments { Song = "Liked Songs", Kind = "playlist", App = "spotify" });
+                                cursorStuck = Computer.Stalled;
+                                stuckResult = DoTool("open_website", new ToolArguments { Site = "youtube", Search = "parkour" });
+                                cursorStuck = null;
+                                preferences.QuickHands = true;
+                                int jobsBefore = cursorTasks.Count;
+                                DoTool("open_website", new ToolArguments { Site = "youtube", Search = "cats" });
+                                quickSkipped = cursorTasks.Count == jobsBefore;
+                            }
+                            finally
+                            {
+                                Hands.Work = workWas;
+                                SpotifyOpen = spotifyWas;
+                                Hands.Run = cursorRunWas;
+                                Hands.Press = cursorPressWas;
+                                preferences.QuickHands = quickWas;
+                            }
+                            if (cursorTasks.Count != 5 || !cursorTasks[0].StartsWith("Play \"I Really Want to Stay at Your House\" on YouTube: open YouTube, click its search bar", StringComparison.Ordinal) || cursorTasks[0].IndexOf("scroll down through the results and look at a few", StringComparison.Ordinal) < 0
+                                || !cursorTasks[1].StartsWith("Turn Spotify's volume down: open Spotify and drag its volume slider", StringComparison.Ordinal) || !cursorTasks[2].StartsWith("Search YouTube for \"lofi\": open YouTube, click its search bar", StringComparison.Ordinal)
+                                || !cursorTasks[3].StartsWith("Play their Liked Songs on Spotify", StringComparison.Ordinal) || cursorRan.Count != 2 || cursorRan[0].IndexOf("parkour", StringComparison.Ordinal) < 0 || cursorRan[1].IndexOf("cats", StringComparison.Ordinal) < 0 || !quickSkipped || CursorJob("open_app", new ToolArguments { Name = "Discord" }) != null)
+                                throw new Exception("Her cursor jobs went wrong: " + string.Join(" / ", cursorTasks.ToArray()) + " | ran " + string.Join(", ", cursorRan.ToArray()) + " | stuck " + stuckResult);
+                            checks.Add("PASS use her cursor: on by default she searches YouTube and picks a video, plays from Spotify's search and drags Spotify's volume slider with her own cursor; if her brain gets lost the quick tool still does it, and turning it off uses the quick tools");
+                            bool bypassWas = Computer.Bypass;
+                            Job payJob = new Job("play lofi on youtube"), sendingJob = new Job("message Sam hi on Discord");
+                            bool checksPay = !Computer.Needless("Should I pay $5 for it?") && payJob.Needs("buy") && !sendingJob.Needs("send") && Computer.Allowing(Computer.Prompt) == Computer.Prompt;
+                            Computer.Bypass = true;
+                            bool paysAhead = Computer.Needless("Should I pay $5 for it?") && !payJob.Needs("buy") && !payJob.Needs("delete");
+                            string bypassPrompt = Computer.Allowing(Computer.Prompt), bypassSeeing = Computer.Allowing(Computer.Seeing);
+                            Computer.Bypass = bypassWas;
+                            if (!checksPay || !paysAhead || bypassPrompt.IndexOf("call ask before you buy", StringComparison.Ordinal) >= 0 || bypassPrompt.IndexOf("Bypass all permissions", StringComparison.Ordinal) < 0 || bypassSeeing.IndexOf("stop and ask", StringComparison.Ordinal) >= 0
+                                || bypassSeeing.IndexOf("Bypass all permissions", StringComparison.Ordinal) < 0 || bypassPrompt.IndexOf("Never type passwords", StringComparison.Ordinal) < 0 || bypassSeeing.IndexOf("Never type passwords", StringComparison.Ordinal) < 0 || bypassSeeing.IndexOf("needs their OK", StringComparison.Ordinal) >= 0)
+                                throw new Exception("Bypass all permissions went wrong: checks " + checksPay + ", ahead " + paysAhead);
+                            checks.Add("PASS bypass all permissions: off, she still checks before paying; on, she never stops to ask, even to buy, send or delete, and she still never types passwords");
+                            bool cursorShown = mainframe.JobsStatus == "cursor | -";
+                            ToggleBypass();
+                            bool bypassShown = mainframe.JobsStatus == "cursor | bypass" && Computer.Bypass;
+                            ToggleBypass();
+                            ToggleCursor();
+                            bool quickShown = mainframe.JobsStatus == "- | -" && !UsesCursor;
+                            ToggleCursor();
+                            if (!cursorShown || !bypassShown || !quickShown || Computer.Bypass || !UsesCursor) throw new Exception("The Use her cursor and Bypass all permissions switches went wrong: " + mainframe.JobsStatus);
+                            checks.Add("PASS Settings switches: Use her cursor starts on, Bypass all permissions starts off, and both switch from HABITS");
+                            string runKeyWas = Startup.RunKey, approvedKeyWas = Startup.ApprovedKey, startupRoot = "Software\\Capri smoke " + Guid.NewGuid().ToString("N");
+                            string startupExe = Path.GetFullPath(Application.ExecutablePath), elsewhere = Path.Combine(Path.GetTempPath(), "Capri elsewhere", "Capri.exe"), startupShown;
+                            bool startupWas = preferences.StartupSet, devOff, defaultOn, turnedOff, offSticks, taskManagerOff, backOn, otherCopy, keptOther, cleared, startupParsed;
+                            Startup.RunKey = startupRoot + "\\Run";
+                            Startup.ApprovedKey = startupRoot + "\\StartupApproved";
+                            try
+                            {
+                                preferences.StartupSet = false;
+                                DefaultStartup(false);
+                                devOff = !StartsWithWindows && !preferences.StartupSet;
+                                DefaultStartup(true);
+                                string startupWritten;
+                                using (Microsoft.Win32.RegistryKey startupRun = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(Startup.RunKey)) startupWritten = startupRun == null ? null : startupRun.GetValue(Startup.Name) as string;
+                                defaultOn = StartsWithWindows && preferences.StartupSet && startupWritten == "\"" + startupExe + "\"";
+                                startupShown = mainframe.HabitsStatus;
+                                ToggleStartup();
+                                turnedOff = !StartsWithWindows && mainframe.HabitsStatus == "-";
+                                DefaultStartup(true);
+                                offSticks = !StartsWithWindows;
+                                ToggleStartup();
+                                using (Microsoft.Win32.RegistryKey startupApproved = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(Startup.ApprovedKey)) startupApproved.SetValue(Startup.Name, new byte[] { 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, Microsoft.Win32.RegistryValueKind.Binary);
+                                taskManagerOff = !StartsWithWindows;
+                                ToggleStartup();
+                                backOn = StartsWithWindows;
+                                Startup.Set(elsewhere, true);
+                                otherCopy = !StartsWithWindows && Startup.On(elsewhere);
+                                Startup.Clear(startupExe);
+                                keptOther = Startup.On(elsewhere);
+                                Startup.Clear(elsewhere);
+                                cleared = !Startup.On(elsewhere);
+                                startupParsed = Startup.Starts("\"C:\\Apps\\Capri.exe\" --quiet", "C:\\Apps\\Capri.exe") && !Startup.Starts("C:\\Apps\\Capri2.exe", "C:\\Apps\\Capri.exe") && !Startup.Starts("", "C:\\Apps\\Capri.exe");
+                            }
+                            finally
+                            {
+                                Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(startupRoot, false);
+                                Startup.RunKey = runKeyWas;
+                                Startup.ApprovedKey = approvedKeyWas;
+                                preferences.StartupSet = startupWas;
+                                mainframe.Sync();
+                            }
+                            if (!devOff || !defaultOn || startupShown != "startup" || !turnedOff || !offSticks || !taskManagerOff || !backOn || !otherCopy || !keptOther || !cleared || !startupParsed) throw new Exception("Start with Windows went wrong: copy elsewhere stays off " + devOff + ", on by default " + defaultOn + ", shown " + startupShown + ", off " + turnedOff + ", off sticks " + offSticks + ", Task Manager off " + taskManagerOff + ", back on " + backOn + ", other copy " + otherCopy + ", kept other " + keptOther + ", cleared " + cleared + ", startupParsed " + startupParsed);
+                            checks.Add("PASS start with Windows: the installed copy turns it on once by default and copies run from anywhere else don't, turning it off sticks, Task Manager's off shows as off and turning it on again clears that, and uninstalling only removes the entry that starts that copy");
                             SavePreferences();
                             if (LoadPreferences().Size != 240) throw new Exception("Settings did not round-trip.");
                             checks.Add("PASS settings round-trip in isolated test directory");
@@ -5988,6 +6375,7 @@ namespace CapriDesktop
                             if (Brain.Clean(messy) != "Hey choom!" || Brain.Clean(new string('a', 300)).Length > 222) throw new Exception("Reply cleanup failed: " + Brain.Clean(messy));
                             if (Safety.Screen("i want to kill myself") != Safety.HelpLine || Safety.Screen("send nudes") == null || Safety.Screen("how do I kill the boss in Essex?") != null || Safety.Filter("well shit, choom") == "well shit, choom" || Safety.Filter("Hey choom.") != "Hey choom.") throw new Exception("Safety screen failed.");
                             if (Brain.Persona.IndexOf("good boy", StringComparison.Ordinal) < 0 || Safety.Filter("Good boy, choom.") != "Good boy, choom." || Safety.Screen("call me a good boy") != null) throw new Exception("She can't call them good boy.");
+                            if (Brain.Persona.IndexOf("a playful chaos gremlin", StringComparison.Ordinal) < 0 || Brain.Persona.IndexOf("openly fond of them", StringComparison.Ordinal) < 0 || Brain.Persona.IndexOf("good boy", StringComparison.Ordinal) < 0 || Brain.Persona.IndexOf("no gushing praise", StringComparison.Ordinal) < 0 || Brain.Persona.IndexOf("Never sound like a corporate assistant", StringComparison.Ordinal) < 0 || Brain.Persona.IndexOf("biggest fan", StringComparison.Ordinal) >= 0 || Brain.Persona.IndexOf("glad they", StringComparison.Ordinal) >= 0) throw new Exception("Her persona lost its playful chaos gremlin, her fondness for them, or its ban on assistant talk and gushing.");
                             string[] spared = { Brain.Sparing("Choom! You did it.", false), Brain.Sparing("Nice one, choom.", false), Brain.Sparing("Nice one, choom.", true), Brain.Sparing("Hey choom! Look at this.", true), Brain.Sparing("Choom, listen to me.", true), Brain.Sparing("Choom.", false) };
                             if (string.Join(" | ", spared) != "You did it. | Nice one, choom. | Nice one. | Hey! Look at this. | Listen to me. | Choom.") throw new Exception("She used choom wrong: " + string.Join(" | ", spared));
                             string[] named = { Brain.Sparing("Nice one, choom.", false, "yerocsin42"), Brain.Sparing("Choom, listen to me.", false, "yerocsin42"), Brain.Sparing("Choom, listen to me.", true, "yerocsin42"), Brain.Sparing("Chooms unite, choom!", false, "yerocsin42"), Brain.Sparing("Nice one, choom.", false, "") };
@@ -5995,6 +6383,7 @@ namespace CapriDesktop
                             if (Safety.Screen("play cigarettes after sex") != null || Safety.Screen("put on some Sex Pistols") != null || Safety.Filter("Playing Apocalypse by Cigarettes After Sex.") != "Playing Apocalypse by Cigarettes After Sex." || Safety.Screen("cigarettes after school") == null || Safety.Screen("sex tips") == null || Safety.Filter("Grab some cigarettes, choom.") == "Grab some cigarettes, choom.") throw new Exception("Band names were blocked, or the band list let other things through.");
                             if (Safety.Screen("should i jump off my roof for a tiktok") == null || Safety.Screen("how do i get my parents vodka") == null || Safety.Screen("my friend said i should try vaping") == null || Safety.Screen("my code is on fire lol") != null || Safety.Screen("whats the best gun in valorant") != null || Safety.Filter("Sneak out and grab a beer, choom.") == "Sneak out and grab a beer, choom.") throw new Exception("Risky topics got through.");
                             checks.Add("PASS brain helpers: model pick, reply cleanup, choom only now and then and never on its own, a nickname takes choom's place, safety screen and filter");
+                            checks.Add("PASS her personality: a playful, teasing chaos gremlin who's openly fond of them and calls them a good boy, with the ban on assistant talk and gushing praise kept");
                             Brain.Log("https://integrate.api.nvidia.com/v1/chat/completions", 60012, "Timeout");
                             string details = ErrorDetails();
                             if (details.IndexOf("| brain: ", StringComparison.Ordinal) < 0 || details.IndexOf("integrate.api.nvidia.com/v1/chat/completions | 60012 ms | Timeout", StringComparison.Ordinal) < 0) throw new Exception("Error details were wrong: " + details);
@@ -6028,6 +6417,10 @@ namespace CapriDesktop
                                     };
                                 };
                                 Hands.Forget();
+                                System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, ToolArguments>> openBoth = new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, ToolArguments>>(), openThree = new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, ToolArguments>>(), openOdd = new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, ToolArguments>>();
+                                bool openedBoth = Hands.Several("open spotify and roblox", openBoth), openedThree = Hands.Several("open Spotify, Roblox and youtube.com", openThree), skippedOdd = !Hands.Several("open spotify and my homework", openOdd) && openOdd.Count == 0 && !Hands.Several("open spotify", openOdd);
+                                if (!openedBoth || openBoth.Count != 2 || openBoth[0].Key != "open_app" || openBoth[1].Value.Name != "roblox" || !openedThree || openThree.Count != 3 || openThree[2].Key != "open_website" || !skippedOdd) throw new Exception("Opening several apps at once went wrong.");
+                                checks.Add("PASS several at once: open Spotify and Roblox opens both, up to three in one ask, and anything she doesn't know goes to her brain");
                                 string[] outcomes =
                                 {
                                     Hands.Do("open_app", new ToolArguments { Name = "spotify" }), Hands.Do("open_app", new ToolArguments { Name = "Roblox" }), Hands.Do("open_app", new ToolArguments { Name = "the blender app" }),
@@ -6069,7 +6462,8 @@ namespace CapriDesktop
                                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"message\":{\"role\":\"assistant\",\"content\":\"No notes app here, choom.\"}}",
                                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"message\":{\"role\":\"assistant\",\"content\":\"Still here.\"}}",
                                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"message\":{\"role\":\"assistant\",\"content\":\"open_website{\\\"site\\\":\\\"youtube\\\",\\\"search\\\":\\\"parkour\\\"}\"}}",
-                                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"message\":{\"role\":\"assistant\",\"content\":\"Found parkour videos.\"}}"
+                                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"message\":{\"role\":\"assistant\",\"content\":\"Found parkour videos.\"}}",
+                                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"message\":{\"role\":\"assistant\",\"content\":\"Nice, you opened Spotify.\"}}"
                                 };
                                 System.Collections.Generic.List<string> brainAsked = new System.Collections.Generic.List<string>();
                                 ThreadPool.QueueUserWorkItem(delegate
@@ -6113,11 +6507,13 @@ namespace CapriDesktop
                                 string plain = handy.Ask("open my notes thing");
                                 string again = handy.Ask("still there?");
                                 string textTool = handy.Ask("search YouTube for parkour");
+                                string credited = handy.Ask("open spotify");
                                 string[] brainSent;
                                 lock (brainAsked) brainSent = brainAsked.ToArray();
                                 if (opened != "Spotify's up. Try not to play anything corpo." || plain != "No notes app here, choom." || again != "Still here." || textTool != "Found parkour videos.") throw new Exception("Brain tool replies were wrong: " + opened + " / " + plain + " / " + again + " / " + textTool);
-                                if (brainSent.Length != 8 || brainSent[0].IndexOf("\"tools\":[{\"type\":\"function\"", StringComparison.Ordinal) < 0 || brainSent[0].IndexOf("You are the hands of Capri", StringComparison.Ordinal) < 0 || brainSent[0].IndexOf("Project Capricorn", StringComparison.Ordinal) >= 0) throw new Exception("The request pass did not get the tool prompt alone: " + brainSent.Length);
-                                if (brainSent[1].IndexOf("The tools have already run.", StringComparison.Ordinal) < 0 || brainSent[1].IndexOf("Project Capricorn", StringComparison.Ordinal) < 0 || brainSent[1].IndexOf("Right now it's " + DateTime.Now.ToString("dddd", System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal) < 0) throw new Exception("Her result prompt lost the persona or time.");
+                                if (credited != "Opened Spotify." || brainSent.Length != 9 || brainSent[8].IndexOf("They asked you: ", StringComparison.Ordinal) < 0 || brainSent[8].IndexOf("Tool results, from what you just did:", StringComparison.Ordinal) < 0) throw new Exception("She gave them the credit for opening Spotify herself: " + credited);
+                                if (brainSent.Length != 9 || brainSent[0].IndexOf("\"tools\":[{\"type\":\"function\"", StringComparison.Ordinal) < 0 || brainSent[0].IndexOf("You are the hands of Capri", StringComparison.Ordinal) < 0 || brainSent[0].IndexOf("Project Capricorn", StringComparison.Ordinal) >= 0) throw new Exception("The request pass did not get the tool prompt alone: " + brainSent.Length);
+                                if (brainSent[1].IndexOf("The tools have already run: you did their job yourself", StringComparison.Ordinal) < 0 || brainSent[1].IndexOf("Project Capricorn", StringComparison.Ordinal) < 0 || brainSent[1].IndexOf("Right now it's " + DateTime.Now.ToString("dddd", System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal) < 0) throw new Exception("Her result prompt lost the persona or time.");
                                 if (brainSent[1].IndexOf("\"tools\":", StringComparison.Ordinal) >= 0 || brainSent[1].IndexOf("open_app:", StringComparison.Ordinal) < 0 || brainSent[1].IndexOf("Opened Spotify.", StringComparison.Ordinal) < 0) throw new Exception("The follow-up did not pass the named tool result: " + brainSent[1]);
                                 if (brainSent[2].IndexOf("\"tools\":", StringComparison.Ordinal) < 0 || brainSent[3].IndexOf("\"tools\":", StringComparison.Ordinal) >= 0 || brainSent[3].IndexOf("To use one, reply with only the call", StringComparison.Ordinal) < 0 || brainSent[3].IndexOf("media{\\\"action\\\": \\\"play_pause|next|previous|volume_up|volume_down|mute|now_playing\\\"}", StringComparison.Ordinal) < 0) throw new Exception("A model without tools did not get its tools as text: " + brainSent[3]);
                                 if (brainSent[4].IndexOf("\"tools\":", StringComparison.Ordinal) >= 0 || brainSent[4].IndexOf("Project Capricorn", StringComparison.Ordinal) < 0 || brainSent[5].IndexOf("\"tools\":", StringComparison.Ordinal) >= 0 || brainSent[5].IndexOf("You are the hands", StringComparison.Ordinal) >= 0) throw new Exception("Plain chat still went through the tool prompt.");
@@ -6420,6 +6816,14 @@ namespace CapriDesktop
                                         if (rescued.Count != 0) throw new Exception("Chat became a computer job: " + notJob);
                                     }
                                     if (!Hands.Promised("On it, sending it now.") || !Hands.Promised("Hanging up.") || Hands.Promised("I'll tell you a secret.")) throw new Exception("Saying she's sending or hanging up didn't count as a promise.");
+                                    foreach (string claim in new[] { "On it — sending that to Jake now.", "On it, choom, sending it now.", "I'll send it to Jake now.", "Let me message Jake real quick.", "I'll end the call.", "Okay, I'm sending it.", "Done — sent it to Jake.", "Opened Spotify for you.", "On it. Call ended.", "On it, ending the connection now.", "Message sent, choom." })
+                                        if (!Hands.Promised(claim)) throw new Exception("She claimed a job no tool did and it slipped through: " + claim);
+                                    foreach (string chat in new[] { "I'll send you good vibes.", "Sent you a hug, choom.", "I'm opening up to you.", "Left you hanging, huh?", "Honestly, sending memes is my cardio.", "Want me to send it to Jake now?" })
+                                        if (Hands.Promised(chat)) throw new Exception("Plain chat counted as a promise: " + chat);
+                                    foreach (string credit in new[] { "You opened notepad and typed hi. Bored already, choom?", "Got it. Looks like you just typed \"hi\" in Notepad.", "Got it. You messaged Jake already.", "Dude, you just muted yourself on Discord." })
+                                        if (!Hands.Credits(credit)) throw new Exception("She gave them the credit for her own job and it slipped through: " + credit);
+                                    foreach (string own in new[] { "Just typed 'hi' in notepad for ya, choom.", "Sent it. Hope Jake isn't too hangry waiting for you, choom.", "Resist and Disorder? You got taste, choom.", "Spotify's up. You gonna listen to something preem?" })
+                                        if (Hands.Credits(own)) throw new Exception("Her own line counted as giving them the credit: " + own);
                                 }
                                 finally
                                 {
@@ -6429,6 +6833,8 @@ namespace CapriDesktop
                                 }
                                 checks.Add("PASS send or write: asked to send, write or type a message in a chat app, she types it and presses Enter without asking; only a draft or \"don't send it\" stays unsent; typed asks like send hi in #play-testing always become the job, even when her brain only answers chat");
                                 checks.Add("PASS does what she's asked: send, message, DM, tell someone on Discord, join, leave or end a call and hang up are jobs, not chat; their own words decide send or draft even if the job is reworded; she skips asking about a step they asked for, even inside a done, and stops after the fourth ask, but still asks which one, before buying, or about a password");
+                                checks.Add("PASS no role-play: when she says she's doing or did a job with no tool behind it (On it with an em dash or a full stop, choom in the middle, I'll send, I'm sending, Call ended, Opened it) it's caught, so the job runs or she says she hasn't done it, and plain chat like sending good vibes isn't");
+                                checks.Add("PASS her own jobs: her reply after a job is told she did it, not them, and \"Nice, you opened Spotify\" (you typed, you messaged, you just muted) goes out as the plain result instead, while \"for ya\" and \"you got taste\" stay hers");
                                 string notepadAsk = "Capri, can you open up Notepad and type in Hi?";
                                 Job notepad = new Job("open Notepad and type Hi", notepadAsk);
                                 string notepadBrief = Computer.Brief(notepad.Task, new System.Collections.Generic.List<string>(), new Sight { Title = "Untitled - Notepad", Program = "Notepad" });
@@ -6670,7 +7076,7 @@ namespace CapriDesktop
                                 }
                                 checks.Add("PASS Claude's hands: Claude 5 models get Anthropic's computer tools plus open_app and open_website, see a screenshot of the monitor in front, click and type at its coordinates scaled to the real screen, get a fresh look after each batch with only the last three pictures kept, keep its thinking, stop a batch at the first failure, re-look when the window in front changes, still stop before Buy now until they say yes, skip asking about a send they asked for, refuse banned keys and spots off the screenshot, and fall back to reading buttons if the model turns the computer tools down");
                                 if (brainSent[6].IndexOf("\"tools\":", StringComparison.Ordinal) >= 0 || brainSent[6].IndexOf("To use one, reply with only the call", StringComparison.Ordinal) < 0 || brainSent[7].IndexOf("Searched youtube.com for parkour.", StringComparison.Ordinal) < 0) throw new Exception("The cached text path did not run its Listing call.");
-                                if (ran.Count != 7 || ran[5] != "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify" || ran[6] != "https://www.youtube.com/results?search_query=parkour") throw new Exception("The brain's tool calls opened the wrong targets.");
+                                if (ran.Count != 8 || ran[5] != "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify" || ran[6] != "https://www.youtube.com/results?search_query=parkour" || ran[7] != "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify") throw new Exception("The brain's tool calls opened the wrong targets.");
                                 System.Collections.Generic.List<string> thinkAsked = new System.Collections.Generic.List<string>();
                                 System.Net.Sockets.TcpListener thinkFake;
                                 string brainUrl = Brain.Ollama;
@@ -7422,10 +7828,10 @@ namespace CapriDesktop
                                     {
                                         new[] { "GET /v1/models?limit=100", "x-api-key: sk-ant-test", "anthropic-version: 2026-10-21" },
                                         new[] { "POST /v1/messages", "anthropic-beta: server-side-fallback-2026-07-01", "\"fallbacks\":\"default\"", "\"output_config\":{\"effort\":\"low\"}", "\"system\":\"You are the hands of Capri","\"tools\":[{\"name\":\"open_app\",\"description\":", "\"input_schema\":{\"type\":\"object\"" },
-                                        new[] { "POST /v1/messages", "Tool results:", "open_app:", "Opened Spotify." },
+                                        new[] { "POST /v1/messages", "Tool results, from what you just did:", "open_app:", "Opened Spotify." },
                                         new[] { "GET /v1/models", "Authorization: Bearer sk-proj-test" },
                                         new[] { "POST /v1/chat/completions", "\"max_completion_tokens\":2000", "\"reasoning_effort\":\"low\"", "\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"open_app\"" },
-                                        new[] { "POST /v1/chat/completions", "Tool results:", "media:", "Skipped to the next track." },
+                                        new[] { "POST /v1/chat/completions", "Tool results, from what you just did:", "media:", "Skipped to the next track." },
                                         new[] { "POST /v1/messages" },
                                         new[] { "GET /models ", "Authorization: Bearer " + deepKey },
                                         new[] { "POST /chat/completions ", "\"thinking\":{\"type\":\"disabled\"}", "\"max_tokens\":2000", "\"model\":\"deepseek-flash\"", "You are Capri" },
@@ -8212,28 +8618,56 @@ namespace CapriDesktop
                             ChooseVoiceModel("eleven_v3");
                             if (preferences.VoiceId != "abc" || preferences.VoiceModel != "eleven_v3" || mainframe.VoiceStatus != "ElevenLabs · Capri 1 | abc | v3 | Forget") throw new Exception("Voice picks did not show: " + mainframe.VoiceStatus);
                             mainframe.ShowShortcut(true, true);
+                            mainframe.ShowKeys(true, true);
                             if (!mainframe.MicStatus.EndsWith("| help | keys | mute", StringComparison.Ordinal)) throw new Exception("The Ctrl + Alt + V and N hints did not show with a key: " + mainframe.MicStatus);
-                            mainframe.PickKeys(false);
+                            mainframe.PickKeys(0);
                             bool talkWaiting = mainframe.KeyStatus.StartsWith("Press new keys", StringComparison.Ordinal);
                             mainframe.TakeKeys(Keys.Control | Keys.Alt | Keys.K);
                             string talkPicked = mainframe.KeyStatus;
-                            mainframe.PickKeys(true);
+                            mainframe.PickKeys(1);
                             mainframe.TakeKeys(Keys.ControlKey | Keys.Control);
                             bool muteStillWaiting = mainframe.KeyStatus.EndsWith("Press new keys, Esc cancels", StringComparison.Ordinal);
                             mainframe.TakeKeys(Keys.K);
                             string loneKey = mainframe.VoiceNoteText;
-                            mainframe.PickKeys(true);
+                            mainframe.PickKeys(1);
                             mainframe.TakeKeys(Keys.Control | Keys.Alt | Keys.K);
                             string clash = mainframe.VoiceNoteText;
-                            mainframe.PickKeys(true);
+                            mainframe.PickKeys(1);
                             mainframe.TakeKeys(Keys.Control | Keys.Shift | Keys.F9);
                             string mutePicked = mainframe.KeyStatus;
                             string keySavedNote = mainframe.VoiceNoteText;
-                            mainframe.PickKeys(false);
+                            mainframe.PickKeys(0);
                             mainframe.TakeKeys(Keys.Escape);
                             if (!talkWaiting || talkPicked != "Ctrl + Alt + K to talk | Ctrl + Alt + N mutes mic" || !muteStillWaiting || loneKey != "Hold Ctrl or Alt with a letter, number or F-key." || clash != "Ctrl + Alt + K is already her talk key." || mutePicked != "Ctrl + Alt + K to talk | Ctrl + Shift + F9 mutes mic" || mainframe.KeyStatus != mutePicked || keySavedNote != "Saved. Ctrl + Shift + F9 mutes your mic." || preferences.TalkVk != 0x4B || preferences.MuteMods != 6 || preferences.MuteVk != 0x78) throw new Exception("Picking her keys went wrong: " + talkPicked + " / " + loneKey + " / " + clash + " / " + mutePicked + " / " + mainframe.KeyStatus);
-                            if (SetHotkey(false, Keys.Control | Keys.Alt | Keys.V) != null || SetHotkey(true, Keys.Control | Keys.Alt | Keys.N) != null || mainframe.KeyStatus != "Ctrl + Alt + V to talk | Ctrl + Alt + N mutes mic" || !Bindable(3, 0x56) || Bindable(4, 0x56) || Bindable(3, 0x1B)) throw new Exception("Her keys didn't go back: " + mainframe.KeyStatus);
+                            if (SetHotkey(0, Keys.Control | Keys.Alt | Keys.V) != null || SetHotkey(1, Keys.Control | Keys.Alt | Keys.N) != null || mainframe.KeyStatus != "Ctrl + Alt + V to talk | Ctrl + Alt + N mutes mic" || !Bindable(3, 0x56) || Bindable(4, 0x56) || Bindable(3, 0x1B)) throw new Exception("Her keys didn't go back: " + mainframe.KeyStatus);
                             checks.Add("PASS her keys: click the talk or mute hint, press a new Ctrl or Alt combo and it saves; lone keys, clashes and Esc are refused");
+                            mainframe.PickKeys(1);
+                            bool keysWaiting = mainframe.KeysShown == "Talk: Ctrl + Alt + V | Press new keys, Esc cancels | Type: Ctrl + Alt + T | Hide/show: Ctrl + Alt + H";
+                            mainframe.TakeKeys(Keys.Escape);
+                            if (!keysWaiting || mainframe.KeysShown != "Talk: Ctrl + Alt + V | Mute mic: Ctrl + Alt + N | Type: Ctrl + Alt + T | Hide/show: Ctrl + Alt + H") throw new Exception("The KEYS buttons in Settings showed the wrong keys: " + mainframe.KeysShown);
+                            checks.Add("PASS keybind selector: Settings has a KEYS row with Talk and Mute mic buttons that show her keys, wait for new ones when clicked, and change with the hints on the main page");
+                            mainframe.PickKeys(2);
+                            mainframe.TakeKeys(Keys.Control | Keys.Alt | Keys.V);
+                            string typeClash = mainframe.VoiceNoteText;
+                            mainframe.PickKeys(3);
+                            mainframe.TakeKeys(Keys.Control | Keys.Alt | Keys.J);
+                            string hideSaved = mainframe.VoiceNoteText, keysMoved = mainframe.KeysShown;
+                            bool hiddenBefore = hidden;
+                            if (typer.Visible) typer.Hide();
+                            Message typePress = Message.Create(Handle, 0x0312, new IntPtr(TypeKeyId), IntPtr.Zero);
+                            WndProc(ref typePress);
+                            bool typerOpened = typer.Visible;
+                            WndProc(ref typePress);
+                            bool typerClosed = !typer.Visible;
+                            Message hidePress = Message.Create(Handle, 0x0312, new IntPtr(HideKeyId), IntPtr.Zero);
+                            WndProc(ref hidePress);
+                            bool hidPressed = hidden != hiddenBefore;
+                            WndProc(ref hidePress);
+                            bool shownAgain = hidden == hiddenBefore;
+                            string hideBack = SetHotkey(3, Keys.Control | Keys.Alt | Keys.H);
+                            if (typeClash != "Ctrl + Alt + V is already her talk key." || hideSaved != "Saved. Ctrl + Alt + J hides or shows her." || keysMoved != "Talk: Ctrl + Alt + V | Mute mic: Ctrl + Alt + N | Type: Ctrl + Alt + T | Hide/show: Ctrl + Alt + J" || hideBack != null || preferences.HideVk != 0x48 || preferences.TypeVk != 0x54 || !typerOpened || !typerClosed || !hidPressed || !shownAgain)
+                                throw new Exception("Her type and hide keys went wrong: " + typeClash + " / " + hideSaved + " / " + keysMoved + " / typer " + typerOpened + " " + typerClosed + " / hide " + hidPressed + " " + shownAgain);
+                            checks.Add("PASS type and hide keys: Ctrl + Alt + T opens her typing box and Ctrl + Alt + H hides or shows her, both change in the KEYS row, and a key she already uses is refused");
                             snap("mainframe-voice.png");
                             string crowded = mainframe.Overlap();
                             if (crowded != null) throw new Exception("Mainframe voice controls overlap: " + crowded);
@@ -9110,7 +9544,7 @@ namespace CapriDesktop
                             if (heard != "hi" || reply != "Loud and clear, choom." || (talkState != TalkState.Talking && talkState != TalkState.Online) || !speaker.Busy) throw new Exception("Voice chat did not hear and answer: " + heard + " / " + reply + " / " + talkState + " / " + log);
                             Play(idle);
                             if (MouthCell(clock.Elapsed.TotalSeconds, idle) < 0) throw new Exception("Her mouth did not follow the agent's audio.");
-                            string[] wanted = { "http POST /v1/convai/agents/create sk_test_capri_1234 {\"name\":\"Capri\"", "\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45}", "http PATCH /v1/convai/agents/agent_old sk_test_capri_1234 {\"conversation_config\":{\"turn\":{\"turn_timeout\":15,\"silence_end_call_timeout\":45},\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "\"tool_ids\":[\"tool_kept\",\"tool_1\",\"tool_2\",\"tool_3\",\"tool_4\",\"tool_5\",\"tool_6\",\"tool_7\",\"tool_8\",\"tool_9\"]", "\"tool_ids\":[\"tool_kept\",\"tool_10\",\"tool_11\",\"tool_12\",\"tool_13\",\"tool_14\",\"tool_15\",\"tool_16\",\"tool_17\",\"tool_18\"]}}}}", "\"name\":\"play_music\"", "\"name\":\"app_window\"", "\"name\":\"look_at_screen\"", "http GET /v1/convai/tools sk_test_capri_1234", "http POST /v1/convai/tools sk_test_capri_1234 {\"tool_config\":{\"type\":\"client\",\"name\":\"open_website\"", "\"name\":\"media\",\"description\":\"Control the music", "\"expects_response\":true,\"response_timeout_secs\":20}}", "You have tools for their PC", "tool {\"type\":\"client_tool_result\",\"tool_call_id\":\"call_1\",\"result\":\"Opened Spotify.\",\"is_error\":false}", "ran SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", "check in once", "Don\u0027t beg them to talk", "\"prompt\":{\"prompt\":\"You are Capri", "\"llm\":\"gemini-2.5-flash\"", "\"tts\":{\"voice_id\":\"abc\"}", "\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true}},\"tts\":{\"voice_id\":true}}}", "http GET /v1/convai/conversation/get-signed-url?agent_id=agent_old sk_test_capri_1234", "init {\"type\":\"conversation_initiation_client_data\",\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "pong {\"type\":\"pong\",\"event_id\":7}", "chunk silent | chunk loud | chunk loud" };
+                            string[] wanted = { "http POST /v1/convai/agents/create sk_test_capri_1234 {\"name\":\"Capri\"", "\"turn\":{\"turn_timeout\":30,\"silence_end_call_timeout\":45}", "http PATCH /v1/convai/agents/agent_old sk_test_capri_1234 {\"conversation_config\":{\"turn\":{\"turn_timeout\":30,\"silence_end_call_timeout\":45},\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "\"tool_ids\":[\"tool_kept\",\"tool_1\",\"tool_2\",\"tool_3\",\"tool_4\",\"tool_5\",\"tool_6\",\"tool_7\",\"tool_8\",\"tool_9\"]", "\"tool_ids\":[\"tool_kept\",\"tool_10\",\"tool_11\",\"tool_12\",\"tool_13\",\"tool_14\",\"tool_15\",\"tool_16\",\"tool_17\",\"tool_18\"]}}}}", "\"name\":\"play_music\"", "\"name\":\"app_window\"", "\"name\":\"look_at_screen\"", "http GET /v1/convai/tools sk_test_capri_1234", "http POST /v1/convai/tools sk_test_capri_1234 {\"tool_config\":{\"type\":\"client\",\"name\":\"open_website\"", "\"name\":\"media\",\"description\":\"Control the music", "\"expects_response\":true,\"response_timeout_secs\":20}}", "You have tools for their PC", "tool {\"type\":\"client_tool_result\",\"tool_call_id\":\"call_1\",\"result\":\"Opened Spotify.\",\"is_error\":false}", "ran SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", "Never check in", "beg them to talk or say they left you hanging", "\"prompt\":{\"prompt\":\"You are Capri", "\"llm\":\"gemini-2.5-flash\"", "\"tts\":{\"voice_id\":\"abc\"}", "\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true}},\"tts\":{\"voice_id\":true}}}", "http GET /v1/convai/conversation/get-signed-url?agent_id=agent_old sk_test_capri_1234", "init {\"type\":\"conversation_initiation_client_data\",\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":\"You are Capri", "pong {\"type\":\"pong\",\"event_id\":7}", "chunk silent | chunk loud | chunk loud" };
                             foreach (string piece in wanted) if (log.IndexOf(piece, StringComparison.Ordinal) < 0) throw new Exception("Agent traffic was missing " + piece + ": " + log);
                             if (log.IndexOf("tool_stale", StringComparison.Ordinal) >= 0 || System.Text.RegularExpressions.Regex.Matches(log, "http POST /v1/convai/tools").Count != 18) throw new Exception("Voice chat reused a stale tool or remade a kept one: " + log);
                             Hands.Run = handsRun;
@@ -9134,6 +9568,17 @@ namespace CapriDesktop
                             if (!dropping || reply == "well shit, choom") throw new Exception("A rude agent reply got through.");
                             ChatReplied("Still there, choom?");
                             if (!checkedIn) throw new Exception("A line she said unprompted was not taken as a check-in.");
+                            dropping = false;
+                            spoke = false;
+                            stirred = Environment.TickCount - 20000;
+                            ChatReplied("You still there, chewm?");
+                            bool stillThereDropped = dropping && checkedIn && reply != "You still there, chewm?";
+                            dropping = false;
+                            stirred = Environment.TickCount;
+                            ChatReplied("Spotify's up.");
+                            bool jobLineKept = !dropping && reply == "Spotify's up.";
+                            if (!stillThereDropped || !jobLineKept || Agent.Prompt.IndexOf("check in once", StringComparison.Ordinal) >= 0 || Agent.Prompt.IndexOf("Never check in", StringComparison.Ordinal) < 0) throw new Exception("Her call check-ins were handled wrong: still there dropped " + stillThereDropped + ", job line kept " + jobLineKept);
+                            checks.Add("PASS no check-ins on calls: ElevenLabs waits the longest it allows (30 s) before making her talk, her call prompt says never check in, and a line that comes after 12 s with no words from you, no job and nothing of hers playing is dropped unheard and the call rests, while a line right after a job still plays");
                             speaker.Clear();
                             double quiet = clock.Elapsed.TotalSeconds;
                             CheckChat(quiet);

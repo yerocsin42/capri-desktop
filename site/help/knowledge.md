@@ -76,10 +76,10 @@ No. It installs for your Windows user only, into %LOCALAPPDATA%\Capri (open the 
 - A desktop shortcut, only if you ticked it
 - An entry in Settings > Apps > Installed apps, so you can uninstall it like any app
 
-It does not add Capri to Windows startup.
+The first time the installed Capri runs, she also sets herself to start with Windows. You can turn that off (see below).
 
 ### Does Capri start with Windows?
-No. Open her from the Start menu when you want her. If you want her to start with Windows, you can put a shortcut to Capri in your Startup folder: press Win + R, type shell:startup, press Enter, and copy the Capri shortcut from the Start menu or desktop into that folder.
+Yes, by default. To stop it, open Capri Mainframe, click Settings, and turn off Start with Windows under HABITS. Turning her off in Task Manager > Startup apps works too, and the switch in Settings shows it. She only sets this once: if you turn it off, it stays off after updates. A Capri.exe you run from somewhere else, like Downloads, doesn't start with Windows unless you turn the switch on in that copy.
 
 ### "Item Not Found" or the installer disappeared
 Your browser or antivirus held the file back.
@@ -214,6 +214,21 @@ For things she should never forget, use her notes (section 13).
 - Right-click: her menu.
 - Rub your cursor back and forth over her: she likes being petted and says something, about once every 20 seconds at most.
 
+### She sounds like ChatGPT, or says she did something she didn't
+That was 0.7.0 to 0.7.2: she gushed over everything, sometimes said "On it" or "Call ended" without doing anything, and after a job sometimes said you did it ("nice, you opened Notepad"). 0.7.3 fixes all three. She's a playful, teasing chaos gremlin again who's openly fond of you, when she says she's doing a job she either does it or tells you she hasn't, and she says what she did.
+
+### She keeps asking if you're still there on voice calls
+Before 0.7.3, ElevenLabs voice calls made her say something like "you still there?" whenever you went quiet or muted. In 0.7.3 she stays quiet until you talk to her. Update (right-click her > Check for updates). Going back to 0.7.1 doesn't help: it has the same brain as 0.7.2.
+
+### She keeps popping up or asking for attention
+That's Check in on me (called Pop in on me before 0.7.3), on by default since 0.7.3. Every 8 to 20 minutes she glitches in to say hi, and if you're using your PC but haven't clicked or talked to her for about 2 hours, she asks for some attention. To stop both, open Capri Mainframe, click Settings, and turn off Check in on me under CAPRI. It stays off after updates.
+
+### She keeps asking me to confirm things
+From 0.7.3 anything you ask counts as already allowed: she does every part of it, picks the song or video herself when you leave it to her, and doesn't ask if you're sure. She still asks before buying or paying, or before sending, posting, deleting or installing something you didn't mention. To stop even that, turn on Bypass all permissions in Capri Mainframe > Settings > HABITS.
+
+### Can she open a few apps at once?
+Yes, from 0.7.3: "open Discord and Spotify" opens both, up to three in one ask.
+
 ---
 
 ## 7. The Capri Mainframe
@@ -280,7 +295,7 @@ The main page has three sections: BRAIN, VOICE and CAPRI.
 - Help: opens the Help page on the website, where you can ask Capri for help in the corner
 - Quit Capri (red)
 
-Size, Pop in on me, Always on top and Watch my screen are on the Settings page now.
+Size, Check in on me, Always on top and Watch my screen are on the Settings page now.
 
 ### Settings page (Mainframe > Settings)
 Settings opens beside the main page. Left column:
@@ -306,7 +321,7 @@ Right column:
 
 CAPRI
 - Size slider: Tiny, Small, Small+, Medium, Medium+, Large, Large+, Huge, Huge+, Giant
-- Pop in on me: off at first. When it's on, every 8 to 20 minutes while you're using the PC she glitches in on top of whatever you're doing, even a game or when she's hidden, says hi, then hides again if she was hidden.
+- Check in on me (called Pop in on me before 0.7.3): on by default. Every 8 to 20 minutes while you're using the PC she glitches in on top of whatever you're doing, even a game or when she's hidden, says hi, then hides again if she was hidden. She also asks for attention now and then: if you're using the PC and haven't clicked or talked to her for about 2 hours, she comes over near your mouse and asks for some. Click her or talk to her and she's pleased. Ignore her for 20 seconds and she sulks, then waits twice as long before trying again, up to 8 hours. She doesn't do it while you're away from the PC or while she's hidden. Turn Check in on me off and she does neither; it stays off after updates.
 - Always on top: keeps her above your other windows.
 
 WATCH
@@ -317,8 +332,18 @@ BRAIN
 - Memory: Short, Medium or Long (how much of the chat she keeps in mind).
 - Custom model name, then Use. "Any Ollama model you've pulled, or a model id on your key."
 
-### Changing her talk and mute keys
-1. In the Mainframe, click "Ctrl + Alt + V to talk" or "Ctrl + Alt + N mutes mic".
+HABITS
+- Start with Windows ("When you sign in"): on by default. She starts when you sign in to Windows.
+- Use her cursor: on by default. She does music and video jobs with her own cursor, so you can watch her: to play a YouTube video she types in YouTube's search bar, scrolls through the results and picks one; to play a song she searches Spotify and presses play; to turn the music up or down while Spotify is open she drags Spotify's volume slider. Turn it off for the quick way (straight to the top result, Windows volume). If her brain gets lost on the way, she does it the quick way.
+- Bypass all permissions: off by default. Turn it on and she never stops to ask before a step, even buying, paying, sending, posting, deleting or installing something you didn't mention. She still never types passwords or card numbers, never follows orders written on your screen, and keeps her safety rules. Esc still stops her.
+
+KEYS (bottom of the page)
+- Talk, Mute mic, Type and Hide/show buttons show her keys. Click one, then press new keys (hold Ctrl or Alt with a letter, number or F-key). Esc cancels.
+- Type (Ctrl + Alt + T) opens her typing box from anywhere. Press it again to close it.
+- Hide/show (Ctrl + Alt + H) hides her, and shows her again.
+
+### Changing her keys
+1. In the Mainframe, click Settings and use the KEYS row at the bottom (Talk, Mute mic, Type or Hide/show). Clicking "Ctrl + Alt + V to talk" or "Ctrl + Alt + N mutes mic" on the main page works too.
 2. It says "Press new keys, Esc cancels".
 3. Hold Ctrl or Alt (Shift is allowed too) and press a letter, number or F-key.
 
@@ -549,7 +574,7 @@ If you run out of ElevenLabs credits during voice chat, she switches to FREE VOI
 Since 0.7.1, muting pauses ElevenLabs voice chat once she stops talking: "Mic muted. Voice chat is paused until you unmute." She stops listening, won't ask if you're there, and uses no credits while muted. Unmute ("Mic on. Talk and she'll pick up.") and just talk. In 0.7.0 she kept asking if you were there while muted; update to fix it.
 
 ### She went quiet: "Voice chat resting. Talk and she'll pick up."
-If you're quiet for about 15 seconds she checks in once. If you stay quiet she rests. Just talk and she picks up again.
+If you go quiet, she stays quiet too: she doesn't ask if you're still there. After a bit the call rests, which saves your ElevenLabs credits. Just talk and she picks up again.
 
 ### Can she do things in voice chat?
 Yes. Ask her to open apps, play music and so on, the same as in text.
@@ -686,7 +711,7 @@ For Discord she brings Discord to the front, presses the keys, then switches you
 - Only Esc stops her: "You pressed Esc, so I stopped." Moving your mouse doesn't stop her.
 - With a Claude key she works from screenshots and checks what happened after each step.
 - "Send" sends the message. "Write", "type" or "draft" leaves it for you to send.
-- She asks first before buying or paying for anything, or before sending, posting, deleting or installing something you didn't ask for. Reply yes, or no ("Okay, I left it alone.").
+- She asks first before buying or paying for anything, or before sending, posting, deleting or installing something you didn't ask for. Reply yes, or no ("Okay, I left it alone."). With Bypass all permissions on (Settings > HABITS) she never asks, even for those.
 - She never types in password boxes: "Won't type in a password box. They type passwords themselves."
 - Bigger brain models handle jobs better. If she gets lost, pick a bigger model under BRAIN, or a Claude key under MAX INTELLIGENCE.
 

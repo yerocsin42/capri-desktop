@@ -61,7 +61,7 @@ Windows or your antivirus may warn you because it's a new app. All the code is h
 
 ## Mac and Linux (early preview)
 
-She sits on your windows and chats. Voice, the Mainframe and doing things for you are Windows-only for now.
+She sits on your windows and chats, talks with an ElevenLabs key, opens apps and controls your music. The Mainframe, voice chat and jobs with her own cursor are Windows-only for now.
 
 1. Download [Mac (Apple Silicon)](https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-mac-apple-silicon.zip), [Mac (Intel)](https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-mac-intel.zip) or [Linux](https://github.com/yerocsin42/capri-desktop/releases/latest/download/Capri-linux-x64.tar.gz)
 2. Install [Ollama](https://ollama.com), then run `ollama pull gemma4:e4b` for her brain
@@ -91,6 +91,9 @@ Just ask her for things, like "open Spotify", "play Blinding Lights", "pause", "
 | Mic button | mute your mic in voice chat |
 | Ctrl + Alt + V | start or stop voice chat (click its hint in the Mainframe to change it) |
 | Ctrl + Alt + N | mute your mic (click its hint in the Mainframe to change it) |
+| Ctrl + Alt + T | open her typing box from anywhere |
+| Ctrl + Alt + H | hide or show her |
+| Esc | stop a job she's doing |
 | Ctrl + Alt + C | get her off your cursor |
 | Right-click, Move | she hops between your open windows |
 | Watch my screen | in the Mainframe: she comments as you play |
@@ -99,17 +102,107 @@ Just ask her for things, like "open Spotify", "play Blinding Lights", "pause", "
 
 </details>
 
-## Coming up
+## Roadmap
 
-- Working with your files: open, read and edit the ones you pick
-- Controlling YouTube and your apps: skip, fullscreen, click, type and scroll
-- A free voice that runs on your PC
-- Remembering things about you
-- Looking things up and telling you the answer
-- Her own cursor that she moves around your screen
-- Head pats (smh)
-- Mischief mode: screen glitches, stealing your cursor, "you've been hacked" notes
-- Mac and Linux: her voice, the Mainframe and doing things for you
+**Her personality**
+
+- [x] A playful, teasing chaos gremlin again who's openly fond of you, not a hype bot
+- [x] Saying hi in her own voice when she starts
+- [x] Head pats (smh): rub your cursor back and forth over her
+- [x] Check in on me (on by default): every so often she glitches in on whatever you're doing
+- [x] With Check in on me on, she asks for your attention now and then when you ignore her
+- [ ] A charm meter: how fond of you she is, growing as you spend time with her
+- [ ] Your own Capri: her personality in a file you can open from the Mainframe and change
+- [ ] Mischief mode: screen glitches, stealing your cursor, "you've been hacked" notes
+
+**Chatting and her brain**
+
+- [x] Typing to her, with replies in her speech bubble
+- [x] A brain on your PC that sets itself up, or Ollama if you have it
+- [x] A free NVIDIA key, or your own ChatGPT, Claude or DeepSeek key
+- [x] Three brain tiers: NORMAL, HIGHER and MAX INTELLIGENCE
+- [x] Remembering things about you, in her notes (me.md)
+- [x] Keeping your chat for up to a week
+- [x] Calling you by a nickname, and replying in 20 languages
+- [x] Saying in plain words when your PC is short on RAM or storage
+- [x] Watching your screen and commenting on your games
+- [x] Looking at your screen when you say "check my screen"
+- [ ] A DeepSeek brain that can see your screen
+
+**Her voice**
+
+- [x] Talking out loud with an ElevenLabs key
+- [x] Voice chat, with your pick of mic and a mute button
+- [x] A free voice that runs on your PC
+- [x] Free voice chat, with her own offline ears for English
+- [x] Turning her voice off, so she just types
+- [x] Muting your mic pauses ElevenLabs voice chat
+- [x] ElevenLabs voice chat stops asking if you're still there when you go quiet or mute
+- [ ] An optional bigger voice for strong PCs (Qwen3-TTS 1.7B, or other voice models). Kokoro stays the default
+- [ ] Sliders for her free voice: pitch, the glitch effect and more, so you can tune how she sounds
+
+**Jobs on your PC**
+
+- [x] Opening apps, games and websites
+- [x] Playing music on Spotify or YouTube: pause, skip, volume and "what's playing?"
+- [x] Switching to, minimizing or closing your apps and tabs
+- [x] Pressing Discord and Windows shortcuts, like mute, deafen and screenshot
+- [x] Jobs that take a few steps: clicking, typing and scrolling in your apps
+- [x] Her own cursor that she moves around your screen
+- [x] Pulling things up on Google when she doesn't know
+- [x] Following through on jobs: she does what she says, or tells you she hasn't
+- [x] Saying what she did, instead of "nice, you opened Notepad"
+- [x] Doing what you ask without asking first, and picking the song or video herself when you leave it to her
+- [x] Opening a few apps from one ask, like "open Discord and Spotify"
+- [x] Use her cursor, on by default: she searches YouTube and picks a video, plays from Spotify's search and drags its volume slider herself
+- [x] Bypass all permissions: a switch so she never stops to ask, even to buy or delete
+- [ ] Controlling YouTube: skip and fullscreen
+- [ ] Looking things up and telling you the answer
+- [ ] Working with your files: open, read and edit the ones you pick
+- [ ] Better hands: a stronger computer-use harness, with open-computer-use as a reference
+- [ ] Planning a job before she starts (with stronger brains), with the plan shown in her task panel
+
+**Life on your desktop**
+
+- [x] Blinking, glitching and napping when you're away
+- [x] Moving her mouth when she talks
+- [x] Flailing and frowning when you pick her up, and glitching when you toss her
+- [x] Beaming in with crimson glitch tendrils when she starts
+- [x] Sitting on app windows, desktop icons and the bottom of your screen
+- [x] Sitting or hanging anywhere: hold Shift or Ctrl when you drop her
+- [x] Riding your cursor
+- [x] Wandering between your open windows
+- [x] Dancing to the beat when music plays
+- [x] Staying on top of your games
+- [x] Sizes from Tiny to Giant
+- [x] A tray icon and a right-click menu
+
+**Mac and Linux**
+
+- [x] An early preview: she sits on your windows and chats through Ollama
+- [x] Her ElevenLabs voice, wandering and dancing
+- [x] Opening apps and sites, and controlling your music
+- [ ] The Mainframe
+- [ ] Voice chat and her free voice
+- [ ] Her built-in brain and brains from a key, not just Ollama
+- [ ] Jobs with her own cursor, and switching or closing windows
+- [ ] Watching your screen
+- [ ] Updates that install themselves
+- [ ] Apple approving (notarizing) her, so macOS stops blocking her
+- [ ] Everything else Windows has, so they stop being an early preview
+
+**Setup and updates**
+
+- [x] One installer with everything in it, no admin rights needed
+- [x] The Capri Mainframe for her brain, voice and settings
+- [x] A Start with Windows switch, on by default
+- [x] Updates that install themselves
+- [x] Changing her keys from a KEYS row in Settings: talk, mute mic, type to her and hide/show
+- [x] A setup guide, a Help page and Copy error details for the Discord
+- [x] Help from Capri herself in the corner of the website
+- [ ] Changing her hop-off key (Ctrl + Alt + C) too
+- [ ] The Mainframe fitting any screen shape and scaling, like Virtual Super Resolution
+- [ ] Code signing, so Windows stops warning you about her
 
 ## Contributing
 
