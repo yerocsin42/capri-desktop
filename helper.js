@@ -81,8 +81,7 @@
   const capri = make('span', 'helper-capri');
   capri.setAttribute('aria-hidden', 'true');
   const sprite = make('span', 'helper-sprite');
-  const tendrils = make('canvas', 'helper-tendrils');
-  capri.append(tendrils, sprite, make('span', 'helper-hit'));
+  capri.append(sprite, make('span', 'helper-hit'));
   helper.append(panel, tab);
   document.body.append(helper);
 
@@ -129,191 +128,16 @@
     sprite.style.backgroundPosition = cell / (clips[name][0] - 1) * 100 + '% 0';
   }, 1000 / 30);
 
-  // Her glitch tendrils, after Tear.Tendrils in the app: angular crimson ribbons with a violet edge, glow, speckles and glitch slices.
-  const burst = (() => {
-    const brush = tendrils.getContext('2d');
-    const ink = ['#e82440', '#ff7890', '#ffffff', '#08060a', '#7a3cff', '#1ef08a'];
-    let started = 0;
-    let seed = 1;
-    let timer = 0;
-    const randoms = start => { let s = start >>> 0 || 1; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; };
-    const ribbon = (shape, room, x, y, aim, length, thick) => {
-      const count = 4 + Math.floor(shape() * 4);
-      const hook = shape() < 0.35;
-      const parts = [];
-      let total = 0;
-      for (let i = 0; i < count; i++) { parts.push((0.35 + 1.3 * shape()) * (hook && i === count - 1 ? 0.55 : 1)); total += parts[i]; }
-      const spine = [[x, y]];
-      const width = [thick * 0.9];
-      let side = shape() < 0.5 ? -1 : 1;
-      let walkX = x;
-      let walkY = y;
-      for (let i = 1; i <= count; i++) {
-        aim += (shape() - 0.5) * 0.32;
-        if (shape() < 0.7) side = -side;
-        const heading = aim + side * (hook && i === count ? 1 + shape() * 0.6 : 0.22 + shape() * 0.48);
-        walkX += Math.cos(heading) * length * parts[i - 1] / total;
-        walkY += Math.sin(heading) * length * parts[i - 1] / total;
-        spine.push([walkX, walkY]);
-        width.push(i === count ? 0 : thick * Math.pow(1 - i / count, 0.45) * (0.7 + 0.6 * shape()));
-      }
-      let fit = 1;
-      for (const [px, py] of spine) {
-        if (px < room.left && px < x) fit = Math.min(fit, (x - room.left) / (x - px));
-        if (px > room.right && px > x) fit = Math.min(fit, (room.right - x) / (px - x));
-        if (py < room.top && py < y) fit = Math.min(fit, (y - room.top) / (y - py));
-        if (py > room.bottom && py > y) fit = Math.min(fit, (room.bottom - y) / (py - y));
-      }
-      fit = Math.max(0.2, fit);
-      return { spine: spine.map(([px, py]) => [x + (px - x) * fit, y + (py - y) * fit]), width };
-    };
-    const shownPart = (line, amount) => {
-      if (amount >= 1) return line;
-      const lengths = [0];
-      for (let i = 1; i < line.spine.length; i++) lengths.push(lengths[i - 1] + Math.hypot(line.spine[i][0] - line.spine[i - 1][0], line.spine[i][1] - line.spine[i - 1][1]));
-      const want = lengths[lengths.length - 1] * amount;
-      const spine = [line.spine[0]];
-      const width = [line.width[0]];
-      for (let i = 1; i < line.spine.length; i++) {
-        if (lengths[i] <= want) { spine.push(line.spine[i]); width.push(line.width[i]); continue; }
-        const t = (want - lengths[i - 1]) / Math.max(1e-6, lengths[i] - lengths[i - 1]);
-        spine.push([line.spine[i - 1][0] + (line.spine[i][0] - line.spine[i - 1][0]) * t, line.spine[i - 1][1] + (line.spine[i][1] - line.spine[i - 1][1]) * t]);
-        width.push(0);
-        break;
-      }
-      return { spine, width };
-    };
-    const outline = (line, grow, extra, dx, dy) => {
-      const left = [];
-      const right = [];
-      const points = line.spine;
-      for (let i = 0; i < points.length; i++) {
-        const a = points[Math.max(0, i - 1)];
-        const b = points[Math.min(points.length - 1, i + 1)];
-        const along = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
-        const nx = -(b[1] - a[1]) / along;
-        const ny = (b[0] - a[0]) / along;
-        const half = (line.width[i] * grow + (line.width[i] > 0 ? extra : 0)) / 2;
-        left.push([points[i][0] + nx * half + dx, points[i][1] + ny * half + dy]);
-        right.push([points[i][0] - nx * half + dx, points[i][1] - ny * half + dy]);
-      }
-      brush.beginPath();
-      [...left, ...right.reverse()].forEach(([px, py], i) => i ? brush.lineTo(px, py) : brush.moveTo(px, py));
-      brush.closePath();
-      brush.fill();
-    };
-    const frame = () => {
-      const progress = (performance.now() - started) / 1700;
-      const ratio = Math.min(2, devicePixelRatio || 1);
-      const wide = tendrils.clientWidth;
-      const tall = tendrils.clientHeight;
-      if (progress >= 1 || !wide || !capri.isConnected) { brush.clearRect(0, 0, tendrils.width, tendrils.height); timer = 0; return; }
-      if (tendrils.width !== Math.round(wide * ratio) || tendrils.height !== Math.round(tall * ratio)) { tendrils.width = Math.round(wide * ratio); tendrils.height = Math.round(tall * ratio); }
-      brush.setTransform(ratio, 0, 0, ratio, 0, 0);
-      brush.clearRect(0, 0, wide, tall);
-      const flicker = Math.floor(progress * 51);
-      const shape = randoms(seed);
-      const jitter = randoms(seed ^ (flicker * 7919 + 1));
-      const unit = wide / 360;
-      let alpha = Math.max(0, Math.min(1, (0.97 - progress) / 0.17));
-      alpha = alpha * alpha * (3 - 2 * alpha);
-      let open = Math.min(1, progress / 0.26);
-      open = 1 - Math.pow(1 - open, 3);
-      const seen = tendrils.getBoundingClientRect();
-      const room = { left: Math.max(8, 8 - seen.left), top: Math.max(8, 8 - seen.top), right: Math.min(wide - 8, document.documentElement.clientWidth - seen.left - 8), bottom: Math.min(tall - 8, innerHeight - seen.top - 8) };
-      const middle = [wide * 0.5, tall * 0.56];
-      const lines = [];
-      const count = 5 + Math.floor(shape() * 3);
-      for (let i = 0; i < count; i++) {
-        // She sits in the bottom-right corner, so the fan opens left and up, where the page has room.
-        const angle = Math.PI * (0.92 + 0.86 * (i + 0.15 + shape() * 0.7) / count);
-        const x = middle[0] + Math.cos(angle) * 18 * unit;
-        const y = middle[1] + Math.sin(angle) * 22 * unit;
-        const reach = Math.min(Math.cos(angle) > 0.01 ? (room.right - x) / Math.cos(angle) : Math.cos(angle) < -0.01 ? (room.left - x) / Math.cos(angle) : 1e9, Math.sin(angle) > 0.01 ? (room.bottom - y) / Math.sin(angle) : Math.sin(angle) < -0.01 ? (room.top - y) / Math.sin(angle) : 1e9);
-        const line = ribbon(shape, room, x, y, angle, Math.max(0, reach) * (0.6 + 0.32 * shape()), (10 + shape() * 6) * unit);
-        let close = Math.max(0, Math.min(1, (progress - 0.56 - 0.08 * shape()) / 0.3));
-        close = Math.round(close * close * (3 - 2 * close) * 6) / 6;
-        lines.push({ ...shownPart(line, open * (1 - close)), dx: jitter() < 0.08 ? (jitter() < 0.5 ? -1 : 1) * (3 + jitter() * 7) * unit : 0 });
-      }
-      brush.save();
-      brush.shadowColor = 'rgba(230, 10, 80, ' + 0.75 * alpha + ')';
-      brush.shadowBlur = 18 * unit * ratio;
-      brush.fillStyle = 'rgba(210, 12, 96, ' + 0.35 * alpha + ')';
-      for (const line of lines) outline(line, 1.8, 6 * unit, line.dx, 0);
-      brush.restore();
-      const cut = (2 + Math.floor(jitter() * 3)) * unit;
-      const split = progress < 0.1 || jitter() < 0.25;
-      for (const line of lines) {
-        if (split) { brush.fillStyle = 'rgba(30, 240, 138, ' + 0.67 * alpha + ')'; outline(line, 1, 0, line.dx + cut, -cut * 0.4); }
-        brush.fillStyle = 'rgba(122, 60, 255, ' + 0.92 * alpha + ')';
-        outline(line, 1, 0, line.dx - 3 * unit, 3 * unit);
-        brush.fillStyle = 'rgba(236, 6, 68, ' + alpha + ')';
-        outline(line, 1, 0, line.dx, 0);
-      }
-      brush.fillStyle = 'rgba(255, 222, 232, ' + 0.82 * alpha + ')';
-      for (const line of lines) {
-        for (let k = 1; k < line.spine.length; k++) {
-          const [ax, ay] = line.spine[k - 1];
-          const [bx, by] = line.spine[k];
-          const girth = line.width[k - 1];
-          const reach = Math.hypot(bx - ax, by - ay);
-          if (girth < 5 * unit || reach < 1) continue;
-          const stars = randoms(seed ^ (k * 131 + Math.round(ax * 7 + ay * 13) * 977));
-          for (let dot = 0, dots = Math.floor(reach * girth / (180 * unit * unit)) + 1; dot < dots; dot++) {
-            const along = stars();
-            const across = (stars() * 2 - 1) * 0.3 * girth;
-            const size = (1 + Math.floor(stars() * 2)) * Math.max(1, unit * 0.8);
-            if (jitter() < 0.25) continue;
-            brush.fillRect(ax + (bx - ax) * along - (by - ay) / reach * across + line.dx, ay + (by - ay) * along + (bx - ax) / reach * across, size, size);
-          }
-        }
-      }
-      for (const line of lines) {
-        const tip = line.spine[line.spine.length - 1];
-        const scatter = (6 + 30 * Math.max(0, progress - 0.5)) * unit;
-        for (let k = 0, blocks = progress > 0.55 ? 2 + Math.floor(jitter() * 4) : Math.floor(jitter() * 3); k < blocks; k++) {
-          const side = (2 + Math.floor(jitter() * 3)) * unit;
-          brush.globalAlpha = alpha;
-          brush.fillStyle = ink[Math.floor(jitter() * ink.length)];
-          brush.fillRect(tip[0] + line.dx + (jitter() * 2 - 1) * scatter, tip[1] + (jitter() * 2 - 1) * scatter, side * (1 + Math.floor(jitter() * 4)), side);
-          brush.globalAlpha = 1;
-        }
-      }
-      for (let k = 0, holes = Math.floor(jitter() * 5); k < holes; k++) {
-        const line = lines[Math.floor(jitter() * lines.length)];
-        const at = line.spine[Math.floor(jitter() * line.spine.length)];
-        brush.clearRect(at[0] - (4 + jitter() * 10) * unit, at[1] - unit, (8 + jitter() * 20) * unit, (1 + Math.floor(jitter() * 3)) * unit);
-      }
-      const bands = progress < 0.1 ? 3 + Math.floor(jitter() * 3) : progress > 0.55 ? 2 + Math.floor(jitter() * 5) : Math.floor(jitter() * 4);
-      for (let b = 0; b < bands; b++) {
-        const top = Math.floor(jitter() * tendrils.height);
-        const height = Math.max(1, Math.floor((2 + jitter() * 14) * unit * ratio));
-        const shift = Math.round((jitter() < 0.5 ? -1 : 1) * (5 + jitter() * 18) * unit * ratio);
-        const strip = brush.getImageData(0, top, tendrils.width, Math.min(height, tendrils.height - top));
-        brush.clearRect(0, top / ratio, wide, height / ratio);
-        brush.putImageData(strip, shift, top);
-      }
-      timer = setTimeout(frame, 1000 / 30);
-    };
-    return () => {
-      if (still.matches || document.hidden) return;
-      seed = Math.floor(Math.random() * 2147483647);
-      started = performance.now();
-      if (!timer) frame();
-    };
-  })();
-
   const sitOn = box => {
     if (capri.parentNode === box) return;
     box.append(capri);
     play('perch_glitch');
-    burst();
   };
   let calls = 0;
   const callOut = () => {
     if (calls >= 5) return;
     setTimeout(() => {
-      if (!tab.hidden && !document.hidden) { calls++; play('perch_glitch'); burst(); }
+      if (!tab.hidden && !document.hidden) { calls++; play('perch_glitch'); }
       callOut();
     }, 35000 + Math.random() * 20000);
   };
@@ -394,7 +218,7 @@
     else if (!phone.matches) input.focus();
   };
   tab.addEventListener('click', () => place(true, true));
-  capri.addEventListener('click', () => { if (capri.parentNode === panel) { play('perch_glitch'); burst(); } });
+  capri.addEventListener('click', () => { if (capri.parentNode === panel) play('perch_glitch'); });
   tuck.addEventListener('click', () => place(false, true));
   panel.addEventListener('keydown', event => { if (event.key === 'Escape') place(false, true); });
 

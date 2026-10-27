@@ -244,7 +244,7 @@ The main page has three sections: BRAIN, VOICE and CAPRI.
   - "Best fit for this PC: <name>"
 - Set up her brain: starts the download. It changes to Cancel while it runs, and Try again if it fails.
 - "Have Ollama? Open it, then press Refresh."
-- "Pick one. Only one brain runs at a time." Three rows:
+- "Pick one. Only one brain runs at a time." With HIGHER picked, this line says "Most NVIDIA models can't see your screen." (since 0.7.1). Three rows:
   - NORMAL: "Free · local model", marked "Start with this!". She runs on Ollama or her built-in brain. New installs start here.
   - HIGHER: "Free · NVIDIA API". The Free key button on this row opens the NVIDIA page where you make a free key.
   - MAX INTELLIGENCE: "ChatGPT or Claude API". Needs a key with paid credits. DeepSeek keys work here too.
@@ -256,8 +256,9 @@ The main page has three sections: BRAIN, VOICE and CAPRI.
 - If you had a key saved before the rows came in, she starts on that key's row.
 
 ### VOICE section
-- "Ctrl + Alt + V to talk" at the top right: shows once an ElevenLabs key is saved. Click it to change the key.
-- Two rows. Click one to pick it:
+- "Ctrl + Alt + V to talk" at the top right: click it to change the key. Since 0.7.1 it shows for everyone, free voice chat too (in 0.7.0 it only showed once an ElevenLabs key was saved).
+- Three rows since 0.7.1 (0.7.0 had only FREE VOICE and ELEVENLABS). Click one to pick it:
+  - OFF: "Silent · text only". She never talks out loud: her replies show as text in her bubble. No voice download, no credits. The rows under it fold away. Voice chat still works as free voice chat, and she types back. Test under it says "Her voice is OFF. Pick FREE VOICE or ELEVENLABS to hear her."
   - FREE VOICE: "Free · runs on your PC". Her free voice. No key, no credits.
   - ELEVENLABS: "Sounds amazing · paid". Her best voice, using your ElevenLabs credits. The Setup guide button on this row opens the setup guide's voice steps.
 - With FREE VOICE picked: "Free voice: Her own" picks her free voice style (Her own, Bright, Sly or Sharp). Get free voice downloads it if it isn't installed (it changes to Cancel while it downloads).
@@ -455,7 +456,7 @@ Her built-in brain uses your graphics card and memory, and so do games. Use the 
 
 ## 11. Her voice
 
-She has two voices. Pick one under VOICE in the Mainframe:
+She has two voices. Pick one under VOICE in the Mainframe, or pick OFF (since 0.7.1) so she doesn't talk out loud at all:
 - FREE VOICE: "Free · runs on your PC". No key, no credits, works offline. Decent, but not as good as ElevenLabs.
 - ELEVENLABS: "Sounds amazing · paid". Her best voice, from your own ElevenLabs account. It uses your ElevenLabs credits. The Setup guide button opens the voice steps.
 
@@ -496,10 +497,15 @@ If you'd rather keep Restrict key on, the key needs: Text to Speech and Models (
 4. Model menu > v4.
 5. Press Test. She says "Voice link online. Miss me, choom?" Make sure you actually hear her, not just the text.
 
+### Turning her voice off
+- 0.7.1 and newer: Capri Mainframe > VOICE > OFF. She types her replies and never talks out loud. Pick FREE VOICE or ELEVENLABS to turn it back on.
+- 0.7.0 has no OFF row. Update to 0.7.1 (right-click her > Check for updates). Until then, Settings > Volume > Mute silences her voice.
+
 ### Switching between FREE VOICE and ELEVENLABS
 Click a row under VOICE. Switching never deletes your key.
 - FREE VOICE with a key saved: "ElevenLabs off. Free voice it is." No credits are used. If her free voice isn't installed yet she says "ElevenLabs off. I'll type, no credits used." The key rows fold away; click ELEVENLABS to see them again.
 - ELEVENLABS: "ElevenLabs back on."
+- OFF (since 0.7.1): "Voice off. I'll type instead." Picking FREE VOICE or ELEVENLABS again: "Voice back on."
 - ELEVENLABS with no key yet: the key box opens. She keeps using her free voice until you connect a key.
 - Test builds 0.6.9 had a "Use ElevenLabs" box instead. Unticking it was the same as picking FREE VOICE.
 
@@ -536,6 +542,8 @@ If you run out of ElevenLabs credits during voice chat, she switches to FREE VOI
 ### Muting your mic
 - Ctrl + Alt + N while voice chat is on, or
 - The mic button by her during voice chat.
+
+Since 0.7.1, muting pauses ElevenLabs voice chat once she stops talking: "Mic muted. Voice chat is paused until you unmute." She stops listening, won't ask if you're there, and uses no credits while muted. Unmute ("Mic on. Talk and she'll pick up.") and just talk. In 0.7.0 she kept asking if you were there while muted; update to fix it.
 
 ### She went quiet: "Voice chat resting. Talk and she'll pick up."
 If you're quiet for about 15 seconds she checks in once. If you stay quiet she rests. Just talk and she picks up again.
