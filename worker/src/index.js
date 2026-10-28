@@ -1,3 +1,5 @@
+import Anthropic from '@anthropic-ai/sdk';
+
 const sha256 = async (text) => {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
   return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
@@ -11,6 +13,7 @@ const models = [
   { name: '@cf/google/gemma-4-26b-a4b-it', vision: true, options: { max_completion_tokens: 260, temperature: 0.3, chat_template_kwargs: { enable_thinking: false } } },
   { name: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', options: { max_tokens: 260, temperature: 0.3 } }
 ];
+const claudeModel = 'claude-opus-5-5';
 const perVisitor = 40;
 const perVisitorPictures = 10;
 const perDay = 2000;
@@ -126,19 +129,46 @@ const said = result => {
 
 const picture = value => typeof value === 'string' && value.length <= 1400000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value) ? value : null;
 
-const see = async (env, image) => {
-  try {
-    const result = await env.AI.run(models[0].name, { messages: [{ role: 'user', content: [{ type: 'text', text: look }, { type: 'image_url', image_url: { url: image } }] }], ...models[0].options, max_completion_tokens: 120, temperature: 0 });
-    return said(result).slice(0, 600);
-  } catch (error) { return ''; }
+const card = image => {
+  const [, type, data] = image.match(/^data:([^;]+);base64,(.+)$/);
+  return { type: 'image', source: { type: 'base64', media_type: type, data } };
 };
 
-const think = async (env, messages, plain) => {
-  for (const model of models) {
+const clip = reply => reply.length > 700 ? reply.slice(0, 697).replace(/\s+\S*$/, '') + '...' : reply;
+
+// Claude answers when the worker has an ANTHROPIC_API_KEY secret, and Workers AI is the fallback. null means Claude refused.
+const ask = async (env, messages, max_tokens, system) => {
+  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 1, timeout: 20000 });
+  const response = await client.beta.messages.create({ model: claudeModel, max_tokens, system, messages, output_config: { effort: 'low' }, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' });
+  return response.stop_reason === 'refusal' ? null : said(response.content.filter(block => block.type === 'text').map(block => block.text).join(' '));
+};
+
+const see = async (env, image) => {
+  if (env.AI) try {
+    const result = await env.AI.run(models[0].name, { messages: [{ role: 'user', content: [{ type: 'text', text: look }, { type: 'image_url', image_url: { url: image } }] }], ...models[0].options, max_completion_tokens: 120, temperature: 0 });
+    const seen = said(result).slice(0, 600);
+    if (seen) return seen;
+  } catch (error) { }
+  if (env.ANTHROPIC_API_KEY) try { return (await ask(env, [{ role: 'user', content: [card(image), { type: 'text', text: look }] }], 1024) || '').slice(0, 600); } catch (error) { }
+  return '';
+};
+
+// Why each model gave nothing goes in trouble, so a broken help line shows up in the logs instead of only as "glitching".
+const think = async (env, asked, messages, plain, trouble) => {
+  if (env.ANTHROPIC_API_KEY) {
+    try {
+      const reply = await ask(env, asked, 1024, messages[0].content);
+      if (reply === null) { trouble.push('claude-refused: ' + claudeModel); return null; }
+      if (reply) return clip(reply);
+      trouble.push('claude-empty: ' + claudeModel);
+    } catch (error) { trouble.push('claude-' + (error.status || 'error') + ': ' + String(error.message).slice(0, 200)); }
+  }
+  for (const model of env.AI ? models : []) {
     try {
       const reply = said(await env.AI.run(model.name, { messages: model.vision ? messages : plain, ...model.options }));
-      if (reply) return reply.length > 700 ? reply.slice(0, 697).replace(/\s+\S*$/, '') + '...' : reply;
-    } catch (error) { }
+      if (reply) return clip(reply);
+      trouble.push(model.name + ': empty reply');
+    } catch (error) { trouble.push(model.name + ': ' + String(error && error.message || error).slice(0, 200)); }
   }
   return null;
 };
@@ -169,7 +199,7 @@ const help = async (request, env, ctx, reply) => {
   let sections = [];
   try { sections = await knowledge(env); } catch (error) { }
   const recent = history.filter(turn => turn.role === 'user').slice(-1).map(turn => turn.content).join(' ');
-  const seen = image && env.AI ? await see(env, image) : '';
+  const seen = image ? await see(env, image) : '';
   const ranked = pick(sections, question + ' ' + seen + ' ' + recent);
   const chosen = ranked.map(entry => entry.section);
   const facts = sections.filter(section => section.number === 1 && section.title !== section.chapter).slice(0, 2);
@@ -178,14 +208,21 @@ const help = async (request, env, ctx, reply) => {
   const system = { role: 'system', content: rules + '\n\nHelp notes:\n' + (written || '(nothing matched)') };
   const messages = [system, ...history, { role: 'user', content: image ? [{ type: 'text', text: question }, { type: 'image_url', image_url: { url: image } }] : question }];
   const plain = image ? [system, ...history, { role: 'user', content: question + (seen ? '\n\n(Their screenshot shows: ' + seen + ')' : "\n\n(They sent a screenshot you can't see. Ask them to type out what it says.)") }] : messages;
+  const first = history.findIndex(turn => turn.role === 'user');
+  const asked = [...history.slice(first < 0 ? history.length : first), { role: 'user', content: image ? [card(image), { type: 'text', text: question }] : question }];
   const links = [];
   for (const entry of ranked.slice(0, 2)) {
     const target = link(entry.section);
     if (entry.score >= ranked[0].score * 0.6 && !links.some(known => known.href === target.href)) links.push(target);
   }
 
-  const answer = env.AI ? await think(env, messages, plain) : null;
-  if (!answer) return reply({ reply: chosen.length ? 'My help line is glitching, but this part of the Help page should cover it:' : "My help line is glitching right now. The Help page has everything, or ask in the Discord.", links: chosen.length ? links : [{ title: 'Help page', href: site + 'help/' }, { title: 'Discord', href: discord }] });
+  const trouble = env.AI ? [] : ['no AI binding'];
+  const answer = await think(env, asked, messages, plain, trouble);
+  if (!answer) console.error('Help line failed: ' + trouble.join(' | '));
+  const claude = trouble.find(entry => entry.startsWith('claude-'));
+  const why = answer ? null : claude ? claude.split(':')[0] : /\b4006\b|daily free allocation/i.test(trouble.join(' ')) ? 'allowance' : (trouble.join(' ').match(/\b(\d{4,5})\b/) || [null, env.AI ? 'ai' : 'binding'])[1];
+  if (why === 'allowance') return reply({ reply: "I've answered all I can for today, choom. I'm back after midnight UTC. The Help page has everything, or ask in the Discord.", links: [{ title: 'Help page', href: site + 'help/' }, { title: 'Discord', href: discord }], why });
+  if (!answer) return reply({ why,  reply: chosen.length ? 'My help line is glitching, but this part of the Help page should cover it:' : "My help line is glitching right now. The Help page has everything, or ask in the Discord.", links: chosen.length ? links : [{ title: 'Help page', href: site + 'help/' }, { title: 'Discord', href: discord }] });
   return reply({ reply: answer, links: links.length ? links : [{ title: 'Help page', href: site + 'help/' }], answered: true });
 };
 
