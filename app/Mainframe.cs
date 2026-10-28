@@ -18,7 +18,7 @@ namespace CapriDesktop
         private static readonly int[] Gaps = { 10, 15, 30, 60, 90, 120, 180, 300, 600 };
         private static readonly string[] GapNames = { "10 s", "15 s", "30 s", "1 min", "1.5 min", "2 min", "3 min", "5 min", "10 min" };
         private const int SetupHeight = 118;
-        private const int PageTall = 630;
+        private const int PageTall = 648;
         // Settings opens a second column to the right, so every setting shows at once.
         private const int Column = 380;
         private const int Far = 30000;
@@ -64,6 +64,7 @@ namespace CapriDesktop
         private readonly Toggle checkIns;
         private readonly Toggle onTop;
         private readonly Toggle startup;
+        private readonly Toggle discord;
         private readonly Toggle cursor;
         private readonly Toggle bypass;
         private readonly Key talkKeys;
@@ -90,6 +91,7 @@ namespace CapriDesktop
         private readonly Key speechModels;
         private readonly ContextMenuStrip speechModelMenu;
         private readonly Label voiceNote;
+        private readonly Label keysNote;
         private readonly Label updateNote;
         private readonly Key keyHelp;
         private readonly Label shortcut;
@@ -379,9 +381,8 @@ namespace CapriDesktop
             customNote = Caption("Any Ollama model you've pulled, or a model id on your key.", 28 + c, 398, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
             customNote.MaximumSize = new Size(328, 0);
             Caption("HABITS >", 28 + c, 446, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
-            startup = Check("Start with Windows", 28 + c, 470, 328, delegate { if (!syncing) capri.ToggleStartup(); });
-            startup.Hint = "When you sign in";
-            startup.HintFont = Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point);
+            startup = Check("Start with Windows", 28 + c, 470, 150, delegate { if (!syncing) capri.ToggleStartup(); });
+            discord = Check("Show on Discord", 186 + c, 470, 170, delegate { if (!syncing) capri.ToggleDiscord(); });
             cursor = Check("Use her cursor", 28 + c, 502, 150, delegate { if (!syncing) capri.ToggleCursor(); });
             bypass = Check("Bypass all permissions", 186 + c, 502, 170, delegate { if (!syncing) capri.ToggleBypass(); });
             Caption("KEYS >", 28, 556, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
@@ -393,6 +394,8 @@ namespace CapriDesktop
             typeKeys.AccessibleName = "Her typing key. Click, then press new keys";
             hideKeys = Make("Hide/show: Ctrl + Alt + H", 358, 584, 250, 28, delegate { PickKeys(3); });
             hideKeys.AccessibleName = "Her hide key. Click, then press new keys";
+            keysNote = Caption("", 96, 620, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
+            keysNote.MaximumSize = new Size(512, 0);
             for (int i = first; i < Controls.Count; i++)
             {
                 pageLeft.Add(new KeyValuePair<Control, int>(Controls[i], Controls[i].Left));
@@ -434,6 +437,8 @@ namespace CapriDesktop
         internal bool TypingShown { get { return typing.Checked; } }
 
         internal string HabitsStatus { get { return startup.Checked ? "startup" : "-"; } }
+
+        internal bool DiscordShown { get { return discord.Checked; } }
 
         internal string JobsStatus { get { return (cursor.Checked ? "cursor" : "-") + " | " + (bypass.Checked ? "bypass" : "-"); } }
 
@@ -608,6 +613,7 @@ namespace CapriDesktop
             voiceNote.MaximumSize = new Size(Scaled(328), 0);
             updateNote.MaximumSize = new Size(Scaled(328), 0);
             customNote.MaximumSize = new Size(Scaled(328), 0);
+            if (keysNote != null) keysNote.MaximumSize = new Size(Scaled(512), 0);
             ClientSize = new Size(Scaled(paged ? Wide + Column : Wide), Scaled(paged ? PageTall : Tall + shift + below - fold));
             Invalidate(true);
         }
@@ -643,6 +649,7 @@ namespace CapriDesktop
             checkIns.Checked = capri.CheckIns;
             onTop.Checked = capri.OnTop;
             startup.Checked = capri.StartsWithWindows;
+            discord.Checked = capri.OnDiscord;
             cursor.Checked = capri.UsesCursor;
             bypass.Checked = capri.Bypassing;
             watch.Checked = capri.Watching;
@@ -962,6 +969,7 @@ namespace CapriDesktop
         internal void PickKeys(int slot)
         {
             capturing = slot + 1;
+            if (keysNote != null) keysNote.Text = "";
             KeyLabels();
         }
 
@@ -973,9 +981,19 @@ namespace CapriDesktop
             capturing = 0;
             string problem = key == Keys.Escape ? null : capri.SetHotkey(slot, keys);
             KeyLabels();
-            if (problem != null) VoiceNote(problem, true);
-            else if (key != Keys.Escape) VoiceNote("Saved. " + (slot == 0 ? talkName + " starts voice chat." : slot == 1 ? muteName + " mutes your mic." : slot == 2 ? typeName + " opens her typing box." : hideName + " hides or shows her."), false);
+            if (problem != null) KeysNote(problem, true);
+            else if (key != Keys.Escape) KeysNote("Saved. " + (slot == 0 ? talkName + " starts voice chat." : slot == 1 ? muteName + " mutes your mic." : slot == 2 ? typeName + " opens her typing box." : hideName + " hides or shows her."), false);
         }
+
+        // A key change answers where it was made: under the KEYS row in Settings, or under VOICE on the main page.
+        private void KeysNote(string text, bool problem)
+        {
+            if (!paged) { VoiceNote(text, problem); return; }
+            keysNote.Text = text;
+            keysNote.ForeColor = problem ? Look.Red : Look.Dim;
+        }
+
+        internal string KeysNoteText { get { return keysNote.Text; } }
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {

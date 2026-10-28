@@ -153,7 +153,7 @@ Just ask her for things, like "open Spotify", "play Blinding Lights", "pause", "
 - [x] Following through on jobs: she does what she says, or tells you she hasn't
 - [x] Saying what she did, instead of "nice, you opened Notepad"
 - [x] Doing what you ask without asking first, and picking the song or video herself when you leave it to her
-- [x] Opening a few apps from one ask, like "open Discord and Spotify"
+- [x] Opening as many apps as you name in one ask, like "open Discord, Spotify and Steam"
 - [x] Use her cursor, on by default: she searches YouTube and picks a video, plays from Spotify's search and drags its volume slider herself
 - [x] Bypass all permissions: a switch so she never stops to ask, even to buy or delete
 - [ ] Controlling YouTube: skip and fullscreen
@@ -161,6 +161,7 @@ Just ask her for things, like "open Spotify", "play Blinding Lights", "pause", "
 - [ ] Working with your files: open, read and edit the ones you pick
 - [ ] Better hands: a stronger computer-use harness, with open-computer-use as a reference
 - [ ] Planning a job before she starts (with stronger brains), with the plan shown in her task panel
+- [ ] Jobs that run for hours, on a schedule: full control of your PC while you're away, like answering your Discord DMs while you sleep
 
 **Life on your desktop**
 
@@ -214,4 +215,4 @@ Free for anything non-commercial: use her, share her, change her. No selling her
 
 Have fun and more updates to come!
 
-<sub>Setup guide based on Dancer's guide in the Discord. Font: Share Tech Mono (OFL). Free voice: Kokoro-82M (Apache-2.0). Her own ears: [NVIDIA Parakeet TDT 0.6B v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) ([CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)), int8 export by sherpa-onnx. Both run with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache-2.0).</sub>
+<sub>Setup guide based on Dancer's guide in the Discord. Font: Share Tech Mono (OFL). Free voice: Kokoro-82M (Apache-2.0). Her own ears: [NVIDIA Parakeet TDT 0.6B v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) for English and [v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) for 25 European languages ([CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)), int8 exports by sherpa-onnx. Both run with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache-2.0).</sub>

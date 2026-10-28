@@ -95,7 +95,7 @@ namespace CapriDesktop
     internal sealed class Agent : IDisposable
     {
         internal const double Pace = 15;
-        internal const int Version = 14;
+        internal const int Version = 16;
         private const string Patience = "\"turn\":{\"turn_timeout\":30,\"silence_end_call_timeout\":45}";
         internal event Action<int> Opened;
         internal event Action<string> Heard;
@@ -190,6 +190,13 @@ namespace CapriDesktop
         {
             if (!ready) return;
             Send("{\"type\":\"contextual_update\",\"text\":" + Voice.Quote(text) + "}");
+        }
+
+        // A contextual update gets no reply, so news she should say out loud goes in as a turn of its own.
+        internal void Say(string text)
+        {
+            if (!ready) return;
+            Send("{\"type\":\"user_message\",\"text\":" + Voice.Quote(text) + "}");
         }
 
         private void Send(string text)

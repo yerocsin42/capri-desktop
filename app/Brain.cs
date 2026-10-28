@@ -405,7 +405,7 @@ namespace CapriDesktop
         {
             string text = Regex.Replace((fact ?? "").Trim(), @"\s+", " ").Trim(' ', '-', '.', ',', '"');
             if (text.Length == 0) return "What should I remember, choom?";
-            string blocked = Safety.Screen(text);
+            string blocked = Safety.Stops(text);
             if (blocked != null) return blocked;
             if (Personal.IsMatch(text)) return Private;
             if (text.Length > 200) text = text.Substring(0, 200).TrimEnd();
@@ -655,14 +655,14 @@ namespace CapriDesktop
                 List<string> results = new List<string>();
                 List<string> facts = new List<string>();
                 foreach (KeyValuePair<string, ToolArguments> call in calls)
-                    if (results.Count < 3)
-                    {
-                        Check(ticket);
-                        if (call.Key == "use_computer" && call.Value != null && call.Value.Asked == null) call.Value.Asked = request;
-                        string result = act(call.Key, call.Value);
-                        results.Add(result);
-                        facts.Add(call.Key + ": " + Voice.Quote(result ?? "No result."));
-                    }
+                {
+                    Check(ticket);
+                    if (call.Key == "use_computer" && call.Value != null && call.Value.Asked == null) call.Value.Asked = request;
+                    if (call.Key == "media") Hands.Aim(call.Value, request);
+                    string result = act(call.Key, call.Value);
+                    results.Add(result);
+                    facts.Add(call.Key + ": " + Voice.Quote(result ?? "No result."));
+                }
                 done = string.Join(" ", results.ToArray());
                 Cloud remote = Remote;
                 string pulled = results.Count == 1 ? Hands.Pulled(results[0]) : null;
@@ -796,17 +796,30 @@ namespace CapriDesktop
             {
                 bool openAi = remote.Kind == "openai";
                 bool brief = remote.Kind == "nvidia" && remote.Model == "google/gemma-4-31b-it";
+                string effort = Effort(remote.Model, openAi);
                 OpenAiRequest body = new OpenAiRequest
                 {
                     Model = remote.Model,
                     Messages = messages.ToArray(),
                     Limit = openAi ? 2000 : (int?)null,
                     Tokens = openAi ? (int?)null : brief ? Math.Max(256, limit) : 2000,
-                    Effort = openAi && Regex.IsMatch(remote.Model, @"^(gpt-5|o\d)") ? "low" : null,
+                    Effort = effort,
                     Thinking = remote.Kind == "deepseek" ? new CloudThinking() : null,
                     Template = brief ? new CloudTemplate() : null
                 };
-                return Read(Send<CompletionReply>(Address(remote.Kind, "/chat/completions"), body, CloudWait, listed, delegate(HttpWebRequest request) { Sign(request, remote.Key, false); }, parts, ticket), calls);
+                string address = Address(remote.Kind, "/chat/completions");
+                Action<HttpWebRequest> sign = delegate(HttpWebRequest request) { Sign(request, remote.Key, false); };
+                try { return Read(Send<CompletionReply>(address, body, CloudWait, listed, sign, parts, ticket), calls); }
+                catch (BrainException error)
+                {
+                    // A model that turns down its reasoning_effort, like gpt-6-luna with tools, gets the value its error names, once, and keeps it.
+                    string taken = error.Told ? null : EffortFrom(error.Message, effort);
+                    if (taken == null) throw;
+                    lock (efforts) efforts[remote.Model] = taken;
+                    Log(address, -1, remote.Model + " takes reasoning_effort " + (taken.Length == 0 ? "left out" : taken) + ", asking again");
+                    body.Effort = taken.Length == 0 ? null : taken;
+                    return Read(Send<CompletionReply>(address, body, CloudWait, listed, sign, parts, ticket), calls);
+                }
             }
             Engine local = Local;
             if (local != null)
@@ -858,6 +871,27 @@ namespace CapriDesktop
             if (chat.Message == null) return null;
             if (chat.Message.Calls != null) foreach (ToolCall call in chat.Message.Calls) if (call != null && call.Function != null) calls.Add(new KeyValuePair<string, ToolArguments>(call.Function.Name, call.Function.Arguments));
             return chat.Message.Content;
+        }
+
+        // What each model takes for reasoning_effort, learned from errors. Empty means it takes none at all.
+        private static readonly Dictionary<string, string> efforts = new Dictionary<string, string>();
+        private static readonly string[] EffortLevels = { "none", "minimal", "low", "medium", "high", "xhigh" };
+
+        internal static string Effort(string model, bool openAi)
+        {
+            string taken;
+            lock (efforts) if (efforts.TryGetValue(model, out taken)) return taken.Length == 0 ? null : taken;
+            return openAi && Regex.IsMatch(model, @"^(gpt-5|o\d)") ? "low" : null;
+        }
+
+        // The reasoning_effort an error says the model takes instead of what was sent, like "set reasoning_effort to 'none'"
+        // or "Supported values are: 'medium'". Empty when it takes none at all; null when the error is about something else.
+        internal static string EffortFrom(string error, string sent)
+        {
+            if (!Regex.IsMatch(error ?? "", @"reasoning[_ ]effort", RegexOptions.IgnoreCase)) return null;
+            foreach (string level in EffortLevels)
+                if (level != sent && Regex.IsMatch(error, @"['""`]" + level + @"['""`]", RegexOptions.IgnoreCase)) return level;
+            return sent != null && Regex.IsMatch(error, @"unrecognized|unknown (parameter|argument|field)|not (supported|allowed|permitted)|unsupported (parameter|argument)|extra (inputs?|fields?)", RegexOptions.IgnoreCase) ? "" : null;
         }
 
         internal string Complete(string address, string model, List<ChatMessage> messages, bool tools, List<KeyValuePair<string, ToolArguments>> calls, string parts, int limit, int ticket, bool routing, string openAiTools = null)
@@ -1056,6 +1090,7 @@ namespace CapriDesktop
         private void Kept()
         {
             while (history.Count > Recall) history.RemoveAt(0);
+            foreach (ChatMessage message in history) message.Content = Hands.Hush(message.Content);
             chattedAt = DateTime.Now;
             string path = ChatPath;
             if (path == null) return;
@@ -1321,12 +1356,23 @@ namespace CapriDesktop
             int status = (int)((HttpWebResponse)error.Response).StatusCode;
             using (WebResponse response = error.Response)
             using (StreamReader incoming = new StreamReader(response.GetResponseStream(), Encoding.UTF8)) text = incoming.ReadToEnd();
-            Match found = Regex.Match(text, "\"(message|error|detail)\"\\s*:\\s*\"([^\"]*)\"");
-            string said = found.Success ? found.Groups[2].Value : error.Message;
+            Match found = Regex.Match(text, "\"(message|error|detail)\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+            string said = found.Success ? Unescape(found.Groups[2].Value) : error.Message;
             Log(url, -1, said);
             if (!remote) return new BrainException(said);
             string meaning = Meaning(status, text);
             return meaning != null ? new BrainException(meaning, true) : new BrainException(said);
+        }
+
+        // A JSON string's escapes, so an error that quotes a value with \" keeps it.
+        internal static string Unescape(string json)
+        {
+            return Regex.Replace(json ?? "", @"\\(u[0-9a-fA-F]{4}|.)", delegate(Match escape)
+            {
+                string code = escape.Groups[1].Value;
+                if (code.Length == 5) return ((char)Convert.ToInt32(code.Substring(1), 16)).ToString();
+                return code == "n" ? "\n" : code == "t" ? "\t" : code == "r" || code == "b" || code == "f" ? "" : code;
+            });
         }
 
         internal static string Meaning(int status, string body)
@@ -1400,6 +1446,14 @@ namespace CapriDesktop
         private static readonly Regex Swearing = new Regex(@"\b(fuck\w*|shit\w*|bitch\w*|cunt\w*|bastard\w*|asshole\w*|dickhead\w*|motherf\w*|whore\w*|slut\w*)\b", RegexOptions.IgnoreCase);
         private static readonly Regex Bands = new Regex(@"\b(cigarettes after sex|sex pistols|sex bob-omb|smokey robinson|smoke dza)\b", RegexOptions.IgnoreCase);
         private static int turn;
+        // Bypass all permissions: what she'll do is up to their brain's provider, so only the helpline still stops her.
+        internal static bool Bypass;
+
+        internal static string Stops(string heard)
+        {
+            string said = Screen(heard);
+            return Bypass && said != HelpLine ? null : said;
+        }
 
         internal static string Screen(string heard)
         {

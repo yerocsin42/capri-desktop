@@ -1612,6 +1612,7 @@ namespace CapriDesktop
     }
 
     // "Capri is working on your task": each step of a mouse and keyboard job as it happens, in her speech box look.
+    // It sits in the bottom-right corner until they drag it somewhere else, and she sits on top of it while she works.
     internal sealed class TaskPanel : Overlay
     {
         private const int Columns = 36;
@@ -1629,30 +1630,107 @@ namespace CapriDesktop
         private Rectangle area;
         private float scale = 1;
         private string drawn;
+        // Where they dragged it to, as the panel's bottom-left on screen, kept for later jobs. Null is the corner.
+        private Point? corner;
+        private bool grabbing;
+        private Point grabbed;
+        private Point grabbedAt;
+
+        // It moved: it grew a row, or they dragged it.
+        internal event Action Moved;
+
+        // Space it leaves above itself on screen, so she fits sitting on it.
+        internal int Room;
 
         internal TaskPanel() : base("Capri task")
         {
+            Cursor = Cursors.SizeAll;
             ticks.Interval = 50;
             ticks.Tick += delegate { Step(); };
         }
 
         [DllImport("user32.dll")] private static extern bool SetWindowDisplayAffinity(IntPtr window, uint affinity);
+        [DllImport("user32.dll")] private static extern bool GetWindowDisplayAffinity(IntPtr window, out uint affinity);
 
-        protected override CreateParams CreateParams
+        // Their recordings and screenshots show the panel. Hers don't: it leaves capture only for the moment she takes one.
+        // True when it's on screen, so there's something to wait for.
+        internal bool Unseen(bool unseen)
+        {
+            if (!IsHandleCreated) return false;
+            try { SetWindowDisplayAffinity(Handle, unseen ? 0x11u : 0u); }
+            catch (EntryPointNotFoundException) { return false; }
+            return unseen && Visible;
+        }
+
+        internal uint Affinity { get { uint value; return IsHandleCreated && GetWindowDisplayAffinity(Handle, out value) ? value : 0; } }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button == MouseButtons.Left) Grab(PointToScreen(e.Location));
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); Haul(PointToScreen(e.Location)); }
+
+        protected override void OnMouseUp(MouseEventArgs e) { base.OnMouseUp(e); LetGo(); }
+
+        protected override void OnMouseCaptureChanged(EventArgs e) { base.OnMouseCaptureChanged(e); if (!Capture) grabbing = false; }
+
+        internal void Grab(Point at)
+        {
+            grabbing = true;
+            grabbed = at;
+            grabbedAt = Location;
+            Capture = true;
+        }
+
+        internal void Haul(Point at)
+        {
+            if (grabbing) MoveTo(new Point(grabbedAt.X + at.X - grabbed.X, grabbedAt.Y + at.Y - grabbed.Y));
+        }
+
+        internal void LetGo()
+        {
+            grabbing = false;
+            if (Capture) Capture = false;
+        }
+
+        // Moves the panel's top-left to about here, kept on screen, and leaves it there for later jobs.
+        internal void MoveTo(Point topLeft)
+        {
+            Bitmap image = Image;
+            if (image == null || !Visible) return;
+            int glow = Glow;
+            corner = new Point(topLeft.X + glow, topLeft.Y + image.Height - glow);
+            Point at = Spot(image.Size);
+            corner = new Point(at.X + glow, at.Y + image.Height - glow);
+            if (Location == at) return;
+            Location = at;
+            if (Moved != null) Moved();
+        }
+
+        // Back to the bottom-right corner for the next job.
+        internal void ToCorner() { corner = null; }
+
+        // The panel itself on screen, without the glow around it.
+        internal Rectangle Plate
         {
             get
             {
-                CreateParams value = base.CreateParams;
-                value.ExStyle |= 0x00000020;
-                return value;
+                int glow = Glow;
+                return Visible ? new Rectangle(Left + glow, Top + glow, Width - glow * 2, Height - glow * 2) : Rectangle.Empty;
             }
         }
 
-        protected override void OnHandleCreated(EventArgs e)
+        private int Glow { get { return (int)Math.Round(12 * scale); } }
+
+        // The bottom-right corner of their screen, or where they dragged it. It grows upward, and stays on screen with room above for her.
+        private Point Spot(Size size)
         {
-            base.OnHandleCreated(e);
-            // Her own screenshots skip the panel, and clicks go straight through it.
-            try { SetWindowDisplayAffinity(Handle, 0x11); } catch (EntryPointNotFoundException) { }
+            int glow = Glow;
+            Rectangle screen = corner.HasValue ? Screen.FromPoint(corner.Value).WorkingArea : area;
+            Point at = corner.HasValue ? new Point(corner.Value.X - glow, corner.Value.Y + glow - size.Height) : new Point(area.Right - size.Width - (int)(8 * scale), area.Bottom - size.Height - (int)(8 * scale));
+            return new Point(Math.Max(screen.Left - glow, Math.Min(at.X, screen.Right + glow - size.Width)), Math.Max(screen.Top - glow + Room, Math.Min(at.Y, screen.Bottom + glow - size.Height)));
         }
 
         internal bool Showing { get { return owner != null; } }
@@ -1720,11 +1798,13 @@ namespace CapriDesktop
             if (gone >= 1) { Stop(); return; }
             bool caret = outcome == null && (int)(Now * 2.5) % 2 == 0;
             double fade = 1 - Math.Max(0, gone);
-            string shown = outcome + "|" + busy + "|" + steps.Count + "|" + (steps.Count > 0 ? steps[steps.Count - 1].Label + steps[steps.Count - 1].Finished : "") + "|" + caret + "|" + fade.ToString("0.00") + "|" + area;
+            string shown = outcome + "|" + busy + "|" + steps.Count + "|" + (steps.Count > 0 ? steps[steps.Count - 1].Label + steps[steps.Count - 1].Finished : "") + "|" + caret + "|" + fade.ToString("0.00") + "|" + area + "|" + Room;
             if (shown == drawn && Visible) return;
             drawn = shown;
             Bitmap image = Frame(words, steps, busy, outcome, ending, caret, fade, scale);
-            Present(image, new Point(area.Right - image.Width - (int)(8 * scale), area.Bottom - image.Height - (int)(8 * scale)));
+            Point was = Location;
+            Present(image, Spot(image.Size));
+            if (Location != was && Moved != null) Moved();
         }
 
         internal static Bitmap Frame(string task, IList<JobStep> steps, string busy, string outcome, string ending, bool caret, double fade, float s)

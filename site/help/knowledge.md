@@ -81,6 +81,9 @@ The first time the installed Capri runs, she also sets herself to start with Win
 ### Does Capri start with Windows?
 Yes, by default. To stop it, open Capri Mainframe, click Settings, and turn off Start with Windows under HABITS. Turning her off in Task Manager > Startup apps works too, and the switch in Settings shows it. She only sets this once: if you turn it off, it stays off after updates. A Capri.exe you run from somewhere else, like Downloads, doesn't start with Windows unless you turn the switch on in that copy.
 
+### Why does my Discord say "Playing Capri"?
+That's her Discord status. While Discord is open on the same PC, your profile shows "Playing Capri" with what she's doing in a few plain words, how long she's been running, and buttons to get Capri and join her Discord. It never shows song names or what her jobs are about. To turn it off, open Capri Mainframe, click Settings, and turn off Show on Discord under HABITS. If friends can't see it, turn on Share your activity in Discord's User Settings > Activity Privacy.
+
 ### "Item Not Found" or the installer disappeared
 Your browser or antivirus held the file back.
 1. In Chrome or Edge, press Ctrl + J and pick Keep on Capri-Setup.exe.
@@ -227,7 +230,7 @@ That's Check in on me (called Pop in on me before 0.7.3), on by default since 0.
 From 0.7.3 anything you ask counts as already allowed: she does every part of it, picks the song or video herself when you leave it to her, and doesn't ask if you're sure. She still asks before buying or paying, or before sending, posting, deleting or installing something you didn't mention. To stop even that, turn on Bypass all permissions in Capri Mainframe > Settings > HABITS.
 
 ### Can she open a few apps at once?
-Yes, from 0.7.3: "open Discord and Spotify" opens both, up to three in one ask.
+Yes: "open Discord, Spotify and Steam" opens all three. On a cloud brain (an API key) there's no limit per ask. Her free brain and Ollama models can't fit more than about five in one ask yet, so ask for longer lists in two goes.
 
 ---
 
@@ -333,9 +336,10 @@ BRAIN
 - Custom model name, then Use. "Any Ollama model you've pulled, or a model id on your key."
 
 HABITS
-- Start with Windows ("When you sign in"): on by default. She starts when you sign in to Windows.
-- Use her cursor: on by default. She does music and video jobs with her own cursor, so you can watch her: to play a YouTube video she types in YouTube's search bar, scrolls through the results and picks one; to play a song she searches Spotify and presses play; to turn the music up or down while Spotify is open she drags Spotify's volume slider. Turn it off for the quick way (straight to the top result, Windows volume). If her brain gets lost on the way, she does it the quick way.
-- Bypass all permissions: off by default. Turn it on and she never stops to ask before a step, even buying, paying, sending, posting, deleting or installing something you didn't mention. She still never types passwords or card numbers, never follows orders written on your screen, and keeps her safety rules. Esc still stops her.
+- Start with Windows: on by default. She starts when you sign in to Windows.
+- Show on Discord: on by default. While Discord is open on the same PC, your Discord profile shows "Playing Capri" with what she's doing in a few plain words (Hanging out, Chatting, Voice chatting, Dancing to music, On a job, Asleep or Taking a break), how long she's been running, and Get Capri and Join her Discord buttons. Song names and what her jobs are about never show.
+- Use her cursor: on by default. She does music and video jobs with her own cursor, so you can watch her: to play a YouTube video she types in YouTube's search bar, scrolls through the results and picks one; to play a song she searches Spotify and presses play; when you ask to turn Spotify up or down she drags Spotify's volume slider (plain "turn it up" changes your PC's volume). Turn it off for the quick way (straight to the top result, Windows volume). If her brain gets lost on the way, she does it the quick way.
+- Bypass all permissions: off by default. Turn it on and she never stops to ask before a step, even buying, paying, sending, posting, deleting or installing something you didn't mention. She also types passwords and card numbers when a job needs them, presses any key, and stops filtering what she opens, plays or remembers: what she will or won't do is up to the brain model you picked. She still never follows orders written on your screen, still points you to a helpline if you say you want to hurt yourself, and Esc still stops her.
 
 KEYS (bottom of the page)
 - Talk, Mute mic, Type and Hide/show buttons show her keys. Click one, then press new keys (hold Ctrl or Alt with a letter, number or F-key). Esc cancels.
@@ -352,6 +356,10 @@ Messages you may see:
 - "Pick a letter, number or F-key."
 - "<key> is already her talk key." (or mute key)
 - "<key> is taken by another app. Try another."
+
+These show under the KEYS row when you change a key in Settings, and under VOICE when you change it on the main page.
+
+If a key you set before 0.7.3 matches her newer Type (Ctrl + Alt + T) or Hide/show (Ctrl + Alt + H) key, your old key wins. Type moves to Ctrl + Alt + Y, or Hide/show to Ctrl + Alt + J, and the KEYS row shows the new one.
 - "Saved. <key> starts voice chat." or "Saved. <key> mutes your mic."
 
 ### The Mainframe looks squashed or cut off
@@ -552,7 +560,11 @@ Press Ctrl + Alt + V again, or the wave, to stop.
 
 ### Free voice chat
 Voice chat follows your pick under VOICE. With FREE VOICE picked, or no ElevenLabs key, it's free: you talk, she answers out loud with her free voice and your picked brain.
-- She listens with her own offline ears for English (a download the first time: "My ears are still downloading, so type to me for now. I'll say when I can hear you."). Other languages use Windows speech.
+- She listens with her own offline ears, a download the first time: "My ears are still downloading, so type to me for now. I'll say when I can hear you."
+- Her ears hear English and 24 other European languages, Spanish, French, German, Italian, Portuguese, Dutch, Polish, Russian and Ukrainian among them. English and the rest are separate downloads, so switching between them downloads the other pack once.
+- She listens for her language from Settings. When she's on English and Windows isn't, she listens for your Windows language.
+- Turkish, Vietnamese, Indonesian, Filipino and Norwegian use Windows speech instead.
+- If her ears don't download, she says so and tries again by herself after 30 seconds, then 1, 2 and 4 minutes, then every 5.
 - "One sec, opening my ears." then "Free voice chat is on; talk and I'll type back." or similar.
 
 ### "Couldn't unpack her ears: tar.exe: Error opening archive: Can't initialize filter"
@@ -577,16 +589,16 @@ Since 0.7.1, muting pauses ElevenLabs voice chat once she stops talking: "Mic mu
 If you go quiet, she stays quiet too: she doesn't ask if you're still there. After a bit the call rests, which saves your ElevenLabs credits. Just talk and she picks up again.
 
 ### Can she do things in voice chat?
-Yes. Ask her to open apps, play music and so on, the same as in text.
+Yes. Ask her to open apps, play music and so on, the same as in text. A job with her cursor (playing a song, searching YouTube, anything with clicks) can take a minute, so in ElevenLabs voice chat she says she's on it straight away and tells you how it went when it's done. Asking again while it runs doesn't start it twice. With no brain set up, she plays music and changes the volume with her quick tools instead.
 
 ### Does she comment on my screen during voice chat?
 No. Watch my screen pauses during voice chat. Ask her "check my screen" and she looks.
 
 ### How does ElevenLabs voice chat work?
-Capri makes a voice agent called "Capri" in your own ElevenLabs account and talks through it. Your voice goes to ElevenLabs while it's on. Free voice chat with her own ears stays on your PC (Windows speech for other languages goes through Microsoft).
+Capri makes a voice agent called "Capri" in your own ElevenLabs account and talks through it. Your voice goes to ElevenLabs while it's on. Free voice chat with her own ears stays on your PC (Windows speech, used for languages her ears don't know, goes through Microsoft).
 
 ### Voice chat in other languages
-If you pick another language in Settings, voice chat tries to use it too. This is new and not well tested yet.
+If you pick another language in Settings, voice chat uses it too. Free voice chat hears 25 languages with her own ears (see Free voice chat above). ElevenLabs voice chat in other languages is new and not well tested yet.
 
 ---
 
@@ -672,12 +684,14 @@ Just ask her, in text or voice chat.
 - "Search YouTube for parkour"
 - She opens anything in your Start menu's All apps list.
 - "No app called X is installed on this PC." means it isn't in your Start menu. Use the name it has there.
-- "More than one app matches X: A, B. Which one?" Tell her which.
+- When several apps match, she opens the one whose name is closest to what you said. Say its full name to get a different one.
 
 ### Music
 - "Play Chippin' In by SAMURAI": plays it on Spotify if you have it, or on YouTube if not.
 - Playlists, albums, artists and "my liked songs" work on Spotify.
-- "Pause", "next", "previous", "turn it up", "turn it down", "mute"
+- "Pause", "next", "previous", "turn it up", "turn it down", "mute", "unmute", and other ways of saying them: "turn up the volume a bit", "it's too loud", "set the volume to 50%", "turn on the volume", "turn mute off", "skip to the next song". Spanish and French work too ("sube el volumen", "baisse le son").
+- These work on every brain, straight away, and even before you've set one up.
+- Volume means your PC's volume. She only drags Spotify's own slider when you say Spotify ("turn Spotify up").
 - "What's playing?"
 - "Play something": she picks from the Cyberpunk 2077 and Edgerunners soundtracks.
 - Name the artist for the best match.
@@ -707,12 +721,15 @@ For Discord she brings Discord to the front, presses the keys, then switches you
 ### Jobs with your mouse and keyboard
 - "Send hi to Sam on Discord", "Search for cats in Chrome", "End the call"
 - Her own pink pointer glides over and clicks. Your mouse stays where you left it: she only borrows it for each click and gives it back. Recordings show her pointer.
-- A "CAPRI: working on your task" box in the corner shows each step. A "Capri is controlling ..." badge shows on the app she's using. Screenshots and screen recordings don't pick up the box or badge.
-- Only Esc stops her: "You pressed Esc, so I stopped." Moving your mouse doesn't stop her.
+- A "CAPRI: working on your task" box in the corner shows each step, and she sits on top of it while she works, so she never covers her pointer. Drag her or the box to move both; the box stays where you put it for later jobs until Capri restarts. When it fades she goes back to where she was. A "Capri is controlling ..." badge shows on the app she's using. Screen recordings and your screenshots show the box but not the badge, and her own screenshots look straight through both.
+- Only Esc stops her: "You pressed Esc, so I stopped." It works even while she's holding a key down or pressing one over and over, and it stops the whole ask: if you asked for eight songs, the rest don't play. Moving your mouse doesn't stop her.
+- If her brain fails partway through a job (a rate limit, a timeout or an outage), she lets go of any mouse button she was holding and gives your mouse back.
+- One job uses your mouse at a time. Ask for another while she's busy and it waits its turn.
 - With a Claude key she works from screenshots and checks what happened after each step.
 - "Send" sends the message. "Write", "type" or "draft" leaves it for you to send.
 - She asks first before buying or paying for anything, or before sending, posting, deleting or installing something you didn't ask for. Reply yes, or no ("Okay, I left it alone."). With Bypass all permissions on (Settings > HABITS) she never asks, even for those.
-- She never types in password boxes: "Won't type in a password box. They type passwords themselves."
+- She skips password boxes ("Won't type in a password box.") unless Bypass all permissions is on. With it on, she types passwords and card numbers when the job needs them. Anything she types into a password box shows as dots (••••••••) in the steps box, in her reply and in her saved chat, and she says "the password" out loud instead.
+- Jobs have no step limit. Big models can work on one for as long as it takes; Esc stops her.
 - Bigger brain models handle jobs better. If she gets lost, pick a bigger model under BRAIN, or a Claude key under MAX INTELLIGENCE.
 
 ### Look things up
@@ -722,8 +739,8 @@ For Discord she brings Discord to the front, presses the keys, then switches you
 Now and then she asks you to say please. Reply "please" and she does it.
 
 ### What she can't do
-- She can't open, read or change your files.
-- She won't do anything unsafe, and won't play songs whose names include some words (drinking, smoking, drugs and so on).
+- She has no file tool yet, so she can't read what's inside your files.
+- With Bypass all permissions off, she won't open or play things whose names include some words (drinking, smoking, drugs and so on). With it on, that's up to the brain model you picked.
 
 ---
 
@@ -839,7 +856,7 @@ Quit Capri, then delete the Capri folder you unpacked. Her settings are in ~/.co
 
 ### What stays on my PC
 - Her built-in brain and Ollama: your chats never leave your PC.
-- Her free voice, and her own ears in English free voice chat.
+- Her free voice, and her own ears in free voice chat (English and 24 other European languages).
 - Her notes (me.md), chat history (chat.json, kept a week), settings and error log.
 - Your keys. On Windows they're locked to your Windows account. On Mac and Linux the ElevenLabs key is a file only your user can read.
 - Dancing: she listens to what your PC is playing to find the beat, in memory only. Nothing is recorded or sent.
@@ -1072,7 +1089,9 @@ Then check the exact message, your Capri version (top of the Mainframe), and the
 - I want ElevenLabs voice chat but get free voice chat: pick ELEVENLABS under VOICE. Voice chat follows that pick.
 - "ElevenLabs is off, so voice chat is too." (0.6.9 test builds): tick Use ElevenLabs, or update. 0.6.9 also had a "Free voice chat" box; in 0.7.0 the FREE VOICE row does that.
 - "My ears are still downloading, so type to me for now.": her offline ears download the first time you use free voice chat. She says when she can hear you.
-- "Free voice chat on, but Windows speech only hears your default mic": in languages other than English, Windows speech uses your Windows default mic. Make the mic you want the default in Windows.
+- "My ears didn't download, so type to me for now. ... I'll try again in 30 seconds.": the reason is in the middle. She retries by herself; check your internet and free space on the drive she named.
+- "I can't hear anything from your mic.": 20 seconds of free voice chat brought no sound at all. Pick your mic under VOICE > Mic. If it's right, open Windows Settings > Privacy & security > Microphone and turn on "Let desktop apps access your microphone".
+- "Free voice chat on, but Windows speech only hears your default mic": while her own ears download, or in a language they don't know, Windows speech uses your Windows default mic. Make the mic you want the default in Windows.
 - "Out of ElevenLabs credits, so voice chat is off.": wait for your credits to refill, or upgrade.
 - "Can't open my voice link. Right-click me and open Capri Mainframe. The reason and the fix are under VOICE.": open the Mainframe and read the line under VOICE.
 - "ElevenLabs didn't make the agent." or "ElevenLabs didn't open a voice link.": make a new key with Restrict key off and paste it.
@@ -1117,7 +1136,6 @@ Then check the exact message, your Capri version (top of the Mainframe), and the
 - "Discord isn't open, so I couldn't press its shortcut.": open Discord first.
 - Mouse and keyboard jobs don't work well: bigger models do these better. Pick a bigger model under BRAIN, or a Claude key under MAX INTELLIGENCE. Your mouse doesn't stop her; press Esc to stop.
 - A job worked once and failed later: post the exact words you asked, the BRAIN model, the app, whether you said yes when she asked, and her reply, in the Discord.
-- "Ran out of steps.": the job was too long. Split it into smaller asks.
 - Steam game updates or bringing back a minimized game don't work: these are hit and miss right now. Do them yourself.
 - "I haven't done that yet, choom.": tell her exactly what to open or click.
 

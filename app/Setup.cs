@@ -83,6 +83,8 @@ namespace CapriSetup
                 using (SHA256 sha = SHA256.Create()) File.WriteAllText(Path.Combine(output, "payload.sha256"), BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant());
                 if (!Ours(Path.Combine(output, "Capri.exe"))) throw new InvalidDataException("The installer doesn't recognise its own Capri.exe.");
                 if (Ours(Application.ExecutablePath) || Ours(Path.Combine(Environment.SystemDirectory, "notepad.exe")) || Ours(Path.Combine(output, "missing.exe"))) throw new InvalidDataException("The installer takes other programs for Capri.");
+                string home = Path.Combine(output, "Capri");
+                if (!Inside(Path.Combine(home, "Capri.exe"), home) || !Inside(Path.Combine(home, "brain", "llama-server.exe"), home + "\\") || Inside(Path.Combine(output, "Capri2", "Capri.exe"), home) || Inside(Path.Combine(Environment.SystemDirectory, "notepad.exe"), home) || Inside(home, home)) throw new InvalidDataException("The uninstaller would close the wrong programs.");
                 using (SetupWindow preview = new SetupWindow(false))
                 {
                     preview.Show();
@@ -94,7 +96,7 @@ namespace CapriSetup
                     Snap(preview, Path.Combine(output, "installer-speech.png"));
                     preview.Close();
                 }
-                File.WriteAllText(Path.Combine(output, "packaging-test.txt"), "PASS embedded executable extracted\nPASS PE signature\nPASS SHA-256 computed\nPASS an unmarked Capri.exe is recognised as Capri, other programs aren't\nPASS installer window rendered\nPASS the installer says it's installing the local speech model, that it may take some time, and that an API key gives a better, faster voice\nLIMIT installation and uninstallation were not performed\n");
+                File.WriteAllText(Path.Combine(output, "packaging-test.txt"), "PASS embedded executable extracted\nPASS PE signature\nPASS SHA-256 computed\nPASS an unmarked Capri.exe is recognised as Capri, other programs aren't\nPASS installer window rendered\nPASS the installer says it's installing the local speech model, that it may take some time, and that an API key gives a better, faster voice\nPASS the uninstaller closes Capri and anything running from her folder, like her brain, and nothing else\nLIMIT installation and uninstallation were not performed\n");
                 return 0;
             }
             catch (Exception error) { Directory.CreateDirectory(output); File.WriteAllText(Path.Combine(output, "failure.txt"), error.ToString()); return 1; }
@@ -278,14 +280,7 @@ namespace CapriSetup
                 string destination = Path.GetFullPath(InstallPath);
                 string expected = Path.GetFullPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Capri"));
                 if (!string.Equals(destination, expected, StringComparison.OrdinalIgnoreCase) || !File.Exists(Path.Combine(destination, ".capri-install"))) throw new IOException("The Capri install marker could not be verified.");
-                foreach (Process process in Process.GetProcessesByName("Capri"))
-                {
-                    using (process)
-                    {
-                        try { if (string.Equals(process.MainModule.FileName, Path.Combine(destination, "Capri.exe"), StringComparison.OrdinalIgnoreCase)) throw new IOException("Quit Capri from her tray menu before removing her."); }
-                        catch (System.ComponentModel.Win32Exception) { }
-                    }
-                }
+                CloseEverything(destination);
                 string uninstaller = Path.Combine(destination, "Uninstall.exe");
                 for (int i = 0; i < 25; i++)
                 {
@@ -293,12 +288,12 @@ namespace CapriSetup
                     catch (IOException) { System.Threading.Thread.Sleep(100); }
                 }
                 if (File.Exists(uninstaller)) throw new IOException("The uninstaller is still open. Close it and try removing Capri again.");
-                File.Delete(Path.Combine(destination, "Capri.exe"));
+                Patiently(delegate { File.Delete(Path.Combine(destination, "Capri.exe")); });
                 File.Delete(Path.Combine(destination, ".capri-install"));
                 foreach (string pack in new[] { "brain", "voice", "ears" })
                 {
                     string folder = Path.Combine(destination, pack);
-                    if (Directory.Exists(folder)) Directory.Delete(folder, true);
+                    Patiently(delegate { if (Directory.Exists(folder)) Directory.Delete(folder, true); });
                 }
                 DeleteShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Capri.lnk"), destination);
                 DeleteShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Capri.lnk"), destination);
@@ -308,6 +303,47 @@ namespace CapriSetup
                 return 0;
             }
             catch (Exception error) { MessageBox.Show(error.Message, "Capri could not be removed", MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }
+        }
+
+        // Capri and anything running from her folder, like her brain's engine, hold its files, so they're closed first.
+        // Nothing outside the folder is touched.
+        internal static void CloseEverything(string folder)
+        {
+            int self;
+            using (Process me = Process.GetCurrentProcess()) self = me.Id;
+            foreach (Process process in Process.GetProcesses())
+            {
+                using (process)
+                {
+                    try
+                    {
+                        if (process.Id == self || !Inside(process.MainModule.FileName, folder)) continue;
+                        process.Kill();
+                        process.WaitForExit(5000);
+                    }
+                    catch (System.ComponentModel.Win32Exception) { }
+                    catch (InvalidOperationException) { }
+                    catch (NotSupportedException) { }
+                }
+            }
+        }
+
+        internal static bool Inside(string file, string folder)
+        {
+            if (string.IsNullOrEmpty(file) || string.IsNullOrEmpty(folder)) return false;
+            return Path.GetFullPath(file).StartsWith(Path.GetFullPath(folder).TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // A file can stay locked for a moment after the program holding it closes.
+        private static void Patiently(Action remove)
+        {
+            for (int tries = 1; ; tries++)
+            {
+                try { remove(); return; }
+                catch (IOException) { if (tries == 10) throw; }
+                catch (UnauthorizedAccessException) { if (tries == 10) throw; }
+                System.Threading.Thread.Sleep(300);
+            }
         }
 
         private static void DeleteShortcut(string path, string destination)

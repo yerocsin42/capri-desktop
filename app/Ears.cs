@@ -671,8 +671,9 @@ namespace CapriDesktop
         }
     }
 
-    // Her own ears: NVIDIA's Parakeet TDT 0.6B v2 (CC-BY-4.0, English), run by the sherpa-onnx her free voice ships.
-    // They hear whichever mic is picked, offline, without Windows' online speech setting.
+    // Her own ears: NVIDIA's Parakeet TDT 0.6B (CC-BY-4.0), run by the sherpa-onnx her free voice ships. v2 hears English;
+    // v3 hears 25 European languages and works out which one it's hearing. They hear whichever mic is picked, offline,
+    // without Windows' online speech setting.
     internal sealed class LocalEars : IDisposable
     {
         internal const string Pack = "parakeet-tdt-0.6b-v2-int8";
@@ -680,20 +681,44 @@ namespace CapriDesktop
         internal static string PackSha = "157c157bc51155e03e37d2466522a3a737dd9c72bb25f36eb18912964161e1ad";
         internal static long PackSize = 482468385;
         private const string Inside = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8";
+        internal const string EuropeanPack = "parakeet-tdt-0.6b-v3-int8";
+        internal static string EuropeanUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2";
+        internal static string EuropeanSha = "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf";
+        internal static long EuropeanSize = 487170055;
+        private const string EuropeanInside = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8";
+        // What v3 hears, as two-letter language codes.
+        internal static readonly string[] European = { "bg", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "de", "el", "hu", "it", "lv", "lt", "mt", "pl", "pt", "ro", "sk", "sl", "es", "sv", "ru", "uk" };
         internal static readonly string[] Needed = { "encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt" };
-        private readonly string folder;
+        private readonly string root;
         private readonly string engine;
         private readonly object gate = new object();
         private IntPtr recognizer;
+        private string opened;
+        private volatile string language = "en";
         internal volatile bool Cancel;
 
         internal LocalEars(string data)
         {
-            folder = Path.Combine(Path.Combine(data, "ears"), Pack);
+            root = Path.Combine(data, "ears");
             engine = LocalVoice.Folder(data);
         }
 
-        internal bool Installed { get { return Complete(folder); } }
+        // The language they'll speak: Capri's, unless she's on English and Windows isn't, which makes English just her default.
+        internal static string Spoken(string capri, string windows) { return capri != "en" || string.IsNullOrEmpty(windows) ? capri : windows.ToLowerInvariant(); }
+
+        // A change takes effect at the next thing she hears.
+        internal string Language { get { return language; } set { language = value ?? "en"; } }
+
+        internal bool Fits { get { return IntPtr.Size == 8 && Array.IndexOf(European, language) >= 0; } }
+
+        // The pack that hears their language: v2 for English, v3 for its other languages, none for the rest, which keep Windows speech.
+        internal string Model { get { return !Fits ? null : language == "en" ? Pack : EuropeanPack; } }
+
+        internal long Size { get { return Model == EuropeanPack ? EuropeanSize : PackSize; } }
+
+        private string Folder { get { return Path.Combine(root, Model ?? Pack); } }
+
+        internal bool Installed { get { return Fits && Complete(Folder); } }
 
         // Ready to hear: the model is in, and so is the free voice that brings sherpa-onnx.
         internal bool Ready { get { return IntPtr.Size == 8 && Installed && File.Exists(Path.Combine(engine, "sherpa-onnx-c-api.dll")) && File.Exists(Path.Combine(engine, "onnxruntime.dll")); } }
@@ -707,19 +732,22 @@ namespace CapriDesktop
         internal void Install(Action<string, long, long> progress)
         {
             if (IntPtr.Size != 8) throw new IOException("Her ears need 64-bit Windows.");
-            string root = Path.GetDirectoryName(folder);
+            if (!Fits) throw new IOException("Her own ears don't know your language yet.");
+            bool english = Model == Pack;
+            string folder = Folder;
+            long size = english ? PackSize : EuropeanSize;
             Directory.CreateDirectory(root);
-            long needed = PackSize * 3 + (64L << 20);
+            long needed = size * 3 + (64L << 20);
             string drive = Path.GetPathRoot(root);
             if (new DriveInfo(drive).AvailableFreeSpace < needed) throw new IOException("Her ears need " + Engine.Amount(needed) + " free on " + drive.TrimEnd('\\') + ".");
             string tarball = folder + ".tar.bz2";
-            Engine.Fetch(PackUrl, tarball, PackSize, PackSha, "her ears", progress, delegate { return Cancel; });
-            progress("Unpacking her ears", PackSize, PackSize);
+            Engine.Fetch(english ? PackUrl : EuropeanUrl, tarball, size, english ? PackSha : EuropeanSha, "her ears", progress, delegate { return Cancel; });
+            progress("Unpacking her ears", size, size);
             string staging = folder + ".new";
             if (Directory.Exists(staging)) Directory.Delete(staging, true);
             Directory.CreateDirectory(staging);
             Untar(tarball, staging);
-            string unpacked = Path.Combine(staging, Inside);
+            string unpacked = Path.Combine(staging, english ? Inside : EuropeanInside);
             if (!Complete(unpacked)) throw new IOException("The ears download is missing files.");
             lock (gate)
             {
@@ -799,7 +827,9 @@ namespace CapriDesktop
 
         private void Open()
         {
-            if (recognizer != IntPtr.Zero) return;
+            string folder = Folder;
+            if (recognizer != IntPtr.Zero && opened == folder) return;
+            Close();
             if (!Ready) throw new IOException("Her ears aren't in yet.");
             LocalVoice.Load(engine);
             List<IntPtr> held = new List<IntPtr>();
@@ -825,6 +855,7 @@ namespace CapriDesktop
                 foreach (IntPtr pointer in held) Marshal.FreeHGlobal(pointer);
             }
             if (recognizer == IntPtr.Zero) throw new IOException("Her ears wouldn't start.");
+            opened = folder;
         }
 
         // Far more than the real struct, which only grows at its end as sherpa-onnx adds models.
@@ -1106,6 +1137,59 @@ namespace CapriDesktop
         [PreserveSig] int GetBuffer(out IntPtr data, out int frames, out int flags, out long position, out long time);
         [PreserveSig] int ReleaseBuffer(int frames);
         [PreserveSig] int GetNextPacketSize(out int frames);
+    }
+
+    // IAudioEndpointVolume, up to GetMute.
+    [ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface ISpeakerVolume
+    {
+        [PreserveSig] int RegisterControlChangeNotify(IntPtr notify);
+        [PreserveSig] int UnregisterControlChangeNotify(IntPtr notify);
+        [PreserveSig] int GetChannelCount(out int count);
+        [PreserveSig] int SetMasterVolumeLevel(float decibels, IntPtr context);
+        [PreserveSig] int SetMasterVolumeLevelScalar(float level, IntPtr context);
+        [PreserveSig] int GetMasterVolumeLevel(out float decibels);
+        [PreserveSig] int GetMasterVolumeLevelScalar(out float level);
+        [PreserveSig] int SetChannelVolumeLevel(int channel, float decibels, IntPtr context);
+        [PreserveSig] int SetChannelVolumeLevelScalar(int channel, float level, IntPtr context);
+        [PreserveSig] int GetChannelVolumeLevel(int channel, out float decibels);
+        [PreserveSig] int GetChannelVolumeLevelScalar(int channel, out float level);
+        [PreserveSig] int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, IntPtr context);
+        [PreserveSig] int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
+    }
+
+    // The PC's own volume and mute on the default speakers, the ones the volume keys change. Null or false when Windows won't say.
+    internal static class Speakers
+    {
+        internal static bool? Muted() { bool muted = false; return Use(delegate(ISpeakerVolume volume) { return volume.GetMute(out muted); }) ? muted : (bool?)null; }
+
+        internal static bool Mute(bool muted) { return Use(delegate(ISpeakerVolume volume) { return volume.SetMute(muted, IntPtr.Zero); }); }
+
+        internal static double? Level() { float level = 0; return Use(delegate(ISpeakerVolume volume) { return volume.GetMasterVolumeLevelScalar(out level); }) ? level : (double?)null; }
+
+        internal static bool SetLevel(double level) { return Use(delegate(ISpeakerVolume volume) { return volume.SetMasterVolumeLevelScalar((float)Math.Max(0, Math.Min(1, level)), IntPtr.Zero); }); }
+
+        private static bool Use(Func<ISpeakerVolume, int> act)
+        {
+            ISoundDevices devices = null;
+            ISoundDevice device = null;
+            object found = null;
+            try
+            {
+                devices = (ISoundDevices)new SoundDevices();
+                if (devices.GetDefaultAudioEndpoint(0, 0, out device) != 0 || device == null) return false;
+                Guid volumeId = typeof(ISpeakerVolume).GUID;
+                if (device.Activate(ref volumeId, 23, IntPtr.Zero, out found) != 0 || found == null) return false;
+                return act((ISpeakerVolume)found) == 0;
+            }
+            catch (Exception) { return false; }
+            finally
+            {
+                if (found != null) Marshal.ReleaseComObject(found);
+                if (device != null) Marshal.ReleaseComObject(device);
+                if (devices != null) Marshal.ReleaseComObject(devices);
+            }
+        }
     }
 
     internal sealed class SoundTap : IDisposable
