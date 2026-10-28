@@ -51,6 +51,8 @@ namespace CapriDesktop
             Hands.PleaseRoll = delegate { return 1; };
             Directory.CreateDirectory(folder);
             if (File.Exists(Path.Combine(folder, "me.md"))) File.Delete(Path.Combine(folder, "me.md"));
+            foreach (string old in new[] { Brain.PersonalityPath, Brain.PersonalityBackup }) if (old != null && File.Exists(old)) File.Delete(old);
+            Brain.MakePersonality();
         }
 
         internal void Tick(double now)
@@ -277,6 +279,20 @@ namespace CapriDesktop
                 string notesPath = pet.OpenNotes();
                 if (saved != "Saved to my notes: They love Hollow Knight." || kept != "- They love Hollow Knight" || forgot != "Forgot my note about hollow knight." || Brain.Notes() != "" || notesPath == null || !File.ReadAllText(notesPath).StartsWith("# What Capri remembers", StringComparison.Ordinal)) throw new Exception("Her notes didn't work: " + saved + " / " + kept + " / " + forgot);
                 checks.Add("PASS notes: remember and forget save to me.md here too, and Open her notes makes the file");
+                bool personalityMade = Brain.PersonalityPath == Path.Combine(folder, "personality.md") && File.ReadAllText(Brain.PersonalityPath) == Brain.PersonalityFile && Brain.Persona == Brain.DefaultPersonality + "\n" + Brain.Machinery;
+                File.Delete(Brain.PersonalityPath);
+                string personalityPath = pet.OpenPersonality();
+                bool personalityOpened = personalityPath == Brain.PersonalityPath && File.ReadAllText(personalityPath) == Brain.PersonalityFile && Brain.PersonalityNote == Brain.HerDefault;
+                File.WriteAllText(personalityPath, "<!-- mine -->\nYou are Capri, but grumpy.\n");
+                bool personalityEdited = Brain.Persona == "You are Capri, but grumpy.\n" + Brain.Machinery && Brain.Character.StartsWith("You are Capri, but grumpy.\n", StringComparison.Ordinal) && Brain.PersonalityNote == Brain.YourEdit;
+                pet.ResetPersonality();
+                bool personalityReset = pet.Talk.Reply == Brain.ResetKept && Brain.Personality == Brain.DefaultPersonality && File.ReadAllText(Brain.PersonalityBackup) == "<!-- mine -->\nYou are Capri, but grumpy.\n";
+                File.WriteAllText(personalityPath, "");
+                bool personalityEmpty = Brain.Personality == Brain.DefaultPersonality && Brain.PersonalityNote == Brain.BlankFile;
+                File.WriteAllText(personalityPath, Brain.PersonalityFile);
+                File.Delete(Brain.PersonalityBackup);
+                if (!personalityMade || !personalityOpened || !personalityEdited || !personalityReset || !personalityEmpty) throw new Exception("personality.md went wrong: made " + personalityMade + ", opened " + personalityOpened + ", edited " + personalityEdited + ", reset " + personalityReset + ", empty " + personalityEmpty);
+                checks.Add("PASS personality.md: it starts as her default next to me.md, an edit reaches her prompt on her next reply, an empty one falls back to her default, and Reset puts her default back and keeps theirs as personality.backup.md");
                 List<short[]> typedHeard = new List<short[]>();
                 Sfx.TypeOut = delegate(short[] typed) { typedHeard.Add(typed); };
                 Sfx.Untyped = delegate { };

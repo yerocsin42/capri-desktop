@@ -37,6 +37,7 @@ namespace CapriDesktop
         [DataMember(Name = "direction")] public string Direction;
         [DataMember(Name = "seconds")] public string Seconds;
         [DataMember(Name = "minutes")] public string Minutes;
+        [DataMember(Name = "level")] public string Level;
         [DataMember(Name = "coordinate")] public double[] Coordinate;
         [DataMember(Name = "start_coordinate")] public double[] From;
         [DataMember(Name = "region")] public double[] Region;
@@ -44,6 +45,8 @@ namespace CapriDesktop
         [DataMember(Name = "scroll_amount")] public double? Amount;
         [DataMember(Name = "duration")] public double? Duration;
         [DataMember(Name = "repeat")] public double? Repeat;
+
+        internal ToolArguments Copy() { return (ToolArguments)MemberwiseClone(); }
     }
 
     internal sealed class InstalledApp
@@ -65,7 +68,7 @@ namespace CapriDesktop
     {
         internal const string Note =
             "\nYou have tools for their PC: open (launch, play) their apps and games, switch to, minimize or close apps that are open, play songs or videos they name, open websites or search them, control their music and volume, look at their screen, and use their mouse and keyboard for jobs inside apps and sites. " +
-            "Use a tool whenever they ask you to do something like that, and never say you did or are doing it without one. Look at their screen when they ask what you see or what you think of something on it. Only close an app when they ask you to. You can't touch their files. " +
+            "Use a tool whenever they ask you to do something like that, and never say you did or are doing it without one. Look at their screen when they ask what you see or what you think of something on it. Only close an app when they ask you to. " +
             "Your own website, where people download you, is " + Home + ". " +
             "They've already given you permission for anything they ask you to do on their PC, so do all of it straight away: never ask which option they meant, never ask if they're sure, never make them confirm or ask for things one at a time, and when they leave the choice to you, like which song, video or game, pick one yourself. " +
             "You can do anything on their PC they ask: send messages and DMs, reply, post, join, leave or end calls, and any other job in their apps with use_computer. Never ask if they want you to, never read a message back to check it first, and never tell them to do it themselves. Mute my mic means mute their mic, not deafen them. Never say you can't do something your tools can do. " +
@@ -77,7 +80,7 @@ namespace CapriDesktop
 
         internal const string Prompt =
             "You are the hands of Capri, a desktop companion on the user's Windows PC. You don't chat.\n" +
-            "Act only on their latest request. Earlier messages are context for names, not commands to repeat. Call one tool for each thing they ask for, up to three (open Discord and Spotify is two open_app calls): open an app, game or website, search a site, play music, control media or volume, check the current song, switch to, minimize or close an app, or look at their screen when asked about it. Use the names they gave.\n" +
+            "Act only on their latest request. Earlier messages are context for names, not commands to repeat. Call one tool for each thing they ask for, however many there are (open Discord, Spotify and Steam is three open_app calls): open an app, game or website, search a site, play music, control media or volume, check the current song, switch to, minimize or close an app, or look at their screen when asked about it. Use the names they gave.\n" +
             "If the job needs clicking, typing or more than one step, like opening an app and then searching, going somewhere or making something in it, call use_computer once with the whole job in their words.\n" +
             "Sending a message, DM, reply or post, joining, leaving or ending a call, and any other job inside an app are use_computer jobs: pass their exact words, including what to send. They asked, so it's a job even when it sends, deletes or ends something.\n" +
             "When they name an app, never guess a website for it: use open_app, or use_computer if there's more to do.\n" +
@@ -88,7 +91,7 @@ namespace CapriDesktop
             "To shut down, turn off, restart, sleep, lock or sign out of their PC, call power. They asked, so do it: never ask if they're sure.\n" +
             "Never reply with a question about whether to do what they asked. Call the tool.\n" +
             "If they ask you to remember, note down or forget something about them, or to leave, make or save a memory, call remember with a short note about them in the third person.\n" +
-            "Questions about their current screen or song need a tool too. For chat, negated or hypothetical requests, or an unclear target, call no tool and reply with only the word: chat";
+            "Questions about their current screen or song need a tool too. If the target is unclear, pick the closest match yourself. For chat, negated or hypothetical requests, call no tool and reply with only the word: chat";
 
         internal const string Chat =
             "\nNo tools ran for this message. Answer as yourself, with your own opinions and tastes. Don't claim you opened, played or looked at anything. You keep notes about them in me.md, saved whenever they ask you to remember something, so never say you can't remember things or keep memories; if they asked you to and nothing was saved, ask what they want you to remember. You can search Google for them: if they ask something you don't know or that changes, like the weather, news, scores or prices, say you'll look it up instead of guessing or saying you can't. If they asked you to do something on their PC, like send a message or end a call, never ask whether to: say On it and what you're doing, like On it, sending it now.";
@@ -99,8 +102,8 @@ namespace CapriDesktop
               "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"The app's name\"}},\"required\":[\"name\"]}" },
             { "open_website", "Open a website in their browser, or search a site like YouTube or Google.",
               "{\"type\":\"object\",\"properties\":{\"site\":{\"type\":\"string\",\"description\":\"The site's name or address, like youtube.com\"},\"search\":{\"type\":\"string\",\"description\":\"Words to search for on that site, if any\"}},\"required\":[\"site\"]}" },
-            { "media", "Control the music or video playing on their PC, or the volume, or check what song is playing.",
-              "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"description\":\"What to do\",\"enum\":[\"play_pause\",\"next\",\"previous\",\"volume_up\",\"volume_down\",\"mute\",\"now_playing\"]}},\"required\":[\"action\"]}" },
+            { "media", "Control the music or video playing on their PC, the PC's volume (up, down, set to a level, mute or unmute), or check what song is playing.",
+              "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"description\":\"What to do\",\"enum\":[\"play_pause\",\"next\",\"previous\",\"volume_up\",\"volume_down\",\"volume_set\",\"mute\",\"unmute\",\"now_playing\"]},\"level\":{\"type\":\"string\",\"description\":\"For volume_set, the volume from 0 to 100. For volume_up or volume_down, how many percent to change it, only if they said\"}},\"required\":[\"action\"]}" },
             { "look_at_screen", "Take a screenshot of their screen and look at it right now: what they're doing, playing or showing you. Use it whenever they ask you to check, look at or see their screen, or ask what something on it is. You can always look, so never say you can't see their screen.",
               "{\"type\":\"object\",\"properties\":{\"focus\":{\"type\":\"string\",\"description\":\"What to look at, if they said\"}}}" },
             { "play_music", "Play a song, playlist, album or artist they name, on Spotify or YouTube. For their liked songs, use kind playlist and song Liked Songs. If they leave the pick to you, pick a track from the Cyberpunk 2077 or Edgerunners soundtrack.",
@@ -156,6 +159,8 @@ namespace CapriDesktop
         internal static Func<string> NowPlaying = SpotifyTitle;
         internal static Func<string, string, string> Work = delegate { return "Using the mouse and keyboard isn't ready on this PC yet."; };
         internal static Func<string, string> Resume = delegate { return null; };
+        // Puts dots over a password she typed into a password box, wherever it would show or be saved.
+        internal static Func<string, string> Hush = delegate(string text) { return text; };
         internal static Action<byte[]> Chord = PressChord;
         internal static Func<string, int, bool> Power = Switch;
         private static readonly string[] Browsers = { "chrome", "msedge", "firefox", "brave", "opera", "vivaldi" };
@@ -199,11 +204,11 @@ namespace CapriDesktop
             {
                 if (tool == "open_app") return OpenApp(args.Name);
                 if (tool == "open_website") return OpenSite(args.Site, args.Search);
-                if (tool == "media") return Media(args.Action);
+                if (tool == "media") return Media(args);
                 if (tool == "look_at_screen") return Look(args.Focus);
                 if (tool == "play_music") return PlayMusic(args.Song, args.App, args.Kind);
                 if (tool == "app_window") return Window(args.Name, args.Action);
-                if (tool == "use_computer") return string.IsNullOrWhiteSpace(args.Task) ? "Which job, choom?" : Safety.Screen(args.Task) != null ? "Not doing that, choom." : Work(args.Task.Trim(), args.Asked);
+                if (tool == "use_computer") return string.IsNullOrWhiteSpace(args.Task) ? "Which job, choom?" : Safety.Stops(args.Task) != null ? "Not doing that, choom." : Work(args.Task.Trim(), args.Asked);
                 if (tool == "shortcut") return Shortcut(args.Name);
                 if (tool == "remember") return args.Action == "forget" ? Brain.Unnote(Theirs(args.Text)) : CallMe(args.Text) ?? Brain.Note(Theirs(args.Text));
                 if (tool == "power") return Turn(args.Action, args.Minutes);
@@ -275,8 +280,8 @@ namespace CapriDesktop
         }
 
         internal const string SayPlease = "Say please.";
-        private static readonly Regex Polite = new Regex(@"\b(please|pls|plz|pleas|thank you|thanks)\b", RegexOptions.IgnoreCase);
-        private static readonly Regex JustPlease = new Regex(@"^\W*((ok|okay|fine|sorry)\W+)?(pretty\s+)?(please+|pls|plz|pleas+e*)(\s+capri)?\W*$", RegexOptions.IgnoreCase);
+        private static readonly Regex Polite = new Regex(@"\b(please|pls|plz|pleas|thank you|thanks|por favor|porfa|porfis|gracias|merci|s'il (te|vous) pla[iî]t|stp|svp)\b", RegexOptions.IgnoreCase);
+        private static readonly Regex JustPlease = new Regex(@"^\W*((ok|okay|fine|sorry|vale|perd[oó]n|d[ée]sol[ée])\W+)?(pretty\s+)?(please+|pls|plz|pleas+e*|por favor|porfa|porfis|s'il (te|vous) pla[iî]t|stp|svp)(\s+capri)?\W*$", RegexOptions.IgnoreCase);
         private static readonly Random Dice = new Random();
         internal static Func<int> PleaseRoll = delegate { lock (Dice) return Dice.Next(10); };
         private static string heldForPlease;
@@ -350,7 +355,10 @@ namespace CapriDesktop
             @"|^\W*((ok|okay|sure|bet|alright)[,.!\s—–-]+)?(i'?m\s+)?on it\b|\b(call|vc|message|dm|text)\s+(ended|sent|posted)\b" +
             @"|^((done|sorted|there|boom|bet|ok|okay|alright)[,.!\s—–-]+)?(i('ve| have)\s+)?(just\s+)?(opened|launched|closed|sent(?!\s+(you|u|ya)\b)|messaged|texted|dmed|dm'd|posted|replied|muted|unmuted|deafened|undeafened|hung up|(ended|left|joined) (the|your|this|that) (call|vc|meeting|server|channel))\b", RegexOptions.IgnoreCase);
 
-        internal static bool Promised(string said) { return Promise.IsMatch((said ?? "").Replace('’', '\'')); }
+        // "I'm sending you the biggest hug" is warmth, not a message she owes them. Warmth sent to someone by name still counts.
+        private static readonly Regex Warmth = new Regex(@"\b(send(s|ing)?|sent)\s+((you|u|ya|y'all)\s+)?((a|an|the|my|some|all|so|much|many|lots|of|this|big|bigger|biggest|huge|massive|giant|tight|warm|warmest|virtual|good|positive|happy|healing|cozy|cosy|little|tiny|extra|more|mega|super|best|sweet|soft|gentle|digital|cyber|neon)\s+)*(hugs?|huggies|squeezes?|kiss(es)?|love|xoxo|vibes?|energy|thoughts|wishes|prayers?|luck|cuddles?|smooches?|hearts?|sunshine|strength|support|positivity|juju|blessings?|regards|cheers|kudos|props|high[- ]?fives?|fist[- ]?bumps?|headpats?|pats)\b(?!\s+(to|over to)\s+(?!(you|u|ya|y'all|yourself)\b)\w)", RegexOptions.IgnoreCase);
+
+        internal static bool Promised(string said) { return Promise.IsMatch(Warmth.Replace((said ?? "").Replace('’', '\''), "")); }
 
         private static readonly Regex Credit = new Regex(@"\b(you|ya|u)('ve| have)?\s+(just\s+|already\s+|finally\s+|actually\s+)?(opened|typed|launched|sent|closed|played|paused|skipped|muted|unmuted|deafened|undeafened|clicked|searched|posted|messaged|texted|dmed|dm'd|replied|wrote|pulled up|fired up|booted up|hung up|ended|left|joined)\b", RegexOptions.IgnoreCase);
 
@@ -402,7 +410,7 @@ namespace CapriDesktop
             return text.Length > 1 && text.Length < 80 && Regex.IsMatch(answered ?? "", @"(?<!\w)" + Regex.Escape(text) + @"(?!\w)", RegexOptions.IgnoreCase);
         }
 
-        private static readonly Regex Lead = new Regex(@"^((hey|yo|ok|okay|salut|bonjour)[\s,]+)?(capri\b[\s,]*)?(((can|could|would|will) (you|u)|do (you|u)(?= mind)|please|pls|plz|stp|s'il te pla[iî]t|(est-ce que )?tu peux|peux-tu|pourrais-tu)\s+)*", RegexOptions.IgnoreCase);
+        private static readonly Regex Lead = new Regex(@"^((hey|yo|ok|okay|salut|bonjour|oye|hola)[\s,]+)?(capri\b[\s,]*)?(((can|could|would|will) (you|u)|do (you|u)(?= mind)|please|pls|plz|stp|s'il te pla[iî]t|(est-ce que )?tu peux|peux-tu|pourrais-tu|(me )?puedes|(me )?podr[ií]as|por favor|porfa)\s+)*", RegexOptions.IgnoreCase);
         // "Check my screen", "can you see this?", "what game is this?": she takes a screenshot and looks, every time.
         private static readonly Regex ScreenAsk = new Regex(@"^(?:(?:can|could|would|will|do|did) (?:you|u) )?(?:(?:take a |have a |quick )?(?:look|peek|peep|glance)(?: at)?|check(?: out)?|see|watch|read|scan|view|look over|screenshot)(?: on)? (?:my|the|our|this|ur|your) (?:screen|monitor|display|desktop|pc|computer|stream|window|tab)s?$|^(?:(?:can|could|would|will|do|did) (?:you|u) )?(?:see|look at|check(?: out)?|peep|watch) (?:this|that|what i'?m (?:doing|playing|watching|looking at|working on|seeing))$|^(?:look at|check out|check|peep|watch) (?:this|that)(?: (?:out|real quick|quick))?$|^(?:take a|have a|quick) (?:look|peek|glance)(?: at (?:this|that|it|my screen|the screen))?$|^what(?:'s| is) on (?:my|the|our) (?:screen|monitor|display|desktop|pc)\b|^what (?:do|can|did) (?:you|u) see\b|^what are (?:you|u) (?:seeing|looking at)$|^what am i (?:doing|playing|watching|looking at|working on|reading)(?: (?:on my (?:screen|pc|computer)|rn|right now|now))?$|^regardes? (?:mon [ée]cran|[çc]a)$|^(?:tu )?(?:peux )?(?:voir|vois) mon [ée]cran$|^tu vois (?:mon [ée]cran|[çc]a)$|^qu'est-ce que (?:je fais|tu vois)$|^qu'est-ce qu'il y a sur mon [ée]cran$", RegexOptions.IgnoreCase);
         private static readonly Regex ScreenQuestion = new Regex(@"^what(?:'s| is) this(?: (?:game|app|thing|site|website|show|anime|movie|video|error|bug|code|program|word|map|level|boss|character|item|guy))?$|^what(?:'s| is) that (?:game|app|thing|site|website|show|anime|movie|video|error|bug|code|program|word|map|level|boss|character|item|guy)$|^what (?:game|app|anime|show|movie|video|website|site|error|program|level|map|boss|character|item) is (?:this|that)$|^who is this(?: (?:guy|character|boss))?$|^(?:how does|does) this look(?: (?:good|ok|okay|right|alright))?$|^what do (?:you|u) think (?:of|about) (?:this|my (?:screen|setup|build|base|drawing|art|design|avatar|character|thumbnail|outfit|fit|skin))$|^(?:look at|check out|peep|read) (?:this|that) \w+(?: \w+)?$|^rate (?:this|my (?:setup|desktop|wallpaper|screen|build|base|drawing|art|design|avatar|character|thumbnail|outfit|fit|skin))$", RegexOptions.IgnoreCase);
@@ -415,21 +423,91 @@ namespace CapriDesktop
 
         private static string Asked(string said)
         {
+            said = Regex.Replace(said ?? "", @"^[\s¿¡]+", "");
             string text = Lead.Replace(Opener.Replace(Regex.Replace((said ?? "").Replace('\u2019', '\'').Trim(), @"\s+", " "), ""), "");
-            for (int i = 0; i < 3; i++) text = Regex.Replace(Regex.Replace(text, @"[\s,.!?]+$", ""), @"\s+(for me|please|pls|plz|rn|right now|now|stp|s'il te pla[iî]t)$", "", RegexOptions.IgnoreCase);
+            for (int i = 0; i < 3; i++) text = Regex.Replace(Regex.Replace(text, @"[\s,.!?]+$", ""), @"\s+(for me|please|pls|plz|rn|right now|now|stp|s'il te pla[iî]t|por favor|porfa|porfis)$", "", RegexOptions.IgnoreCase);
             return text;
         }
+        // Volume, mute and music in everyday words, in English, Spanish and French, so they never wait on a brain.
+        // Volume means the PC's volume: Spotify's own slider only when they say Spotify.
+        private const string Owner = @"(?:(?:the|my|ur|your|our|this|that|all the|pc'?s?|computer'?s?|laptop'?s?|spotify'?s?|youtube'?s?|game'?s?|video'?s?|music'?s?|song'?s?)\s+)*";
+        private const string Noise = Owner + @"(?:volume|vol|sound|sounds|audio|music|song|track|tune|tunes|video|game|pc|computer|laptop|speakers?|headphones?|headset|everything|spotify|youtube)";
+        private const string Thing = @"(?:it|this|that|" + Noise + ")";
+        private const string Sound = Owner + @"(?:volume|vol|sound|sounds|audio|speakers?)";
+        private const string Loud = Owner + @"(?:volume|vol|sound|sounds|audio|music|speakers?)";
+        private const string Tune = @"(?:(?:the|my|this|that|spotify'?s?|youtube'?s?)\s+)*(?:music|song|track|tune|tunes|video|vid|playback|spotify|youtube|podcast)";
+        private const string Percent = @"\s*(?:%|percent|per ?cent|por ?ciento|pour ?cent)?";
         private static readonly string[] MediaWords =
         {
-            @"^(pause|stop the music|pause (it|this|spotify|(the|this) (music|song|track|video)))$", "pause",
-            @"^(unpause|resume|unpause (it|spotify|the (music|song|video))|resume (it|spotify|the (music|song|track|video))|keep playing|play it again)$", "resume",
-            @"^(skip|next|skip (this|the) (song|track)|next (song|track))$", "next",
-            @"^(previous|go back|(last|previous) (song|track))$", "previous",
-            @"^(turn (it|the volume|the music) up|volume up|louder)$", "volume_up",
-            @"^(turn (it|the volume|the music) down|volume down|quieter)$", "volume_down",
-            @"^(un)?mute( (it|the volume|the sound))?$", "mute",
-            @"^((what('|\u2019)?s|what is) (playing|this song|this track|the song|on spotify)|what (song|track)( is|('|\u2019)s)? (this|playing|on)|what am i listening to|what are we listening to)$", "now_playing"
+            // A level: "volume to 50", "set the volume to 30%", "max the volume".
+            @"^(?:(?:set|put|turn|change|make|bring|get|adjust|move|crank|drop|lower|raise|have)\s+)?" + Sound + @"(?:\s+level)?\s+(?:to|at|on|=)?\s*(?<n>\d{1,3})" + Percent + "$", "volume_set", "n",
+            @"^(?:set|put|turn|bring|crank|drop|lower|raise|move)\s+(?:it|this|that)\s+(?:(?:up|down)\s+)?(?:to|at)\s+(?<n>\d{1,3})\s*(?:%|percent|per ?cent)$", "volume_set", "n",
+            @"^(?:turn|crank|bring|put)\s+" + Thing + @"\s+(?:up|down)\s+to\s+(?<n>\d{1,3})" + Percent + "$", "volume_set", "n",
+            @"^(?:max|maximi[sz]e|full)\s+(?:out\s+)?" + Sound + @"(?:\s+out)?$|^" + Sound + @"\s+(?:to\s+|at\s+|on\s+)?(?:the\s+)?(?:max|maximum|full|top)$|^(?:full|max|maximum)\s+volume$|^(?:turn|crank|pump|put)\s+" + Thing + @"\s+(?:all the way up|up all the way|up to (?:the\s+)?max|to (?:the\s+)?max)$", "volume_set", "100",
+            @"^(?:turn|bring|put)\s+" + Thing + @"\s+(?:all the way down|down all the way)$|^" + Sound + @"\s+(?:to\s+)?(?:zero|nothing)$", "volume_set", "0",
+            @"^(?:half|50%)\s+volume$|^" + Sound + @"\s+(?:to\s+|at\s+)?half(?:\s*way)?$", "volume_set", "50",
+            @"^(?:(?:pon|sube|baja|ajusta|deja)\s+)?(?:el\s+)?volumen\s+(?:al|a|en)\s+(?<n>\d{1,3})" + Percent + @"$|^(?:mets\s+)?(?:le\s+)?(?:son|volume)\s+[a\u00e0]\s+(?<n>\d{1,3})" + Percent + "$", "volume_set", "n",
+            // Unmute before mute, since "turn mute off" says mute.
+            @"^(?:un-?mute|unsilence)(?:\s+" + Thing + @")?$|^(?:turn|switch|put|set)\s+(?:the\s+)?mute\s+off$|^(?:turn|switch)\s+off\s+(?:the\s+)?mute$|^(?:take|get)\s+(?:" + Thing + @"\s+)?off\s+(?:of\s+)?mute$|^mute off$", "unmute", "",
+            @"^(?:turn|switch|put|bring)\s+" + Sound + @"\s+(?:back\s+)?on$|^(?:turn|switch)\s+(?:back\s+)?on\s+" + Sound + @"$|^(?:sound|volume|audio)\s+(?:back\s+)?on$|^bring\s+(?:back\s+)?" + Sound + @"(?:\s+back)?$", "unmute", "",
+            @"^(?:quita(?:le)? el silencio|desmutea(?:r)?|activa el (?:sonido|audio|volumen)|pon el (?:sonido|audio|volumen)|enciende el (?:sonido|audio|volumen)|devu[e\u00e9]lveme el sonido)$|^(?:remets|r[\u00e9e]active|rallume) le son$|^enl[e\u00e8]ve la sourdine$", "unmute", "",
+            @"^(?:mute|silence|hush)(?:\s+" + Thing + @")?$|^(?:kill|cut)\s+" + Sound + @"$|^(?:turn|switch|shut)\s+off\s+" + Sound + @"$|^(?:turn|switch|shut)\s+" + Sound + @"\s+off$", "mute", "",
+            @"^(?:turn|switch|put|set)\s+(?:on\s+)?(?:the\s+)?mute(?:\s+on)?$|^(?:put|set)\s+(?:" + Thing + @"\s+)?on mute$|^(?:mute on|sound off|volume off|audio off|no sound)$", "mute", "",
+            @"^(?:silencia(?:r)?|mutea(?:r)?|quita(?:le)? el (?:sonido|volumen|audio)|pon(?:lo)? en silencio|apaga el (?:sonido|volumen|audio))(?:\s+(?:el|la)\s+(?:volumen|sonido|audio|pc|computadora|ordenador|compu))?$|^(?:coupe(?:r)?|couper) (?:le )?(?:son|volume)$|^mets(?: le pc| l'ordi)? en sourdine$", "mute", "",
+            // Up and down. "A bit", "a lot" or "by 20" say how far.
+            @"^(?:turn|crank|pump|bump|jack|kick|ramp|dial|boost|raise|push|bring|knock|put)\s+" + Thing + @"\s+up$|^(?:turn|crank|pump|bump|jack|ramp|dial|boost)\s+up\s+" + Thing + @"$|^(?:raise|increase|boost|up|amp up)\s+" + Thing + @"$|^(?:make|get)\s+" + Thing + @"\s+(?:louder|loud|higher)$|^louder$|^" + Loud + @"\s+(?:louder|up|higher)$|^more (?:volume|sound)$", "volume_up", "",
+            @"^(?:(?:it'?s|its|it is|that'?s|thats|this is|the (?:volume|sound|music|audio|game|video|song) is)\s+)?(?:(?:way|so|really|kinda|a bit|bit)\s+)?too (?:quiet|soft|low)$|^i can'?t hear (?:it|that|anything|the (?:music|video|game|sound|audio|song))$", "volume_up", "",
+            @"^(?:sube(?:le)?|s[u\u00fa]bele|subir|aumenta(?:r)?|alza|pon(?:le)? m[a\u00e1]s alto|m[a\u00e1]s alto|m[a\u00e1]s volumen)(?:\s+(?:el|la|al)\s+(?:volumen|sonido|m[u\u00fa]sica|audio|canci[o\u00f3]n))?$|^(?:monte(?:r)?|augmente(?:r)?|mets plus fort|plus fort)(?:\s+(?:le|la)\s+(?:son|volume|musique))?$", "volume_up", "",
+            @"^(?:turn|crank|bring|knock|dial|drop)\s+" + Thing + @"\s+down$|^(?:turn|crank|knock|dial|drop|bring)\s+down\s+" + Thing + @"$|^(?:lower|decrease|reduce|quieten)\s+" + Thing + @"$|^(?:drop|soften)\s+" + Noise + @"$|^(?:make|get)\s+" + Thing + @"\s+(?:quieter|softer|lower|less loud)$|^(?:quieter|softer)$|^" + Loud + @"\s+(?:down|quieter|softer|lower)$|^less (?:volume|sound)$", "volume_down", "",
+            @"^(?:(?:it'?s|its|it is|that'?s|thats|this is|you'?re|ur|the (?:volume|sound|music|audio|game|video|song) is)\s+)?(?:(?:way|so|really|kinda|a bit|bit)\s+)?too loud$", "volume_down", "",
+            @"^(?:baja(?:le)?|b[a\u00e1]jale|bajar|disminuye|reduce|pon(?:le)? m[a\u00e1]s bajo|m[a\u00e1]s bajo|menos volumen)(?:\s+(?:el|la|al)\s+(?:volumen|sonido|m[u\u00fa]sica|audio|canci[o\u00f3]n))?$|^(?:baisse(?:r)?|diminue(?:r)?|moins fort|mets moins fort)(?:\s+(?:le|la)\s+(?:son|volume|musique))?$", "volume_down", "",
+            // The music itself.
+            @"^pause(?:\s+" + Tune + @"|\s+(?:it|this|that))?$|^(?:stop|hold|freeze)\s+" + Tune + @"$|^(?:turn|switch|shut)\s+off\s+(?:the\s+)?(?:music|song|video|podcast)$|^(?:turn|switch|shut)\s+(?:the\s+)?(?:music|song|video|podcast)\s+off$", "pause", "",
+            @"^(?:pausa(?:r)?|pon pausa|pausa la (?:m[u\u00fa]sica|canci[o\u00f3]n)|det[e\u00e9]n la (?:m[u\u00fa]sica|canci[o\u00f3]n)|para la (?:m[u\u00fa]sica|canci[o\u00f3]n))$|^(?:mets(?: la musique)? en pause|pause la musique)$", "pause", "",
+            @"^(?:resume|unpause)(?:\s+" + Tune + @"|\s+(?:it|this|that))?$|^continue\s+" + Tune + @"$|^(?:keep playing|hit play|press play|play|play it again)$|^(?:turn|switch|put)\s+(?:the\s+)?(?:music|song|video|podcast)\s+back\s+on$", "resume", "",
+            @"^(?:reanuda(?:r)?|contin[u\u00fa]a la (?:m[u\u00fa]sica|canci[o\u00f3]n)|dale play|quita la pausa|sigue con la m[u\u00fa]sica)$|^(?:reprends|relance|remets)(?: la musique)?$", "resume", "",
+            @"^(?:skip|next)(?:\s+(?:to\s+)?(?:the\s+)?(?:next\s+)?(?:(?:this|that|current)\s+)?(?:song|track|one|tune|it|this|that))?$|^(?:play|go to|put on)\s+(?:the\s+)?next\s+(?:song|track|one|tune)$|^(?:change|switch)\s+(?:the\s+)?(?:song|track|tune)$|^(?:another|different|new)\s+(?:song|track|tune)$|^skip\s+(?:ahead|forward)$", "next", "",
+            @"^(?:siguiente(?: canci[o\u00f3]n)?|la siguiente|pasa(?: la)? canci[o\u00f3]n|p[a\u00e1]sala|salta(?: esta| la)?(?: canci[o\u00f3]n)?|s[a\u00e1]ltala|otra canci[o\u00f3]n|cambia(?: la)? canci[o\u00f3]n)$|^(?:suivant(?:e)?|chanson suivante|passe (?:la chanson|[a\u00e0] la suivante)|la suivante)$", "next", "",
+            @"^(?:previous|prev)(?:\s+(?:song|track|one|tune))?$|^go\s+back(?:\s+(?:a|one)\s+(?:song|track|tune))?$|^(?:(?:play|go to|put on)\s+)?(?:the\s+)?(?:last|previous|prior)\s+(?:song|track|one|tune)(?:\s+again)?$|^back\s+(?:a|one)\s+(?:song|track|tune)$", "previous", "",
+            @"^(?:anterior|canci[o\u00f3]n anterior|la anterior|pon la anterior)$|^(?:pr[\u00e9e]c[\u00e9e]dent(?:e)?|chanson pr[\u00e9e]c[\u00e9e]dente|la pr[\u00e9e]c[\u00e9e]dente)$", "previous", "",
+            @"^((what('|\u2019)?s|what is) (playing|this song|this track|the song|on spotify)|what (song|track)( is|('|\u2019)s)? (this|playing|on)|what am i listening to|what are we listening to)$", "now_playing", ""
         };
+
+        internal static bool Loudness(string said, out string action, out string level, out bool spotify)
+        {
+            action = level = null;
+            string text = Regex.Replace((said ?? "").ToLowerInvariant().Replace('\u2019', '\''), @"^(?:(?:i (?:want|need) (?:you|u) to|go ahead and|just|quickly|quick)\s+)+", "");
+            spotify = Regex.IsMatch(text, @"\bspotify\b");
+            text = Regex.Replace(text, @"\s+(?:on|in|for)\s+(?:spotify|youtube|my pc|the pc|my computer|the computer|my laptop)$", "");
+            text = Regex.Replace(text, @"(?<!all the )\bway (up|down)$", "$1 a lot");
+            string step = null;
+            Match by = Regex.Match(text, @"\s+(?:(?<small>(?:just )?a (?:bit|little|lil|tad|notch|touch|smidge|hair)(?: more)?|a little bit(?: more)?|slightly)|(?<big>a lot(?: more)?|loads|heaps|tons|(?:a )?(?:bunch|ton)(?: more)?|much more)|by (?<n>\d{1,3})" + Percent + @")$");
+            if (by.Success)
+            {
+                step = by.Groups["small"].Success ? "6" : by.Groups["big"].Success ? "20" : by.Groups["n"].Value;
+                text = text.Substring(0, by.Index);
+            }
+            for (int i = 0; i < MediaWords.Length; i += 3)
+            {
+                Match found = Regex.Match(text, MediaWords[i]);
+                if (!found.Success) continue;
+                action = MediaWords[i + 1];
+                bool stepped = action == "volume_up" || action == "volume_down";
+                if (step != null && !stepped) return false;
+                level = stepped ? step : MediaWords[i + 2] == "n" ? found.Groups["n"].Value : MediaWords[i + 2].Length > 0 ? MediaWords[i + 2] : null;
+                int value;
+                return level == null || (int.TryParse(level, out value) && value <= 100);
+            }
+            return false;
+        }
+
+        // A model's media call squared with what they said: unmute isn't mute, and only saying Spotify means Spotify's own volume.
+        internal static void Aim(ToolArguments args, string said)
+        {
+            if (args == null) return;
+            if (args.Action == "mute" && Regex.IsMatch(said ?? "", @"\bun-?mute\b|\bmute off\b|\boff (of )?mute\b|\b(sound|volume|audio) (back )?on\b|\bturn on (the )?(sound|volume|audio)\b", RegexOptions.IgnoreCase)) args.Action = "unmute";
+            if (args.App == null && (args.Action == "volume_up" || args.Action == "volume_down") && Regex.IsMatch(said ?? "", @"\bspotify\b", RegexOptions.IgnoreCase)) args.App = "spotify";
+        }
 
         internal static bool Heard(string said, out string tool, out ToolArguments args)
         {
@@ -452,7 +530,6 @@ namespace CapriDesktop
             if (Moon.IsMatch(said ?? "")) { tool = "play_music"; args.Song = MoonSong; args.Kind = "song"; return true; }
             string text = Asked(said);
             if (Chatter.IsMatch(text) || Regex.IsMatch(text, @"\b(if|unless|until|after|before|when) (i|you|we|it|the)\b", RegexOptions.IgnoreCase)) return false;
-            string lower = text.ToLowerInvariant();
             string minutes;
             string switched = PowerFor(text, out minutes);
             if (switched != null) { tool = "power"; args.Action = switched; args.Minutes = minutes; return true; }
@@ -468,8 +545,16 @@ namespace CapriDesktop
             if ((!question || polite) && Regex.IsMatch(text, Remembering + @"(?: of)?(?: (?:that|this|it))?$", RegexOptions.IgnoreCase)) { tool = "remember"; args.Text = ""; return true; }
             noted = Regex.Match(text, @"^(?:i (?:want|need|would like) (?:you|u) to\s+)?forget(?:\s+(?:that|about|the note about|my note about|what i said about))?\s+([^,;]+)", RegexOptions.IgnoreCase);
             if (noted.Success && !question && !Regex.IsMatch(noted.Groups[1].Value.Trim(), @"^(it|that|this|about (it|that|this)|i asked|i said|what i said|the last thing|me|you|everything i said)\b", RegexOptions.IgnoreCase)) { tool = "remember"; args.Action = "forget"; args.Text = noted.Groups[1].Value.Trim(); return true; }
-            for (int i = 0; i < MediaWords.Length; i += 2)
-                if (Regex.IsMatch(lower, MediaWords[i])) { tool = "media"; args.Action = MediaWords[i + 1]; return true; }
+            string loud, step;
+            bool spotify;
+            if (Loudness(text, out loud, out step, out spotify))
+            {
+                tool = "media";
+                args.Action = loud;
+                args.Level = step;
+                if (spotify && (loud == "volume_up" || loud == "volume_down")) args.App = "spotify";
+                return true;
+            }
             Match found = Regex.Match(text, @"^(?:open|launch|start|go to|fire up|load up)\s+(spotify|youtube)\s*(?:,|and|&)?\s*(?:then\s+)?(?:play|shuffle|put on|blast)\s+(.+)$", RegexOptions.IgnoreCase);
             if (found.Success) text = "play " + found.Groups[2].Value + " on " + found.Groups[1].Value;
             if (Regex.IsMatch(text, @"\b(and|then|but)\s+(open|launch|play|close|quit|pause|don't|do not)\b", RegexOptions.IgnoreCase)) return false;
@@ -594,7 +679,13 @@ namespace CapriDesktop
             if (tool == "open_app") return Named(args.Name);
             if (tool == "open_website") return Named(args.Site);
             if (tool == "look_at_screen") return true;
-            if (tool == "media") return Regex.IsMatch(args.Action ?? "", @"\A(play_pause|pause|resume|next|previous|volume_up|volume_down|mute|now_playing)\z");
+            if (tool == "media")
+            {
+                int level;
+                bool leveled = int.TryParse(args.Level, out level) && level >= 0 && level <= 100;
+                if (args.Action == "volume_set") return leveled;
+                return Regex.IsMatch(args.Action ?? "", @"\A(play_pause|pause|resume|next|previous|volume_up|volume_down|mute|unmute|now_playing)\z") && (string.IsNullOrEmpty(args.Level) || leveled);
+            }
             if (tool == "app_window") return Named(args.Name) && Regex.IsMatch(args.Action ?? "", @"\A(switch_to|minimize|close)\z");
             if (tool == "use_computer") return Named(args.Task);
             if (tool == "shortcut") return Regex.IsMatch(args.Name ?? "", @"\A(discord_mute|discord_deafen|screenshot|clip_that|record|game_bar|show_desktop|task_manager|clipboard|emoji)\z");
@@ -609,7 +700,7 @@ namespace CapriDesktop
             Match found = Regex.Match(Asked(said), @"^(?:open|launch|start|run|load up|boot up|fire up)\s+(?:up\s+)?(.+)$", RegexOptions.IgnoreCase);
             if (!found.Success) return false;
             string[] parts = Regex.Split(found.Groups[1].Value.Trim(), @"\s*,\s*(?:and\s+|&\s*)?|\s+and\s+|\s*&\s*", RegexOptions.IgnoreCase);
-            if (parts.Length < 2 || parts.Length > 3) return false;
+            if (parts.Length < 2) return false;
             List<KeyValuePair<string, ToolArguments>> opening = new List<KeyValuePair<string, ToolArguments>>();
             foreach (string part in parts)
             {
@@ -661,12 +752,14 @@ namespace CapriDesktop
         private static string OpenApp(string wanted)
         {
             if (string.IsNullOrWhiteSpace(wanted)) return "Which app, choom?";
-            if (Safety.Screen(wanted) != null) return "Not opening that, choom.";
+            if (Safety.Stops(wanted) != null) return "Not opening that, choom.";
             List<InstalledApp> found = Match(Apps(), wanted);
             if (found.Count == 0) return "No app called " + wanted.Trim() + " is installed on this PC.";
-            if (found.Count > 1) return "More than one app matches " + wanted.Trim() + ": " + string.Join(", ", found.ConvertAll(app => app.Name).ToArray()) + ". Which one?";
-            Run(found[0].Id);
-            return "Opened " + (AppName(found[0]) == "spotify" ? "Spotify" : found[0].Name) + ".";
+            // When several match equally well, the one with the fewest extra words is closest to what they said.
+            InstalledApp chosen = found[0];
+            foreach (InstalledApp app in found) if (AppName(app).Length < AppName(chosen).Length) chosen = app;
+            Run(chosen.Id);
+            return "Opened " + (AppName(chosen) == "spotify" ? "Spotify" : chosen.Name) + ".";
         }
 
         internal static List<InstalledApp> Match(List<InstalledApp> apps, string wanted)
@@ -683,7 +776,6 @@ namespace CapriDesktop
                 if (score > best) { best = score; top.Clear(); }
                 if (!top.Exists(other => AppName(other) == name)) top.Add(app);
             }
-            if (top.Count > 3) top.RemoveRange(3, top.Count - 3);
             return top;
         }
 
@@ -782,7 +874,7 @@ namespace CapriDesktop
 
         private static string OpenSite(string site, string search)
         {
-            if (Safety.Screen((site ?? "") + " " + (search ?? "")) != null) return "Not opening that, choom.";
+            if (Safety.Stops((site ?? "") + " " + (search ?? "")) != null) return "Not opening that, choom.";
             string address = Address(site, search);
             if (address == null) return "That isn't a website.";
             Run(address);
@@ -812,14 +904,60 @@ namespace CapriDesktop
             return uri.AbsoluteUri;
         }
 
-        private static string Media(string action)
+#if CROSS
+        // Mac and Linux have no Windows audio API (Speakers lives in Ears.cs), so mute toggles with the key and a set level isn't possible.
+        internal static Func<bool?> MuteState = delegate { return (bool?)null; };
+        internal static Func<bool, bool> SetMute = delegate { return false; };
+        internal static Func<double?> VolumeNow = delegate { return (double?)null; };
+        internal static Func<double, bool> SetVolume = delegate { return false; };
+        private const string VolumeRefused = "Couldn't set the volume: here I can only turn it up or down.";
+#else
+        internal static Func<bool?> MuteState = Speakers.Muted;
+        internal static Func<bool, bool> SetMute = Speakers.Mute;
+        internal static Func<double?> VolumeNow = Speakers.Level;
+        internal static Func<double, bool> SetVolume = Speakers.SetLevel;
+        private const string VolumeRefused = "Couldn't set the volume: Windows didn't let me.";
+#endif
+
+        private static string Media(ToolArguments args)
         {
+            string action = args.Action;
             if (action == "play_pause" || action == "pause" || action == "resume") return Toggle(action);
             if (action == "next") { Press(0xB0); return "Skipped to the next track."; }
             if (action == "previous") { Press(0xB1); return "Went back a track."; }
-            if (action == "volume_up") { for (int i = 0; i < 5; i++) Press(0xAF); return "Turned the volume up."; }
-            if (action == "volume_down") { for (int i = 0; i < 5; i++) Press(0xAE); return "Turned the volume down."; }
-            if (action == "mute") { Press(0xAD); return "Toggled mute."; }
+            int level;
+            bool leveled = int.TryParse(args.Level, out level) && level >= 0 && level <= 100;
+            // Each volume key moves Windows' volume 2%, and shows its volume bar.
+            if (action == "volume_up" || action == "volume_down")
+            {
+                bool up = action == "volume_up";
+                int presses = leveled && level > 0 ? Math.Max(1, (level + 1) / 2) : 5;
+                for (int i = 0; i < presses; i++) Press(up ? (byte)0xAF : (byte)0xAE);
+                return up ? "Turned the volume up." : "Turned the volume down.";
+            }
+            if (action == "volume_set")
+            {
+                if (!leveled) return "Couldn't set the volume: it goes from 0 to 100.";
+                if (!SetVolume(level / 100.0)) return VolumeRefused;
+                if (level > 0 && MuteState() == true) SetMute(false);
+                return "Set the volume to " + level + "%.";
+            }
+            if (action == "mute" || action == "unmute")
+            {
+                bool muting = action == "mute";
+                bool? muted = MuteState();
+                if (muted == null) { Press(0xAD); return "Toggled mute."; }
+                double? now = VolumeNow();
+                // "Turn the sound on" with the volume at zero needs volume as well as unmuting.
+                if (!muting && now.HasValue && now.Value < 0.01 && SetVolume(0.2))
+                {
+                    if (muted.Value) SetMute(false);
+                    return "Turned the sound back on at 20%.";
+                }
+                if (muted.Value == muting) return muting ? "The PC is already muted." : "The sound is already on.";
+                if (!SetMute(muting)) { Press(0xAD); return "Toggled mute."; }
+                return muting ? "Muted the PC." : "Unmuted the PC.";
+            }
             if (action == "now_playing") return Playing();
             return "There's no media action called " + action + ".";
         }
@@ -1054,7 +1192,7 @@ namespace CapriDesktop
             song = song.Trim();
             if (Regex.IsMatch(song, @"^((what('|\u2019)?s|what is)\s+)?((currently|now)\s+)?playing( now)?$|^(this|that|the current) (song|track)$", RegexOptions.IgnoreCase)) return Playing();
             if (Regex.IsMatch(song, @"^(play\s+)?(me\s+)?((some|any|a|random|good)\s+)?(music|songs?|tunes|tracks?|something)(\s+for me)?$", RegexOptions.IgnoreCase)) { song = Pick(); kind = "song"; }
-            if (Safety.Screen(song) != null) return "Not playing that, choom.";
+            if (Safety.Stops(song) != null) return "Not playing that, choom.";
             Match tail = Regex.Match(song, @"^(?:(?:the|my|your)\s+)?(.+?)\s+(playlist|album)$", RegexOptions.IgnoreCase);
             if (tail.Success && kind != "artist") { kind = tail.Groups[2].Value.ToLowerInvariant(); song = tail.Groups[1].Value; }
             bool liked = Regex.IsMatch(song, @"^((my|your|the)\s+)?((liked|saved)\s+songs|likes)$", RegexOptions.IgnoreCase);
@@ -1213,11 +1351,9 @@ namespace CapriDesktop
                 top.Add(window);
             }
             if (top.Count == 0) return wanted + " isn't open.";
-            List<string> programs = new List<string>();
-            List<string> titles = new List<string>();
-            foreach (OpenWindow window in top)
-                if (!programs.Contains(window.Program)) { programs.Add(window.Program); titles.Add(window.Title.Length > 40 ? window.Title.Substring(0, 37) + "..." : window.Title); }
-            if (programs.Count > 1) return "More than one open app matches " + wanted + ": " + string.Join(", ", titles.GetRange(0, Math.Min(3, titles.Count)).ToArray()) + ". Which one?";
+            // When several apps match, the one whose own name matches goes first, then the one nearest the front.
+            OpenWindow first = top.Find(window => Score(Plain(window.Program), want) == best) ?? top[0];
+            top = top.FindAll(window => window.Program == first.Program);
             if (action == "switch_to") return Steer(top[0], action) ? "Switched to " + wanted + "." : "Couldn't bring " + wanted + " to the front.";
             if (action == "close" && Array.IndexOf(Browsers, top[0].Program.ToLowerInvariant()) >= 0 && Score(Plain(top[0].Program), want) == 0)
                 return Steer(top[0], "close_tab") ? "Closed the " + wanted + " tab." : "Couldn't reach the " + wanted + " tab to close it.";
