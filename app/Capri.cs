@@ -6846,8 +6846,8 @@ namespace CapriDesktop
                             if (!checksPay || !paysAhead || bypassPrompt.IndexOf("call ask before you buy", StringComparison.Ordinal) >= 0 || bypassPrompt.IndexOf("Bypass all permissions", StringComparison.Ordinal) < 0 || bypassSeeing.IndexOf("stop and ask", StringComparison.Ordinal) >= 0
                                 || bypassSeeing.IndexOf("Bypass all permissions", StringComparison.Ordinal) < 0 || bypassPrompt.IndexOf("Never type passwords", StringComparison.Ordinal) >= 0 || bypassSeeing.IndexOf("Never type passwords", StringComparison.Ordinal) >= 0
                                 || bypassPrompt.IndexOf("Type passwords, card numbers", StringComparison.Ordinal) < 0 || bypassSeeing.IndexOf("Type passwords, card numbers", StringComparison.Ordinal) < 0 || bypassSeeing.IndexOf("needs their OK", StringComparison.Ordinal) >= 0)
-                                throw new Exception("Bypass all permissions went wrong: checks " + checksPay + ", ahead " + paysAhead);
-                            checks.Add("PASS bypass all permissions: off, she still checks before paying, skips password boxes and filters what she opens; on, she never stops to ask, even to buy, send or delete, types passwords and card numbers, presses any key, and only the helpline still stops her");
+                                throw new Exception("Blackwall mode went wrong: checks " + checksPay + ", ahead " + paysAhead);
+                            checks.Add("PASS Blackwall mode: off, she still checks before paying, skips password boxes and filters what she opens; on, she never stops to ask, even to buy, send or delete, types passwords and card numbers, presses any key, and only the helpline still stops her");
                             bool cursorShown = mainframe.JobsStatus == "cursor | -";
                             ToggleBypass();
                             bool bypassShown = mainframe.JobsStatus == "cursor | bypass" && Computer.Bypass && Safety.Bypass;
@@ -6855,8 +6855,9 @@ namespace CapriDesktop
                             ToggleCursor();
                             bool quickShown = mainframe.JobsStatus == "- | -" && !UsesCursor;
                             ToggleCursor();
-                            if (!cursorShown || !bypassShown || !quickShown || Computer.Bypass || Safety.Bypass || !UsesCursor) throw new Exception("The Use her cursor and Bypass all permissions switches went wrong: " + mainframe.JobsStatus);
-                            checks.Add("PASS Settings switches: Use her cursor starts on, Bypass all permissions starts off, and both switch from HABITS");
+                            bool blackwallNamed = mainframe.BlackwallStatus == "Blackwall mode | She won't ask twice when you ask her to do something.";
+                            if (!cursorShown || !bypassShown || !quickShown || !blackwallNamed || Computer.Bypass || Safety.Bypass || !UsesCursor) throw new Exception("The Use her cursor and Blackwall mode switches went wrong: " + mainframe.JobsStatus + " / " + mainframe.BlackwallStatus);
+                            checks.Add("PASS Settings switches: Use her cursor starts on, Blackwall mode (was Bypass all permissions) starts off with \"She won't ask twice when you ask her to do something.\" under it, and both switch from HABITS");
                             string runKeyWas = Startup.RunKey, approvedKeyWas = Startup.ApprovedKey, startupRoot = "Software\\Capri smoke " + Guid.NewGuid().ToString("N");
                             string startupExe = Path.GetFullPath(Application.ExecutablePath), elsewhere = Path.Combine(Path.GetTempPath(), "Capri elsewhere", "Capri.exe"), startupShown;
                             bool startupWas = preferences.StartupSet, devOff, defaultOn, turnedOff, offSticks, taskManagerOff, backOn, otherCopy, keptOther, cleared, startupParsed;

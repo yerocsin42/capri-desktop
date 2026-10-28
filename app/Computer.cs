@@ -104,7 +104,7 @@ namespace CapriDesktop
         internal const string Confused = "Got lost before I could start that job. " + Bigger;
         internal const string Stalled = "Got stuck on that one. " + Bigger;
         internal const string Exact = "\nTheir exact words: ";
-        // Bypass all permissions in Settings: they've said yes to every step ahead of time, so she never stops to check, even to buy or delete,
+        // Blackwall mode in Settings (Bypass all permissions before 0.7.4): they've said yes to every step ahead of time, so she never stops to check, even to buy or delete,
         // and nothing here refuses a step: passwords, card numbers and any key are up to their brain's provider.
         internal static bool Bypass;
         private const int MostTargets = 70;
@@ -401,7 +401,7 @@ namespace CapriDesktop
         internal static string Allowing(string prompt)
         {
             if (!Bypass) return prompt;
-            const string ahead = "They turned on Bypass all permissions, so they've said yes to every step ahead of time: never stop to ask about one, even to buy, pay, send, post, delete or install.";
+            const string ahead = "They turned on Blackwall mode (Bypass all permissions), so they've said yes to every step ahead of time: never stop to ask about one, even to buy, pay, send, post, delete or install.";
             return prompt.Replace("Never type passwords, card numbers or other private details.", "Type passwords, card numbers and other private details whenever their job needs them.")
                 .Replace(" Always call ask before you buy or pay for anything.", "").Replace(" Before you buy or pay for anything, stop and ask.", "")
                 .Replace("Only call ask before you buy or pay, or before a send, post, delete or install their job didn't mention; Capri stops you herself before any step that needs their OK.", ahead)

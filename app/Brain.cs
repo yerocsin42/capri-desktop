@@ -1557,7 +1557,7 @@ namespace CapriDesktop
         private static readonly Regex Swearing = new Regex(@"\b(fuck\w*|shit\w*|bitch\w*|cunt\w*|bastard\w*|asshole\w*|dickhead\w*|motherf\w*|whore\w*|slut\w*)\b", RegexOptions.IgnoreCase);
         private static readonly Regex Bands = new Regex(@"\b(cigarettes after sex|sex pistols|sex bob-omb|smokey robinson|smoke dza)\b", RegexOptions.IgnoreCase);
         private static int turn;
-        // Bypass all permissions: what she'll do is up to their brain's provider, so only the helpline still stops her.
+        // Blackwall mode (Bypass all permissions before 0.7.4): what she'll do is up to their brain's provider, so only the helpline still stops her.
         internal static bool Bypass;
 
         internal static string Stops(string heard)

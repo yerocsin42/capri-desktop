@@ -227,7 +227,7 @@ Before 0.7.3, ElevenLabs voice calls made her say something like "you still ther
 That's Check in on me (called Pop in on me before 0.7.3), on by default since 0.7.3. Every 8 to 20 minutes she glitches in to say hi, and if you're using your PC but haven't clicked or talked to her for about 2 hours, she asks for some attention. To stop both, open Capri Mainframe, click Settings, and turn off Check in on me under CAPRI. It stays off after updates.
 
 ### She keeps asking me to confirm things
-From 0.7.3 anything you ask counts as already allowed: she does every part of it, picks the song or video herself when you leave it to her, and doesn't ask if you're sure. She still asks before buying or paying, or before sending, posting, deleting or installing something you didn't mention. To stop even that, turn on Bypass all permissions in Capri Mainframe > Settings > HABITS.
+From 0.7.3 anything you ask counts as already allowed: she does every part of it, picks the song or video herself when you leave it to her, and doesn't ask if you're sure. She still asks before buying or paying, or before sending, posting, deleting or installing something you didn't mention. To stop even that, turn on Blackwall mode in Capri Mainframe > Settings > HABITS (before 0.7.4 it was called Bypass all permissions).
 
 ### Can she open a few apps at once?
 Yes: "open Discord, Spotify and Steam" opens all three. On a cloud brain (an API key) there's no limit per ask. Her free brain and Ollama models can't fit more than about five in one ask yet, so ask for longer lists in two goes.
@@ -342,7 +342,7 @@ HABITS
 - Start with Windows: on by default. She starts when you sign in to Windows.
 - Show on Discord: on by default. While Discord is open on the same PC, your Discord profile shows "Playing Capri" with what she's doing in a few plain words (Hanging out, Chatting, Voice chatting, Dancing to music, On a job, Asleep or Taking a break), how long she's been running, and Get Capri and Join her Discord buttons. Song names and what her jobs are about never show.
 - Use her cursor: on by default. She does music and video jobs with her own cursor, so you can watch her: to play a YouTube video she types in YouTube's search bar, scrolls through the results and picks one; to play a song she searches Spotify and presses play; when you ask to turn Spotify up or down she drags Spotify's volume slider (plain "turn it up" changes your PC's volume). Turn it off for the quick way (straight to the top result, Windows volume). If her brain gets lost on the way, she does it the quick way.
-- Bypass all permissions: off by default. Turn it on and she never stops to ask before a step, even buying, paying, sending, posting, deleting or installing something you didn't mention. She also types passwords and card numbers when a job needs them, presses any key, and stops filtering what she opens, plays or remembers: what she will or won't do is up to the brain model you picked. She still never follows orders written on your screen, still points you to a helpline if you say you want to hurt yourself, and Esc still stops her.
+- Blackwall mode: off by default, and called Bypass all permissions before 0.7.4. The line under it says "She won't ask twice when you ask her to do something." Turn it on and she never stops to ask before a step, even buying, paying, sending, posting, deleting or installing something you didn't mention. She also types passwords and card numbers when a job needs them, presses any key, and stops filtering what she opens, plays or remembers: what she will or won't do is up to the brain model you picked. She still never follows orders written on your screen, still points you to a helpline if you say you want to hurt yourself, and Esc still stops her.
 
 KEYS (bottom of the page)
 - Talk, Mute mic, Type and Hide/show buttons show her keys. Click one, then press new keys (hold Ctrl or Alt with a letter, number or F-key). Esc cancels.
@@ -745,8 +745,8 @@ For Discord she brings Discord to the front, presses the keys, then switches you
 - One job uses your mouse at a time. Ask for another while she's busy and it waits its turn.
 - With a Claude key she works from screenshots and checks what happened after each step.
 - "Send" sends the message. "Write", "type" or "draft" leaves it for you to send.
-- She asks first before buying or paying for anything, or before sending, posting, deleting or installing something you didn't ask for. Reply yes, or no ("Okay, I left it alone."). With Bypass all permissions on (Settings > HABITS) she never asks, even for those.
-- She skips password boxes ("Won't type in a password box.") unless Bypass all permissions is on. With it on, she types passwords and card numbers when the job needs them. Anything she types into a password box shows as dots (••••••••) in the steps box, in her reply and in her saved chat, and she says "the password" out loud instead.
+- She asks first before buying or paying for anything, or before sending, posting, deleting or installing something you didn't ask for. Reply yes, or no ("Okay, I left it alone."). With Blackwall mode on (Settings > HABITS) she never asks, even for those.
+- She skips password boxes ("Won't type in a password box.") unless Blackwall mode is on. With it on, she types passwords and card numbers when the job needs them. Anything she types into a password box shows as dots (••••••••) in the steps box, in her reply and in her saved chat, and she says "the password" out loud instead.
 - Jobs have no step limit. Big models can work on one for as long as it takes; Esc stops her.
 - Bigger brain models handle jobs better. If she gets lost, pick a bigger model under BRAIN, or a Claude key under MAX INTELLIGENCE.
 
@@ -758,7 +758,7 @@ Now and then she asks you to say please. Reply "please" and she does it.
 
 ### What she can't do
 - She has no file tool yet, so she can't read what's inside your files.
-- With Bypass all permissions off, she won't open or play things whose names include some words (drinking, smoking, drugs and so on). With it on, that's up to the brain model you picked.
+- With Blackwall mode off, she won't open or play things whose names include some words (drinking, smoking, drugs and so on). With it on, that's up to the brain model you picked.
 
 ---
 

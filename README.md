@@ -168,7 +168,7 @@ Who she is and how she talks lives in `personality.md`, a plain text file you ca
 - [x] Doing what you ask without asking first, and picking the song or video herself when you leave it to her
 - [x] Opening as many apps as you name in one ask, like "open Discord, Spotify and Steam"
 - [x] Use her cursor, on by default: she searches YouTube and picks a video, plays from Spotify's search and drags its volume slider herself
-- [x] Bypass all permissions: a switch so she never stops to ask, even to buy or delete
+- [x] Blackwall mode (was Bypass all permissions): a switch so she won't ask twice when you ask her to do something, even to buy or delete
 - [ ] Controlling YouTube: skip and fullscreen
 - [ ] Looking things up and telling you the answer
 - [ ] Working with your files: open, read and edit the ones you pick

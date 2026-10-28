@@ -18,11 +18,11 @@ namespace CapriDesktop
         private static readonly int[] Gaps = { 10, 15, 30, 60, 90, 120, 180, 300, 600 };
         private static readonly string[] GapNames = { "10 s", "15 s", "30 s", "1 min", "1.5 min", "2 min", "3 min", "5 min", "10 min" };
         private const int SetupHeight = 118;
-        private const int PageTall = 648;
+        private const int PageTall = 668;
         // Settings opens a second column to the right, so every setting shows at once.
         private const int Column = 380;
         private const int Far = 30000;
-        private static readonly int[][] PageBars = { new[] { 0, 58, 206 }, new[] { 0, 220, 376 }, new[] { 0, 386, 538 }, new[] { Column, 58, 146 }, new[] { Column, 162, 250 }, new[] { Column, 266, 424 }, new[] { Column, 446, 530 }, new[] { 0, 552, 612 } };
+        private static readonly int[][] PageBars = { new[] { 0, 58, 206 }, new[] { 0, 220, 376 }, new[] { 0, 386, 538 }, new[] { Column, 58, 146 }, new[] { Column, 162, 250 }, new[] { Column, 266, 424 }, new[] { Column, 446, 550 }, new[] { 0, 572, 632 } };
         private static readonly int[] Volumes = { 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 125, 150 };
         private static readonly string[] VolumeNames = { "Mute", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%", "125%", "150%" };
         private static readonly int[] SizeSteps = { 140, 170, 200, 240, 280, 320, 380, 440, 500, 560 };
@@ -93,6 +93,7 @@ namespace CapriDesktop
         private readonly ContextMenuStrip speechModelMenu;
         private readonly Label voiceNote;
         private readonly Label keysNote;
+        private readonly Label blackwallNote;
         private readonly Label updateNote;
         private readonly Key keyHelp;
         private readonly Label shortcut;
@@ -387,17 +388,23 @@ namespace CapriDesktop
             startup = Check("Start with Windows", 28 + c, 470, 150, delegate { if (!syncing) capri.ToggleStartup(); });
             discord = Check("Show on Discord", 186 + c, 470, 170, delegate { if (!syncing) capri.ToggleDiscord(); });
             cursor = Check("Use her cursor", 28 + c, 502, 150, delegate { if (!syncing) capri.ToggleCursor(); });
-            bypass = Check("Bypass all permissions", 186 + c, 502, 170, delegate { if (!syncing) capri.ToggleBypass(); });
-            Caption("KEYS >", 28, 556, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
-            talkKeys = Make("Talk: Ctrl + Alt + V", 96, 550, 250, 28, delegate { PickKeys(0); });
+            // Blackwall mode was "Bypass all permissions" until 0.7.4; its label says what it does.
+            bypass = Check("Blackwall mode", 186 + c, 502, 170, delegate { if (!syncing) capri.ToggleBypass(); });
+            bypass.AccessibleName = "Blackwall mode. She won't ask twice when you ask her to do something";
+            blackwallNote = Caption("She won't ask twice when you ask her to do something.", 28 + c, 526, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
+            blackwallNote.AutoSize = false;
+            blackwallNote.TextAlign = ContentAlignment.MiddleRight;
+            blackwallNote.Bounds = new Rectangle(28 + c, 526, 328, 18);
+            Caption("KEYS >", 28, 576, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
+            talkKeys = Make("Talk: Ctrl + Alt + V", 96, 570, 250, 28, delegate { PickKeys(0); });
             talkKeys.AccessibleName = "Her talk key. Click, then press new keys";
-            muteKeys = Make("Mute mic: Ctrl + Alt + N", 358, 550, 250, 28, delegate { PickKeys(1); });
+            muteKeys = Make("Mute mic: Ctrl + Alt + N", 358, 570, 250, 28, delegate { PickKeys(1); });
             muteKeys.AccessibleName = "Her mute key. Click, then press new keys";
-            typeKeys = Make("Type: Ctrl + Alt + T", 96, 584, 250, 28, delegate { PickKeys(2); });
+            typeKeys = Make("Type: Ctrl + Alt + T", 96, 604, 250, 28, delegate { PickKeys(2); });
             typeKeys.AccessibleName = "Her typing key. Click, then press new keys";
-            hideKeys = Make("Hide/show: Ctrl + Alt + H", 358, 584, 250, 28, delegate { PickKeys(3); });
+            hideKeys = Make("Hide/show: Ctrl + Alt + H", 358, 604, 250, 28, delegate { PickKeys(3); });
             hideKeys.AccessibleName = "Her hide key. Click, then press new keys";
-            keysNote = Caption("", 96, 620, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
+            keysNote = Caption("", 96, 640, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
             keysNote.MaximumSize = new Size(512, 0);
             for (int i = first; i < Controls.Count; i++)
             {
@@ -445,6 +452,8 @@ namespace CapriDesktop
 
         internal string JobsStatus { get { return (cursor.Checked ? "cursor" : "-") + " | " + (bypass.Checked ? "bypass" : "-"); } }
 
+        internal string BlackwallStatus { get { return bypass.Text + " | " + blackwallNote.Text; } }
+
         internal string SettingsStatus { get { return languages.Text + " | " + volumeName.Text + " | " + soundsName.Text + " | " + wanderName.Text + " | " + sleepName.Text + " | " + (dance.Checked ? "dance" : "-") + " | " + (intro.Checked ? "intro" : "-") + " | " + repliesName.Text + " | " + recallName.Text + " | " + bubbleName.Text; } }
 
         internal void ShowSettings(bool on)
@@ -463,6 +472,8 @@ namespace CapriDesktop
             Arrange(expanded);
             Rectangle area = Screen.FromControl(this).WorkingArea;
             if (on && Right > area.Right) Left = Math.Max(area.Left, area.Right - Width);
+            // She opens centred on the shorter main page, so the taller Settings page can hang off the bottom.
+            if (on && Bottom > area.Bottom) Top = Math.Max(area.Top, area.Bottom - Height);
         }
 
         private void Reachable(Control control, bool on)
