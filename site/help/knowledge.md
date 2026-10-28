@@ -304,9 +304,12 @@ Size, Check in on me, Always on top and Watch my screen are on the Settings page
 Settings opens beside the main page. Left column:
 
 YOU
+- Next to YOU: which personality she's using. "personality.md · her default" or "personality.md · your edit". In yellow: "personality.md · long, slows small brains". In red, when she's gone back to her default: "personality.md missing · her default", "personality.md is empty · her default" or "can't read personality.md · her default".
 - Language: the language she replies in. 20 to pick from: English, Español, Français, Deutsch, Italiano, Português, Nederlands, Svenska, Dansk, Norsk, Polski, Čeština, Română, Türkçe, Русский, Українська, Ελληνικά, Tiếng Việt, Bahasa Indonesia, Filipino.
 - "What should she call you?": type a nickname, press Save.
-- Open her notes: opens me.md. "me.md · her memories".
+- Open her notes: opens me.md, her memories.
+- Edit personality: opens personality.md, who she is and how she talks. See "Make her yours" in section 13.
+- Reset: puts her default personality back straight away. Yours is kept as personality.backup.md.
 
 VOICE
 - Volume: Mute, 10% to 100%, 125%, 150%. Default 100%.
@@ -602,7 +605,7 @@ If you pick another language in Settings, voice chat uses it too. Free voice cha
 
 ---
 
-## 13. Her notes, nickname and language
+## 13. Her notes, personality, nickname and language
 
 ### Her notes (me.md)
 She keeps a notes file about you and reads it every chat, in text and voice chat.
@@ -616,6 +619,21 @@ To read or edit them: Mainframe > Settings > Open her notes. It opens me.md in N
 She won't save personal things like names, addresses, schools, passwords, phone numbers, emails, birthdays or bank details: "I don't keep personal stuff like names, addresses, schools or passwords in my notes."
 
 "My notes are full. Clear some out in me.md first." means the file is too long. Open it and delete some lines.
+
+### Make her yours: personality.md
+Who she is and how she talks lives in a file you can rewrite. Capri is open source, so make her whoever you like.
+1. Mainframe > Settings > Edit personality. It opens personality.md in Notepad.
+2. Change anything under the note at the top, then save.
+3. Her next reply uses it. No restart. In ElevenLabs voice chat, it starts with your next call.
+
+- The note at the top, between <!-- and -->, is for you. She never sees it, and blank lines don't matter.
+- Capri adds her own rules after your text: reply length, language, what she can do on your PC, and her safety rules. You can't change those, and you don't need to write them.
+- Long is fine. She never cuts it, but a very long personality makes small brains on your PC slower to reply, and the Mainframe shows "personality.md · long, slows small brains". With a brain on your PC, Settings > Memory > Medium or Long gives it more room.
+- Mainframe > Settings > Reset puts her default back straight away. Your version is kept as personality.backup.md in the same folder.
+- If the file is missing, empty or can't be read, she uses her default and the Mainframe says so in red. Press Edit personality to make the file again.
+- Mac and Linux: right-click her > Settings > Edit her personality (personality.md), or Reset her personality to default.
+- Where it is: %LOCALAPPDATA%\Capri\personality.md on Windows, ~/.config/Capri/personality.md on Mac and Linux.
+- It goes to her brain with the rest of her prompt, so with a brain key that company sees it too.
 
 ### Nickname: "What should she call you?"
 1. Mainframe > Settings.
@@ -832,7 +850,7 @@ No automatic updates yet. Download the new file from the website and replace the
 2. Settings > Apps > Installed apps > Capri > Uninstall. (Windows 10: Settings > Apps > Apps & features.)
 3. In "Remove Capri", press Remove Capri.
 
-It removes the app, her brain download, the shortcuts and the Installed apps entry. It keeps your settings, notes, chat and error log in %LOCALAPPDATA%\Capri, in case you come back.
+It removes the app, her brain download, the shortcuts and the Installed apps entry. It keeps your settings, notes, personality, chat and error log in %LOCALAPPDATA%\Capri, in case you come back.
 
 Errors:
 - "Quit Capri from her tray menu before removing her."
@@ -857,14 +875,14 @@ Quit Capri, then delete the Capri folder you unpacked. Her settings are in ~/.co
 ### What stays on my PC
 - Her built-in brain and Ollama: your chats never leave your PC.
 - Her free voice, and her own ears in free voice chat (English and 24 other European languages).
-- Her notes (me.md), chat history (chat.json, kept a week), settings and error log.
+- Her notes (me.md), her personality (personality.md), chat history (chat.json, kept a week), settings and error log.
 - Your keys. On Windows they're locked to your Windows account. On Mac and Linux the ElevenLabs key is a file only your user can read.
 - Dancing: she listens to what your PC is playing to find the beat, in memory only. Nothing is recorded or sent.
 - Capri has no ads and no analytics.
 
 ### What goes to the services you pick
-- A brain key (NVIDIA, OpenAI, Claude, DeepSeek): your messages, her notes and recent chat go to that company. With Watch my screen on, or when you say "check my screen", so does the screenshot.
-- ElevenLabs: the text she says out loud. In ElevenLabs voice chat: your voice, your words and her notes.
+- A brain key (NVIDIA, OpenAI, Claude, DeepSeek): your messages, her personality, her notes and recent chat go to that company. With Watch my screen on, or when you say "check my screen", so does the screenshot.
+- ElevenLabs: the text she says out loud. In ElevenLabs voice chat: your voice, your words, her personality and her notes.
 - Free voice chat in a language other than English uses Windows speech, which goes through Microsoft.
 
 ### The help chat on the website
@@ -879,7 +897,7 @@ Quit Capri, then delete the Capri folder you unpacked. Her settings are in ~/.co
 - Your browser: when she opens Google, YouTube and other sites for you.
 
 ### Where are my files?
-- Windows: %LOCALAPPDATA%\Capri (settings.json, me.md, chat.json, errors.txt, and the brain folder)
+- Windows: %LOCALAPPDATA%\Capri (settings.json, me.md, personality.md, chat.json, errors.txt, and the brain folder)
 - Mac and Linux: ~/.config/Capri
 
 ---
@@ -918,6 +936,7 @@ On Mac and Linux, her error log is errors.txt in ~/.config/Capri.
 - Her brain through Ollama
 - Her ElevenLabs voice for spoken replies
 - Remember and forget, nickname, language
+- Her personality file (personality.md), with Reset
 - Wander, dance to music, petting, sizes
 - Opening apps and websites, playing songs on Spotify, skipping tracks, what's playing, volume
 
@@ -935,7 +954,7 @@ On Mac and Linux, her error log is errors.txt in ~/.config/Capri.
 - Move: Stay put, Wander: Rarely, Wander: Sometimes, Wander: Often, Wander: Restless, Dance to music, Dance
 - Size: Tiny, Small, Medium, Large, Huge, Giant
 - Brain: your Ollama models. "No models yet. Install Ollama, then pull one."
-- Settings: What should she call you?, Language, Reply length, Chat memory, Sounds (Off, Quiet, Normal, Loud, Typing sound), Voice, Open her notes (me.md)
+- Settings: What should she call you?, Language, Reply length, Chat memory, Sounds (Off, Quiet, Normal, Loud, Typing sound), Voice, Open her notes (me.md), Edit her personality (personality.md), Reset her personality to default
 - Join the Discord
 - Quit Capri
 
@@ -1049,6 +1068,7 @@ Then check the exact message, your Capri version (top of the Mainframe), and the
 - "[SIGNAL CORRUPTED] ...": a one-off hiccup. Try again, or ask something else.
 - She forgets what you said a few messages ago: Mainframe > Settings > Memory > Long. For things she should always remember, tell her "remember ..." so it goes in her notes. If she still forgets, post the exact messages in the Discord.
 - Her replies are too long or too short: Mainframe > Settings > Replies.
+- She doesn't act like herself after you edited personality.md, or you want her back: Mainframe > Settings > Reset. Yours is kept as personality.backup.md.
 - She makes things up: smaller brains on your PC do this sometimes. The free NVIDIA key is smarter.
 - "Your PC doesn't have enough free RAM" or "Your storage is full": see section 10.
 - Games lag or stutter while she runs: use the free NVIDIA key.

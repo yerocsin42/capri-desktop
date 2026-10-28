@@ -143,6 +143,8 @@
           <dt>Language</dt><dd>20 languages for her replies</dd>
           <dt>What should she call you?</dt><dd>type a nickname → <b>Save</b>. <code>choom</code> resets it</dd>
           <dt>Open her notes</dt><dd>me.md, what she remembers</dd>
+          <dt>Edit personality</dt><dd>personality.md, who she is and how she talks. <a href="#personality">Make her yours</a></dd>
+          <dt>Reset</dt><dd>her default personality back. Yours is kept as personality.backup.md</dd>
           <dt>Volume</dt><dd>her voice, Mute to 150%</dd>
           <dt>Sounds</dt><dd>her effects, Off to 100%</dd>
           <dt>Bubble</dt><dd>Quick, Normal, Long</dd>
@@ -264,7 +266,7 @@
       </section>
 
       <section id="notes" class="step">
-        <h2>Notes, nickname, language</h2>
+        <h2>Notes, personality, nickname, language</h2>
         <dl class="keys">
           <dt>“Remember …”</dt><dd>saves to her notes, she reads them every chat</dd>
           <dt>“Forget …”</dt><dd>takes it out. “Forget everything about me” wipes them</dd>
@@ -274,6 +276,14 @@
           <dt>Chat history</dt><dd>kept a week, even after a restart</dd>
         </dl>
         <p class="note">She won't save names, addresses, schools, passwords or phone numbers.</p>
+
+        <h3 id="personality">Make her yours</h3>
+        <ol class="moves">
+          <li>Mainframe → Settings → <b>Edit personality</b></li>
+          <li>Rewrite who she is in <code>personality.md</code>, then save</li>
+          <li>Her next reply uses it. No restart</li>
+        </ol>
+        <p class="note">The note at the top is never sent to her. Capri adds her own rules after yours: reply length, language, what she can do on your PC and safety. Long is fine, but small brains get slower. <b>Reset</b> puts her default back and keeps yours as <code>personality.backup.md</code>. Missing, empty or can't be read? She uses her default and the Mainframe says so. ElevenLabs voice chat picks it up on your next call.</p>
       </section>
 
       <section id="moving" class="step">
@@ -307,15 +317,15 @@
           <li>Windows Settings → Apps → Installed apps → Capri → <b>Uninstall</b></li>
           <li><b>Remove Capri</b></li>
         </ol>
-        <p class="note">Your settings, notes and chat stay in <code>%LOCALAPPDATA%\Capri</code>. Delete that folder to remove everything. Used voice chat? Delete the “Capri” agent in ElevenLabs too.</p>
+        <p class="note">Your settings, notes, personality and chat stay in <code>%LOCALAPPDATA%\Capri</code>. Delete that folder to remove everything. Used voice chat? Delete the “Capri” agent in ElevenLabs too.</p>
       </section>
 
       <section id="privacy" class="step">
         <h2>Privacy</h2>
         <dl class="keys">
-          <dt>Stays on your PC</dt><dd>built-in brain and Ollama chats, her free voice, notes, chat history, settings, your keys</dd>
-          <dt>Brain key</dt><dd>your messages, notes and recent chat go to that company. Screen pictures too, if you watch</dd>
-          <dt>ElevenLabs</dt><dd>what she says. In voice chat: your voice and words</dd>
+          <dt>Stays on your PC</dt><dd>built-in brain and Ollama chats, her free voice, notes, personality, chat history, settings, your keys</dd>
+          <dt>Brain key</dt><dd>your messages, her personality, notes and recent chat go to that company. Screen pictures too, if you watch</dd>
+          <dt>ElevenLabs</dt><dd>what she says. In voice chat: your voice and words, her personality and notes</dd>
           <dt>Dancing</dt><dd>reads your sound level in memory, nothing recorded</dd>
           <dt>Analytics</dt><dd>none</dd>
         </dl>
@@ -325,7 +335,7 @@
       <section id="mac-linux" class="step">
         <h2>Mac and Linux <small>preview</small></h2>
         <dl class="keys">
-          <dt>Works</dt><dd>sitting, chatting, Ollama brain, her ElevenLabs voice, notes, wander, dancing, apps, Spotify</dd>
+          <dt>Works</dt><dd>sitting, chatting, Ollama brain, her ElevenLabs voice, notes, personality.md, wander, dancing, apps, Spotify</dd>
           <dt>Not yet</dt><dd>Mainframe, voice chat, built-in brain, NVIDIA key, shortcuts, screen watching, mouse jobs, auto-updates</dd>
           <dt>Brain</dt><dd>right-click her → <b>Brain</b>, pick an Ollama model</dd>
           <dt>Voice</dt><dd>right-click her → <b>Settings</b> → <b>Voice</b> → <b>Add ElevenLabs key...</b></dd>
@@ -375,6 +385,7 @@
           <dt>“That model isn't on your key.”</dt><dd>Pick another model.</dd>
           <dt>“My brain sent gibberish.” or <code>&lt;unused49&gt;</code></dt><dd>She retries on your CPU by herself. Keeps happening? Use the free NVIDIA key.</dd>
           <dt>She forgets what you said</dt><dd>Mainframe Settings → <b>Memory</b> → <b>Long</b>.</dd>
+          <dt>She doesn't act like herself</dt><dd>Edited <code>personality.md</code>? Mainframe Settings → <b>Reset</b>. Yours is kept as <code>personality.backup.md</code>.</dd>
           <dt>She makes things up</dt><dd>Small brains on your PC guess. The free NVIDIA key is smarter.</dd>
           <dt>PC freezes</dt><dd>Try the free NVIDIA key, then tell us in the Discord.</dd>
         </dl>

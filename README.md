@@ -102,6 +102,19 @@ Just ask her for things, like "open Spotify", "play Blinding Lights", "pause", "
 
 </details>
 
+## Make her yours
+
+Who she is and how she talks lives in `personality.md`, a plain text file you can rewrite. She's open source, so make her whoever you like.
+
+1. In the Capri Mainframe, press **Settings**, then **Edit personality**. It opens in Notepad
+2. Rewrite anything under the note at the top, then save
+3. Her next reply uses it. No restart
+
+- **Where it lives:** `%LOCALAPPDATA%\Capri\personality.md` on Windows, `~/.config/Capri/personality.md` on Mac and Linux (right-click her, Settings, Edit her personality)
+- **Capri's own rules stay in the app:** reply length, language, what she can do on your PC and her safety rules come after your text, so you don't need to write them
+- **Reset** puts her default back and keeps yours as `personality.backup.md`
+- Her default is `DefaultPersonality` in [app/Brain.cs](app/Brain.cs), so a pull request can change her for everyone
+
 ## Roadmap
 
 **Her personality**
@@ -111,8 +124,8 @@ Just ask her for things, like "open Spotify", "play Blinding Lights", "pause", "
 - [x] Head pats (smh): rub your cursor back and forth over her
 - [x] Check in on me (on by default): every so often she glitches in on whatever you're doing
 - [x] With Check in on me on, she asks for your attention now and then when you ignore her
+- [x] Your own Capri: her personality in a file you can open from the Mainframe and change
 - [ ] A charm meter: how fond of you she is, growing as you spend time with her
-- [ ] Your own Capri: her personality in a file you can open from the Mainframe and change
 - [ ] Mischief mode: screen glitches, stealing your cursor, "you've been hacked" notes
 
 **Chatting and her brain**

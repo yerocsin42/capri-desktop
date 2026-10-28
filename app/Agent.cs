@@ -112,6 +112,9 @@ namespace CapriDesktop
 
         internal static string Prompt { get { return Brain.Persona + Hands.Note + "\nYou are talking out loud in a live voice chat: keep every reply to one or two short spoken sentences, and never write tags in square brackets.\nIf the user goes quiet, they're busy, gaming or muted: stay quiet until they talk to you. Never check in, ask if they're still there, beg them to talk or say they left you hanging.\nSo the voice says your slang right, always spell choom as chewm, preem as preme and yezzirrr as yessirrr. Say chewm rarely, at most once every few replies and never on its own."; } }
 
+        // ElevenLabs keeps its own copy of her prompt, so her agent is tuned again after an update or when personality.md changes.
+        internal static bool Stale(int version, string personality) { return version < Version || (personality ?? "") != Brain.PersonalityStamp; }
+
         internal static string Create(string key, string voiceId)
         {
             string body = "{\"name\":\"Capri\",\"conversation_config\":{\"agent\":{\"language\":\"en\"," + Brains(key) + "}," + Patience + ",\"tts\":{\"voice_id\":" + Voice.Quote(voiceId) + "}},\"platform_settings\":{\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true}},\"tts\":{\"voice_id\":true}}}}}";

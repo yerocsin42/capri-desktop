@@ -177,6 +177,7 @@ namespace CapriDesktop
         [DataMember] public int HideVk = 0x48;
         [DataMember] public int WanderPace = 1;
         [DataMember] public string AgentPolyglot;
+        [DataMember] public string AgentPersonality;
         // Check in on me is on by default. Before 0.7.3 it was saved as PopIns, off by default, so the new name turns it on once for everyone.
         [DataMember] public bool CheckIns = true;
         [DataMember] public string VoiceStyle;
@@ -786,6 +787,8 @@ namespace CapriDesktop
         private const string GuideLine = "Follow the guide I just opened. Make your ElevenLabs key with Restrict key turned off, paste it in the box under VOICE, press Connect and pick my voice in the Voice ID box." + Brain.Stuck;
         private const string FreeKeyLine = "Sign in on that page, press Generate API Key and copy it. Then paste it in the box under BRAIN and press Connect. It's free." + Brain.Stuck;
         internal static Action<string> Browse = delegate(string page) { try { Process.Start(page); } catch (System.ComponentModel.Win32Exception) { } };
+        // Opens a file of hers in Notepad. Smoke tests swap it to see which file a button opened.
+        internal static Action<string> Edit = delegate(string path) { using (Process.Start(new ProcessStartInfo("notepad.exe", "\"" + path + "\"") { UseShellExecute = false })) { } };
         private const int PaddingSize = 36;
         internal const int MinSize = 140;
         internal const int MaxSize = 560;
@@ -831,6 +834,9 @@ namespace CapriDesktop
             startMarker = smoke ? null : Path.Combine(data, Program.StartMarker);
             Brain.LogPath = Path.Combine(data, "errors.txt");
             Brain.MemoryPath = Path.Combine(data, "me.md");
+            Brain.PersonalityPath = Path.Combine(data, Brain.PersonalityName);
+            if (smoke) foreach (string old in new[] { Brain.PersonalityPath, Brain.PersonalityBackup }) if (File.Exists(old)) File.Delete(old);
+            Brain.MakePersonality();
             engine = new Engine(data);
             kokoro = new LocalVoice(data);
             parakeet = new LocalEars(data);
@@ -2149,6 +2155,29 @@ namespace CapriDesktop
                 using (Process.Start(new ProcessStartInfo("notepad.exe", "\"" + path + "\"") { UseShellExecute = false })) { }
             }
             catch (Exception) { Tell("open notes", "Couldn't open my notes. They live in " + path + "."); }
+        }
+
+        internal void OpenPersonality()
+        {
+            string path = Brain.PersonalityPath;
+            try
+            {
+                if (!Brain.MakePersonality()) throw new IOException("Couldn't make " + path);
+                Edit(path);
+            }
+            catch (Exception) { Tell("open personality", "Couldn't open my personality. It lives in " + path + "."); }
+            mainframe.ShowPersonality();
+        }
+
+        internal void ResetPersonality()
+        {
+            string backup = Brain.ResetPersonality();
+            mainframe.ShowPersonality();
+            if (backup == null) { Tell("reset personality", "Couldn't reset my personality. It lives in " + Brain.PersonalityPath + "."); return; }
+            if (hidden || chatting || IsDisposed) return;
+            heard = "settings";
+            box.Prompt = "> sys: ";
+            Answer(++asking, backup.Length > 0 ? Brain.ResetKept : Brain.ResetDone, TalkState.Talking);
         }
 
         private static readonly double[] WanderPaces = { 3, 1, 0.45, 0.18 };
@@ -4452,7 +4481,8 @@ namespace CapriDesktop
             string key = voice.Key;
             string voiceId = voice.VoiceId;
             string agentId = preferences.AgentId;
-            bool stale = preferences.AgentVersion < Agent.Version;
+            bool stale = Agent.Stale(preferences.AgentVersion, preferences.AgentPersonality);
+            string stamp = Brain.PersonalityStamp;
             string language = Brain.LanguageCode(Brain.Language);
             string polyglot = preferences.AgentPolyglot;
             ThreadPool.QueueUserWorkItem(delegate
@@ -4490,7 +4520,7 @@ namespace CapriDesktop
                 {
                     if (ticket != chatTicket || !chatting) return;
                     if (problem != null) { ChatFailed(problem); return; }
-                    if (preferences.AgentId != agentId || preferences.AgentVersion != Agent.Version || preferences.AgentPolyglot != polyglot) { preferences.AgentId = agentId; preferences.AgentVersion = Agent.Version; preferences.AgentPolyglot = polyglot; SavePreferences(); }
+                    if (preferences.AgentId != agentId || preferences.AgentVersion != Agent.Version || preferences.AgentPolyglot != polyglot || (preferences.AgentPersonality ?? "") != stamp) { preferences.AgentId = agentId; preferences.AgentVersion = Agent.Version; preferences.AgentPolyglot = polyglot; preferences.AgentPersonality = stamp; SavePreferences(); }
                     Connect(url, voiceId, language);
                 });
             });
@@ -9295,6 +9325,83 @@ namespace CapriDesktop
                             if (pageTabs != null) throw new Exception("Settings page keyboard: " + pageTabs);
                             string pageOverlap = mainframe.Overlap();
                             if (pageOverlap != null) throw new Exception("Settings controls overlap: " + pageOverlap);
+                            // personality.md: her default is 0.7.3's prompt byte for byte, and an edit reaches her chat and voice-chat prompts on her next reply.
+                            const string todaysPersona = "895421eeceae91c9ce89fde770fa559ecfcd5ee7721d81882dbd820f34de1c0e";
+                            Func<string, string> personaHash = delegate(string text) { using (System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(new System.Text.UTF8Encoding(false).GetBytes(text))).Replace("-", "").ToLowerInvariant(); };
+                            string personalityFile = Brain.PersonalityPath;
+                            string personalityBackup = Brain.PersonalityBackup;
+                            if (Brain.Stamp(Brain.DefaultPersonality) != Brain.DefaultStamp || Brain.Retired.Contains(Brain.DefaultStamp)) throw new Exception("Her default personality changed. Set Brain.DefaultStamp to " + Brain.Stamp(Brain.DefaultPersonality) + " and add the old stamp to Brain.Retired, so untouched copies of personality.md move to her new default.");
+                            bool personalityMade = personalityFile != null && Path.GetFileName(personalityFile) == "personality.md" && Path.GetDirectoryName(personalityFile) == Path.GetDirectoryName(Brain.MemoryPath) && File.Exists(personalityFile) && File.ReadAllText(personalityFile) == Brain.PersonalityFile && Brain.PersonalityFile.StartsWith("<!--", StringComparison.Ordinal);
+                            bool personalityToday = Brain.Persona.Length == 4943 && personaHash(Brain.Persona) == todaysPersona && Brain.Persona == Brain.DefaultPersonality + "\n" + Brain.Machinery && Brain.Readable(Brain.PersonalityFile) == Brain.DefaultPersonality && Brain.Personality == Brain.DefaultPersonality && Brain.PersonalityNote == Brain.HerDefault && Brain.PersonalityStamp == "" && !Agent.Stale(Agent.Version, null) && Agent.Prompt.StartsWith(Brain.Persona + Hands.Note, StringComparison.Ordinal) && mainframe.PersonalityShown == Brain.HerDefault && mainframe.PersonalityColour == Look.Dim;
+                            if (!personalityMade || !personalityToday) throw new Exception("Her default personality is not 0.7.3's prompt byte for byte: made " + personalityMade + ", " + Brain.Persona.Length + " characters, SHA-256 " + personaHash(Brain.Persona) + ". If her default or her rules changed on purpose, update todaysPersona here.");
+                            Action<string> personaEditWas = Edit;
+                            System.Collections.Generic.List<string> personaEdits = new System.Collections.Generic.List<string>();
+                            Edit = delegate(string path) { personaEdits.Add(path); };
+                            Button personalityButton = null, resetButton = null;
+                            foreach (Control control in mainframe.Controls)
+                            {
+                                if (control is Button && control.Text == "Edit personality") personalityButton = (Button)control;
+                                if (control is Button && control.Text == "Reset") resetButton = (Button)control;
+                            }
+                            if (personalityButton == null || resetButton == null) throw new Exception("The Mainframe lost its Edit personality or Reset button.");
+                            File.Delete(personalityFile);
+                            mainframe.Sync();
+                            bool personaMissing = Brain.Personality == Brain.DefaultPersonality && personaHash(Brain.Persona) == todaysPersona && Brain.PersonalityStamp == "" && mainframe.PersonalityShown == Brain.NoFile && mainframe.PersonalityColour == Look.Red && mainframe.Overlap() == null;
+                            personalityButton.PerformClick();
+                            bool personaOpened = personaEdits.Count == 1 && personaEdits[0] == personalityFile && File.Exists(personalityFile) && File.ReadAllText(personalityFile) == Brain.PersonalityFile && mainframe.PersonalityShown == Brain.HerDefault;
+                            File.WriteAllText(personalityFile, "<!-- nothing yet -->\r\n\r\n   \r\n");
+                            mainframe.Sync();
+                            bool personaBlankFalls = Brain.Personality == Brain.DefaultPersonality && personaHash(Brain.Persona) == todaysPersona && Brain.PersonalityStamp == "" && mainframe.PersonalityShown == Brain.BlankFile && mainframe.PersonalityColour == Look.Red && mainframe.Overlap() == null;
+                            File.WriteAllText(personalityFile, "");
+                            personaBlankFalls = personaBlankFalls && Brain.PersonalityNote == Brain.BlankFile && personaHash(Brain.Persona) == todaysPersona;
+                            personalityButton.PerformClick();
+                            bool personaBlankKept = personaEdits.Count == 2 && personaEdits[1] == personalityFile && File.ReadAllText(personalityFile) == "";
+                            string personaMine = "You are Capri, but grumpy: you sigh a lot and secretly love cats.\nYou call everyone \"boss\".";
+                            File.WriteAllText(personalityFile, "<!--\r\nmy notes, never sent\r\n-->\r\n\r\nYou are Capri, but grumpy: you sigh a lot and secretly love cats.   \r\n\r\n\r\nYou call everyone \"boss\".\r\n<!-- a note at the end -->\r\n");
+                            mainframe.Sync();
+                            string personaMineStamp = Brain.PersonalityStamp;
+                            bool personaEditReached = Brain.Personality == personaMine && Brain.Persona == personaMine + "\n" + Brain.Machinery && Brain.Character.StartsWith(personaMine + "\n" + Brain.Machinery, StringComparison.Ordinal) && Agent.Prompt.StartsWith(personaMine + "\n" + Brain.Machinery + Hands.Note, StringComparison.Ordinal) && Brain.Persona.IndexOf("never sent", StringComparison.Ordinal) < 0 && Brain.Persona.IndexOf("Edgerunners", StringComparison.Ordinal) < 0 && personaMineStamp.Length == 16 && personaMineStamp == Brain.Stamp(personaMine) && Agent.Stale(Agent.Version, null) && !Agent.Stale(Agent.Version, personaMineStamp) && Agent.Stale(Agent.Version - 1, personaMineStamp) && mainframe.PersonalityShown == Brain.YourEdit && mainframe.PersonalityColour == Look.Dim;
+                            bool personaLocked;
+                            using (FileStream personaLock = new FileStream(personalityFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                            {
+                                mainframe.Sync();
+                                personaLocked = Brain.Personality == Brain.DefaultPersonality && personaHash(Brain.Persona) == todaysPersona && mainframe.PersonalityShown == Brain.CantRead && mainframe.PersonalityColour == Look.Red && mainframe.Overlap() == null;
+                            }
+                            personaLocked = personaLocked && Brain.Personality == personaMine;
+                            string personaLong = "";
+                            while (personaLong.Length < 20000) personaLong += "You remember every Night City street, every rooftop and every vending machine that ever ate your eddies. ";
+                            personaLong = personaLong.Trim();
+                            File.WriteAllText(personalityFile, personaLong);
+                            mainframe.Sync();
+                            bool personaLongKept = Brain.Personality == personaLong && Brain.Persona == personaLong + "\n" + Brain.Machinery && Agent.Prompt.StartsWith(personaLong + "\n", StringComparison.Ordinal) && mainframe.PersonalityShown == Brain.LongNote && mainframe.PersonalityColour == Look.Yellow && mainframe.Overlap() == null;
+                            snap("mainframe-personality.png");
+                            string personaTheirs = "<!-- mine -->\r\nYou are Capri, but grumpy.\r\n";
+                            File.WriteAllText(personalityFile, personaTheirs);
+                            if (File.Exists(personalityBackup)) File.Delete(personalityBackup);
+                            CloseTalk();
+                            resetButton.PerformClick();
+                            bool personaResetKept = Path.GetFileName(personalityBackup) == "personality.backup.md" && Path.GetDirectoryName(personalityBackup) == Path.GetDirectoryName(personalityFile) && File.Exists(personalityBackup) && File.ReadAllText(personalityBackup) == personaTheirs && File.ReadAllText(personalityFile) == Brain.PersonalityFile && personaHash(Brain.Persona) == todaysPersona && reply == Brain.ResetKept && mainframe.PersonalityShown == Brain.HerDefault;
+                            CloseTalk();
+                            resetButton.PerformClick();
+                            bool personaResetAgain = File.ReadAllText(personalityBackup) == personaTheirs && File.ReadAllText(personalityFile) == Brain.PersonalityFile && reply == Brain.ResetDone;
+                            CloseTalk();
+                            File.Delete(personalityFile);
+                            resetButton.PerformClick();
+                            bool personaResetMissing = File.ReadAllText(personalityFile) == Brain.PersonalityFile && File.ReadAllText(personalityBackup) == personaTheirs && reply == Brain.ResetDone;
+                            CloseTalk();
+                            string personaOld = "You are Capri, from an older Capri.";
+                            Brain.Retired.Add(Brain.Stamp(personaOld));
+                            File.WriteAllText(personalityFile, "<!-- an old note -->\n\n" + personaOld + "\n");
+                            bool personaMovedOn = Brain.MakePersonality() && File.ReadAllText(personalityFile) == Brain.PersonalityFile;
+                            File.WriteAllText(personalityFile, personaOld + " I edited this.");
+                            bool personaEditStays = Brain.MakePersonality() && Brain.Personality == personaOld + " I edited this.";
+                            Brain.Retired.Remove(Brain.Stamp(personaOld));
+                            Edit = personaEditWas;
+                            File.WriteAllText(personalityFile, Brain.PersonalityFile);
+                            File.Delete(personalityBackup);
+                            mainframe.Sync();
+                            if (!personaMissing || !personaOpened || !personaBlankFalls || !personaBlankKept || !personaEditReached || !personaLocked || !personaLongKept || !personaResetKept || !personaResetAgain || !personaResetMissing || !personaMovedOn || !personaEditStays || mainframe.PersonalityShown != Brain.HerDefault || personaHash(Brain.Persona) != todaysPersona) throw new Exception("personality.md went wrong: missing " + personaMissing + ", opened " + personaOpened + ", empty " + personaBlankFalls + "/" + personaBlankKept + ", edited " + personaEditReached + ", locked " + personaLocked + ", long " + personaLongKept + ", reset " + personaResetKept + "/" + personaResetAgain + "/" + personaResetMissing + ", old default " + personaMovedOn + "/" + personaEditStays + ", note " + mainframe.PersonalityShown + ", reply " + reply);
+                            checks.Add("PASS personality.md: her default is 0.7.3's prompt byte for byte (4943 characters, same SHA-256); an edit with notes, blank lines and Windows line endings reaches her chat and voice-chat prompts on her next reply and marks her agent for re-tuning; missing, empty and locked files fall back to her default and the Mainframe says so in red; a 20,000-character one is kept whole with a yellow slow-brains warning; Edit personality opens personality.md through the test seam and makes it when missing; Reset keeps theirs as personality.backup.md and never overwrites it with her default; an untouched old default moves to the new one; nothing overlaps");
                             SetVolume(50);
                             SetSoundLevel(30);
                             SetSleepAfter(600);
@@ -10617,6 +10724,7 @@ namespace CapriDesktop
                             if (Agent.Create(voice.Key, voice.VoiceId) != "agent_test") throw new Exception("ElevenLabs agent was not made.");
                             preferences.AgentId = "agent_old";
                             preferences.AgentVersion = 1;
+                            preferences.AgentPersonality = "0123456789abcdef";
                             CloseTalk();
                             pill.Press(2);
                             if (!pill.Chatting || pill.Muted || !chatting || TalkPill.Render(1, 0, true).Width <= TalkPill.Measure(1).Width + 30) throw new Exception("Wave did not start voice chat with the mic button apart on the right.");
@@ -10639,7 +10747,7 @@ namespace CapriDesktop
                             }
                             string log;
                             lock (asked) log = string.Join(" | ", asked.ToArray());
-                            if (agent == null || !agent.Ready || preferences.AgentId != "agent_old" || preferences.AgentVersion != Agent.Version || mainframe.VoiceStatus.IndexOf("Voice chat on", StringComparison.Ordinal) != 0) throw new Exception("Voice chat did not open the agent link: " + mainframe.VoiceStatus + " / " + log);
+                            if (agent == null || !agent.Ready || preferences.AgentId != "agent_old" || preferences.AgentVersion != Agent.Version || preferences.AgentPersonality != "" || mainframe.VoiceStatus.IndexOf("Voice chat on", StringComparison.Ordinal) != 0) throw new Exception("Voice chat did not open the agent link: " + mainframe.VoiceStatus + " / " + log);
                             short[] loud = new short[Ears.Chunk];
                             for (int i = 0; i < loud.Length; i++) loud[i] = (short)(Math.Sin(i * 0.3) * 9000);
                             pill.Press(3);
@@ -10706,6 +10814,8 @@ namespace CapriDesktop
                             if (agent != null || !chatting || !resting || !pill.Chatting || mainframe.VoiceStatus.IndexOf("Voice chat resting", StringComparison.Ordinal) != 0) throw new Exception("She did not hang up and rest after one check-in: " + mainframe.VoiceStatus);
                             short[] speech = new short[Ears.Chunk];
                             for (int i = 0; i < speech.Length; i++) speech[i] = (short)(Math.Sin(i * 0.3) * 9000);
+                            // An edit to personality.md while she rests: the call she wakes into re-tunes her agent with it.
+                            File.WriteAllText(Brain.PersonalityPath, "<!-- for the call -->\r\nYou are Capri, on a call from the Mainframe.\r\n");
                             ears.Feed(new short[Ears.Chunk]);
                             ears.Feed(speech);
                             if (!resting) throw new Exception("One loud blip woke her.");
@@ -10721,6 +10831,14 @@ namespace CapriDesktop
                             string log;
                             lock (asked) log = string.Join(" | ", asked.ToArray());
                             if (System.Text.RegularExpressions.Regex.Matches(log, "get-signed-url").Count < 2 || System.Text.RegularExpressions.Regex.Matches(log, "init \\{").Count < 2 || log.IndexOf("woke silent | woke loud | woke loud | woke loud", StringComparison.Ordinal) < 0) throw new Exception("Talking did not reopen the link and replay what she missed: " + log);
+                            const string callPersonality = "You are Capri, on a call from the Mainframe.";
+                            string tunedFor = "http PATCH /v1/convai/agents/agent_old sk_test_capri_1234 {\"conversation_config\":{\"turn\":{\"turn_timeout\":30,\"silence_end_call_timeout\":45},\"agent\":{\"prompt\":{\"prompt\":\"";
+                            string callPrompt = Voice.Quote(callPersonality + "\n" + Brain.Machinery + Hands.Note);
+                            callPrompt = callPrompt.Substring(1, callPrompt.Length - 2);
+                            bool retuned = System.Text.RegularExpressions.Regex.Matches(log, System.Text.RegularExpressions.Regex.Escape(tunedFor)).Count == 2 && log.IndexOf(tunedFor + callPrompt, StringComparison.Ordinal) >= 0 && log.IndexOf("init {\"type\":\"conversation_initiation_client_data\",\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":\"" + callPrompt, StringComparison.Ordinal) >= 0 && preferences.AgentPersonality == Brain.Stamp(callPersonality);
+                            File.WriteAllText(Brain.PersonalityPath, Brain.PersonalityFile);
+                            if (!retuned) throw new Exception("An edited personality.md did not re-tune her ElevenLabs agent for the next call: " + preferences.AgentPersonality + " / " + log);
+                            checks.Add("PASS personality.md on calls: an edit while she rests re-tunes her ElevenLabs agent on the next call (its prompt stamp changed), and that call starts with the new personality");
                             if (agent != null || !chatting || !resting || mainframe.VoiceStatus.IndexOf("Voice chat resting", StringComparison.Ordinal) != 0) throw new Exception("A clean hang-up from ElevenLabs did not leave her resting: " + mainframe.VoiceStatus + " / " + log);
                             lock (waking) resting = false;
                             agent = new Agent();

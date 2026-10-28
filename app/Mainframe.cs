@@ -57,6 +57,7 @@ namespace CapriDesktop
         private readonly Rung[] rungs = new Rung[3];
         private int tier;
         private readonly Entry nickname;
+        private readonly Label personalityNote;
         private readonly Key showHide;
         private readonly Key perch;
         private readonly Slider sizeSlider;
@@ -296,6 +297,7 @@ namespace CapriDesktop
             for (int i = header; i < Controls.Count; i++) mainLeft.Add(new KeyValuePair<Control, int>(Controls[i], Controls[i].Left));
             int first = Controls.Count;
             Caption("YOU >", 28, 58, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
+            personalityNote = Caption("", 84, 59, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
             Caption("Language", 28, 86, Font, Look.Dim);
             languageMenu = Dropdown();
             for (int i = 0; i < Brain.Languages.GetLength(0); i++)
@@ -315,8 +317,9 @@ namespace CapriDesktop
             nickname.Box.AccessibleName = "What should she call you?";
             nickname.Box.KeyDown += delegate(object sender, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; UseNickname(); } };
             Make("Save", 280, 140, 76, 28, delegate { UseNickname(); });
-            Make("Open her notes", 28, 176, 160, 28, delegate { capri.OpenNotes(); });
-            Caption("me.md · her memories", 200, 182, Font, Look.Dim);
+            Make("Open her notes", 28, 176, 120, 28, delegate { capri.OpenNotes(); }).AccessibleName = "Open her notes: me.md, her memories";
+            Make("Edit personality", 156, 176, 130, 28, delegate { capri.OpenPersonality(); }).AccessibleName = "Edit her personality: personality.md";
+            Make("Reset", 294, 176, 62, 28, delegate { capri.ResetPersonality(); }).AccessibleName = "Reset her personality to her default";
             Caption("VOICE >", 28, 220, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
             Caption("Volume", 28, 249, Font, Look.Dim);
             volume = PageSlider(VolumeNames, 242, "Her voice volume");
@@ -684,7 +687,27 @@ namespace CapriDesktop
             repliesName.Text = Lengths[replies.Value];
             recall.Value = Math.Max(0, Array.IndexOf(Recalls, capri.Recall));
             recallName.Text = Lengths[recall.Value];
+            ShowPersonality();
             syncing = false;
+        }
+
+        // Says which personality she's using, and why it's her default when personality.md is missing, empty or can't be read.
+        internal void ShowPersonality()
+        {
+            string note = Brain.PersonalityNote;
+            personalityNote.Text = note;
+            personalityNote.ForeColor = note == Brain.HerDefault || note == Brain.YourEdit ? Look.Dim : note == Brain.LongNote ? Look.Yellow : Look.Red;
+        }
+
+        internal string PersonalityShown { get { return personalityNote.Text; } }
+
+        internal Color PersonalityColour { get { return personalityNote.ForeColor; } }
+
+        // Back from editing personality.md in Notepad, the note catches up.
+        protected override void OnActivated(EventArgs e)
+        {
+            base.OnActivated(e);
+            ShowPersonality();
         }
 
         internal string Status { get { return brainName.Text + " | " + brainNote.Text; } }

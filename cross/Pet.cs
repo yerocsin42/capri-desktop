@@ -186,6 +186,7 @@ namespace CapriDesktop
         private const int VoiceWait = 8000;
         private const string KeyHeard = "(voice key)";
         private const string NameHeard = "(nickname)";
+        private const string PersonalityHeard = "(personality)";
         private bool dancing;
         private Action outro;
         private double outroAt;
@@ -225,6 +226,8 @@ namespace CapriDesktop
             Brain.BrainMenu = "in my right-click menu under Brain";
             Brain.Bin = OperatingSystem.IsMacOS() ? "Trash" : "trash";
             Brain.MemoryPath = Path.Combine(Program.Smoke ?? folder, "me.md");
+            Brain.PersonalityPath = Path.Combine(Program.Smoke ?? folder, Brain.PersonalityName);
+            Brain.MakePersonality();
             Brain.Language = Brain.LanguageCode(Saved.Language) == "en" ? null : Saved.Language;
             Brain.Nickname = Brain.Nick(Saved.Nickname).Length == 0 ? null : Brain.Nick(Saved.Nickname);
             Brain.Wordiness = Math.Max(0, Math.Min(2, Saved.Replies));
@@ -884,6 +887,10 @@ namespace CapriDesktop
             sounds.Items.Add(typingItem);
             MenuItem notes = new MenuItem { Header = "Open her notes (me.md)" };
             notes.Click += delegate { OpenNotes(); };
+            MenuItem personality = new MenuItem { Header = "Edit her personality (personality.md)" };
+            personality.Click += delegate { OpenPersonality(); };
+            MenuItem resetPersonality = new MenuItem { Header = "Reset her personality to default" };
+            resetPersonality.Click += delegate { ResetPersonality(); };
             MenuItem nickname = new MenuItem { Header = "What should she call you?" };
             nickname.Click += delegate { AskNickname(); };
             settings.Items.Add(nickname);
@@ -894,6 +901,8 @@ namespace CapriDesktop
             voiceMenu = new MenuItem { Header = "Voice" };
             settings.Items.Add(voiceMenu);
             settings.Items.Add(notes);
+            settings.Items.Add(personality);
+            settings.Items.Add(resetPersonality);
             MenuItem sizes = new MenuItem { Header = "Size" };
             for (int i = 0; i < Sizes.Length; i++)
             {
@@ -1082,6 +1091,21 @@ namespace CapriDesktop
             catch (Exception) { return null; }
             if (Program.Smoke == null) Browse(path);
             return path;
+        }
+
+        internal string OpenPersonality()
+        {
+            string path = Brain.PersonalityPath;
+            if (!Brain.MakePersonality()) return null;
+            if (Program.Smoke == null) Browse(path);
+            return path;
+        }
+
+        internal void ResetPersonality()
+        {
+            ComeBack();
+            string backup = Brain.ResetPersonality();
+            Reply(++asking, PersonalityHeard, backup == null ? "Couldn't reset my personality. It lives in " + Brain.PersonalityPath + "." : backup.Length > 0 ? Brain.ResetKept : Brain.ResetDone);
         }
 
         internal static int WalkTarget(int at, int from, int to, int size, double side, double length)
