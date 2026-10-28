@@ -2326,12 +2326,46 @@ namespace CapriDesktop
 
         internal string HideKeyName { get { return KeyName(preferences.HideMods, preferences.HideVk); } }
 
-        internal static bool Bindable(int mods, int vk) { return (mods & 3) != 0 && (mods & ~7) == 0 && ((vk >= 0x41 && vk <= 0x5A) || (vk >= 0x30 && vk <= 0x39) || (vk >= 0x70 && vk <= 0x7B)); }
+        // Any key alone or with any of Alt (1), Ctrl (2), Shift (4) and Win (8), which are RegisterHotKey's own flags.
+        // A modifier on its own, a mouse button or an IME placeholder never counts.
+        internal static bool Bindable(int mods, int vk) { return (mods & ~15) == 0 && vk > 0 && vk < 0xFF && Array.IndexOf(NotKeys, vk) < 0; }
 
-        internal static string KeyName(int mods, int vk)
+        private static readonly int[] NotKeys = { 0x01, 0x02, 0x04, 0x05, 0x06, 0x10, 0x11, 0x12, 0x5B, 0x5C, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xE5, 0xE7 };
+
+        // Keys carries Ctrl, Alt and Shift. The Windows key comes separately, because Keys has no flag for it.
+        internal static int HotMods(Keys keys, bool win) { return ((keys & Keys.Alt) != 0 ? 1 : 0) | ((keys & Keys.Control) != 0 ? 2 : 0) | ((keys & Keys.Shift) != 0 ? 4 : 0) | (win ? 8 : 0); }
+
+        internal static string ModNames(int mods) { return ((mods & 8) != 0 ? "Win + " : "") + ((mods & 2) != 0 ? "Ctrl + " : "") + ((mods & 1) != 0 ? "Alt + " : "") + ((mods & 4) != 0 ? "Shift + " : ""); }
+
+        internal static string KeyName(int mods, int vk) { return ModNames(mods) + KeyWord(vk); }
+
+        private static readonly int[] WordedKeys = { 0x03, 0x08, 0x09, 0x0C, 0x0D, 0x13, 0x14, 0x1B, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2C, 0x2D, 0x2E, 0x2F, 0x5D, 0x5F, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x90, 0x91, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF, 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7 };
+        private static readonly string[] KeyWords = { "Break", "Backspace", "Tab", "Clear", "Enter", "Pause", "Caps Lock", "Esc", "Space", "Page Up", "Page Down", "End", "Home", "Left", "Up", "Right", "Down", "Print Screen", "Insert", "Delete", "Help", "Menu", "Sleep", "Num *", "Num +", "Num Separator", "Num -", "Num .", "Num /", "Num Lock", "Scroll Lock", "Browser Back", "Browser Forward", "Browser Refresh", "Browser Stop", "Browser Search", "Browser Favorites", "Browser Home", "Volume Mute", "Volume Down", "Volume Up", "Next Track", "Previous Track", "Stop Media", "Play/Pause", "Mail", "Media Select", "App 1", "App 2" };
+
+        // The name on the key: letters and digits as they are, F1 to F24, and words for the rest.
+        private static string KeyWord(int vk)
         {
-            string name = ((mods & 2) != 0 ? "Ctrl + " : "") + ((mods & 1) != 0 ? "Alt + " : "") + ((mods & 4) != 0 ? "Shift + " : "");
-            return name + (vk >= 0x70 && vk <= 0x7B ? "F" + (vk - 0x6F) : ((char)vk).ToString());
+            if ((vk >= 0x41 && vk <= 0x5A) || (vk >= 0x30 && vk <= 0x39)) return ((char)vk).ToString();
+            if (vk >= 0x70 && vk <= 0x87) return "F" + (vk - 0x6F);
+            if (vk >= 0x60 && vk <= 0x69) return "Num " + (vk - 0x60);
+            int at = Array.IndexOf(WordedKeys, vk);
+            if (at >= 0) return KeyWords[at];
+            // Punctuation moves around between keyboard layouts, so it's named by what this keyboard types.
+            char typed = (char)(Native.MapVirtualKey(vk, 2) & 0xFFFF);
+            return typed > ' ' ? typed.ToString() : "Key " + vk;
+        }
+
+        // A key that types, alone or with only Shift, stops typing in other apps while it's hers: RegisterHotKey takes it everywhere.
+        internal static bool Swallows(int mods, int vk) { return (mods & 11) == 0 && ((vk >= 0x41 && vk <= 0x5A) || (vk >= 0x30 && vk <= 0x39) || (vk >= 0x60 && vk <= 0x6F) || (vk >= 0xBA && vk <= 0xC0) || (vk >= 0xDB && vk <= 0xDF) || vk == 0xE2 || vk == 0x20 || vk == 0x0D || vk == 0x09 || vk == 0x08); }
+
+        // Saved keys from any version: one that isn't a key goes back to its default, and mute can't share talk's.
+        internal static void CheckKeys(Preferences value)
+        {
+            if (!Bindable(value.TalkMods, value.TalkVk)) { value.TalkMods = 3; value.TalkVk = 0x56; }
+            if (!Bindable(value.MuteMods, value.MuteVk) || (value.MuteMods == value.TalkMods && value.MuteVk == value.TalkVk)) { value.MuteMods = 3; value.MuteVk = 0x4E; }
+            if (!Bindable(value.TypeMods, value.TypeVk)) { value.TypeMods = 3; value.TypeVk = 0x54; }
+            if (!Bindable(value.HideMods, value.HideVk)) { value.HideMods = 3; value.HideVk = 0x48; }
+            Unclash(value);
         }
 
         // Her keys, in the order the Mainframe shows them: talk, mute mic, type to her, hide or show her.
@@ -2362,12 +2396,11 @@ namespace CapriDesktop
             return false;
         }
 
-        internal string SetHotkey(int slot, Keys keys)
+        internal string SetHotkey(int slot, Keys keys) { return SetHotkey(slot, HotMods(keys, false), (int)(keys & Keys.KeyCode)); }
+
+        internal string SetHotkey(int slot, int mods, int vk)
         {
-            int mods = ((keys & Keys.Alt) != 0 ? 1 : 0) | ((keys & Keys.Control) != 0 ? 2 : 0) | ((keys & Keys.Shift) != 0 ? 4 : 0);
-            int vk = (int)(keys & Keys.KeyCode);
-            if ((mods & 3) == 0) return "Hold Ctrl or Alt with a letter, number or F-key.";
-            if (!Bindable(mods, vk)) return "Pick a letter, number or F-key.";
+            if (!Bindable(mods, vk)) return "Press a key, alone or with Ctrl, Alt, Shift or Win.";
             string name = KeyName(mods, vk);
             int[] bound = { preferences.TalkMods, preferences.TalkVk, preferences.MuteMods, preferences.MuteVk, preferences.TypeMods, preferences.TypeVk, preferences.HideMods, preferences.HideVk };
             for (int i = 0; i < KeyJobs.Length; i++)
@@ -5319,11 +5352,7 @@ namespace CapriDesktop
                 {
                     Preferences value = (Preferences)new DataContractJsonSerializer(typeof(Preferences)).ReadObject(stream);
                     if (value.Size < MinSize || value.Size > MaxSize) value.Size = 240;
-                    if (!Bindable(value.TalkMods, value.TalkVk)) { value.TalkMods = 3; value.TalkVk = 0x56; }
-                    if (!Bindable(value.MuteMods, value.MuteVk) || (value.MuteMods == value.TalkMods && value.MuteVk == value.TalkVk)) { value.MuteMods = 3; value.MuteVk = 0x4E; }
-                    if (!Bindable(value.TypeMods, value.TypeVk)) { value.TypeMods = 3; value.TypeVk = 0x54; }
-                    if (!Bindable(value.HideMods, value.HideVk)) { value.HideMods = 3; value.HideVk = 0x48; }
-                    Unclash(value);
+                    CheckKeys(value);
                     return value;
                 }
             }
@@ -9673,36 +9702,50 @@ namespace CapriDesktop
                             mainframe.ShowKeys(true, true);
                             if (!mainframe.MicStatus.EndsWith("| help | keys | mute", StringComparison.Ordinal)) throw new Exception("The Ctrl + Alt + V and N hints did not show with a key: " + mainframe.MicStatus);
                             mainframe.PickKeys(0);
-                            bool talkWaiting = mainframe.KeyStatus.StartsWith("Press new keys", StringComparison.Ordinal);
+                            bool talkWaiting = mainframe.KeyStatus.StartsWith("Press new keys, then Confirm", StringComparison.Ordinal) && !mainframe.ConfirmReady;
                             mainframe.TakeKeys(Keys.Control | Keys.Alt | Keys.K);
+                            bool talkPending = mainframe.ConfirmReady && preferences.TalkVk == 0x56 && mainframe.KeysShown.StartsWith("Talk: Ctrl + Alt + K |", StringComparison.Ordinal);
+                            mainframe.ConfirmKeys();
                             string talkPicked = mainframe.KeyStatus;
                             mainframe.PickKeys(1);
                             mainframe.TakeKeys(Keys.ControlKey | Keys.Control);
-                            bool muteStillWaiting = mainframe.KeyStatus.EndsWith("Press new keys, Esc cancels", StringComparison.Ordinal);
-                            mainframe.TakeKeys(Keys.K);
-                            string loneKey = mainframe.VoiceNoteText;
-                            mainframe.PickKeys(1);
+                            bool modifierAlone = !mainframe.ConfirmReady && mainframe.KeysShown.Contains("| Mute mic: Ctrl + ... |");
+                            mainframe.TakeKeys(Keys.ShiftKey | Keys.Shift | Keys.Control);
+                            bool modifiersAlone = !mainframe.ConfirmReady && mainframe.KeysShown.Contains("| Mute mic: Ctrl + Shift + ... |");
+                            mainframe.ConfirmKeys();
+                            bool stillPicking = mainframe.KeyStatus.EndsWith("Press new keys, then Confirm", StringComparison.Ordinal);
                             mainframe.TakeKeys(Keys.Control | Keys.Alt | Keys.K);
+                            mainframe.ConfirmKeys();
                             string clash = mainframe.VoiceNoteText;
-                            mainframe.PickKeys(1);
+                            bool clashKeptPicking = mainframe.ConfirmReady;
                             mainframe.TakeKeys(Keys.Control | Keys.Shift | Keys.F9);
+                            mainframe.ConfirmKeys();
                             string mutePicked = mainframe.KeyStatus;
                             string keySavedNote = mainframe.VoiceNoteText;
+                            // Esc is a key like any other now. Cancel is what keeps the old one.
                             mainframe.PickKeys(0);
                             mainframe.TakeKeys(Keys.Escape);
-                            if (!talkWaiting || talkPicked != "Ctrl + Alt + K to talk | Ctrl + Alt + N mutes mic" || !muteStillWaiting || loneKey != "Hold Ctrl or Alt with a letter, number or F-key." || clash != "Ctrl + Alt + K is already her talk key." || mutePicked != "Ctrl + Alt + K to talk | Ctrl + Shift + F9 mutes mic" || mainframe.KeyStatus != mutePicked || keySavedNote != "Saved. Ctrl + Shift + F9 mutes your mic." || preferences.TalkVk != 0x4B || preferences.MuteMods != 6 || preferences.MuteVk != 0x78) throw new Exception("Picking her keys went wrong: " + talkPicked + " / " + loneKey + " / " + clash + " / " + mutePicked + " / " + mainframe.KeyStatus);
-                            if (SetHotkey(0, Keys.Control | Keys.Alt | Keys.V) != null || SetHotkey(1, Keys.Control | Keys.Alt | Keys.N) != null || mainframe.KeyStatus != "Ctrl + Alt + V to talk | Ctrl + Alt + N mutes mic" || !Bindable(3, 0x56) || Bindable(4, 0x56) || Bindable(3, 0x1B)) throw new Exception("Her keys didn't go back: " + mainframe.KeyStatus);
-                            checks.Add("PASS her keys: click the talk or mute hint, press a new Ctrl or Alt combo and it saves; lone keys, clashes and Esc are refused");
+                            bool escPending = mainframe.ConfirmReady && mainframe.KeysShown.StartsWith("Talk: Esc |", StringComparison.Ordinal);
+                            mainframe.CancelKeys();
+                            bool keptOld = !mainframe.ConfirmReady && preferences.TalkMods == 3 && preferences.TalkVk == 0x4B && mainframe.KeyStatus == mutePicked;
+                            if (!talkWaiting || !talkPending || talkPicked != "Ctrl + Alt + K to talk | Ctrl + Alt + N mutes mic" || !modifierAlone || !modifiersAlone || !stillPicking || clash != "Ctrl + Alt + K is already her talk key." || !clashKeptPicking || mutePicked != "Ctrl + Alt + K to talk | Ctrl + Shift + F9 mutes mic" || keySavedNote != "Saved. Ctrl + Shift + F9 mutes your mic." || !escPending || !keptOld || preferences.MuteMods != 6 || preferences.MuteVk != 0x78)
+                                throw new Exception("Picking her keys went wrong: " + talkWaiting + " " + talkPending + " / " + talkPicked + " / " + modifierAlone + " " + modifiersAlone + " " + stillPicking + " / " + clash + " " + clashKeptPicking + " / " + mutePicked + " / " + keySavedNote + " / esc " + escPending + " " + keptOld + " / " + mainframe.KeysShown);
+                            if (SetHotkey(0, Keys.Control | Keys.Alt | Keys.V) != null || SetHotkey(1, Keys.Control | Keys.Alt | Keys.N) != null || mainframe.KeyStatus != "Ctrl + Alt + V to talk | Ctrl + Alt + N mutes mic" || !Bindable(3, 0x56) || !Bindable(4, 0x56) || !Bindable(3, 0x1B) || !Bindable(0, 0x77) || !Bindable(9, 0x4A) || Bindable(0, 0x11) || Bindable(2, 0xA2) || Bindable(8, 0x5B) || Bindable(16, 0x41) || Bindable(0, 0) || Bindable(0, 0x01))
+                                throw new Exception("Her keys didn't go back: " + mainframe.KeyStatus);
+                            checks.Add("PASS her keys: what's pressed shows live, Confirm saves it, a modifier alone can't be confirmed, a clash is refused and keeps picking, Esc is a key like any other, and Cancel keeps the old one");
                             mainframe.PickKeys(1);
-                            bool keysWaiting = mainframe.KeysShown == "Talk: Ctrl + Alt + V | Press new keys, Esc cancels | Type: Ctrl + Alt + T | Hide/show: Ctrl + Alt + H";
-                            mainframe.TakeKeys(Keys.Escape);
+                            bool keysWaiting = mainframe.KeysShown == "Talk: Ctrl + Alt + V | Press new keys, then Confirm | Type: Ctrl + Alt + T | Hide/show: Ctrl + Alt + H";
+                            mainframe.CancelKeys();
                             if (!keysWaiting || mainframe.KeysShown != "Talk: Ctrl + Alt + V | Mute mic: Ctrl + Alt + N | Type: Ctrl + Alt + T | Hide/show: Ctrl + Alt + H") throw new Exception("The KEYS buttons in Settings showed the wrong keys: " + mainframe.KeysShown);
                             checks.Add("PASS keybind selector: Settings has a KEYS row with Talk and Mute mic buttons that show her keys, wait for new ones when clicked, and change with the hints on the main page");
                             mainframe.PickKeys(2);
                             mainframe.TakeKeys(Keys.Control | Keys.Alt | Keys.V);
+                            mainframe.ConfirmKeys();
                             string typeClash = mainframe.VoiceNoteText;
+                            // Opening another key drops the one being picked, so Type stays on Ctrl + Alt + T.
                             mainframe.PickKeys(3);
                             mainframe.TakeKeys(Keys.Control | Keys.Alt | Keys.J);
+                            mainframe.ConfirmKeys();
                             string hideSaved = mainframe.VoiceNoteText, keysMoved = mainframe.KeysShown;
                             bool hiddenBefore = hidden;
                             if (typer.Visible) typer.Hide();
@@ -9734,17 +9777,78 @@ namespace CapriDesktop
                             string mainNoteBefore = mainframe.VoiceNoteText;
                             mainframe.PickKeys(3);
                             mainframe.TakeKeys(Keys.Control | Keys.Alt | Keys.V);
+                            mainframe.ConfirmKeys();
                             string pageClash = mainframe.KeysNoteText;
                             mainframe.PickKeys(2);
                             mainframe.TakeKeys(Keys.Control | Keys.Alt | Keys.Y);
+                            string pagePending = mainframe.KeysNoteText;
+                            bool pageButtons = mainframe.ConfirmReady;
+                            string pickingCrowded = mainframe.Overlap();
+                            snap("mainframe-keys-confirm.png");
+                            mainframe.ConfirmKeys();
                             string pageSaved = mainframe.KeysNoteText;
                             bool mainNoteKept = mainframe.VoiceNoteText == mainNoteBefore;
                             string pageCrowded = mainframe.Overlap();
                             string typeBack = SetHotkey(2, Keys.Control | Keys.Alt | Keys.T);
+                            if (pageClash != "Ctrl + Alt + V is already her talk key." || pagePending != "Confirm to keep Ctrl + Alt + Y, or Cancel." || !pageButtons || pickingCrowded != null || pageSaved != "Saved. Ctrl + Alt + Y opens her typing box." || mainframe.ConfirmReady || !mainNoteKept || pageCrowded != null || typeBack != null || preferences.TypeVk != 0x54)
+                                throw new Exception("The KEYS row's messages didn't show in Settings: " + pageClash + " / " + pagePending + " " + pageButtons + " / " + pageSaved + " / main kept " + mainNoteKept + " / overlap " + pickingCrowded + " " + pageCrowded);
+                            checks.Add("PASS KEYS messages: changing a key in Settings says \"Saved.\" or \"already her talk key\" under the KEYS row, where they're looking, not on the hidden main page, and Confirm and Cancel sit beside the keys without covering anything");
+                            // Any key alone or with any modifiers: F8 on its own, Ctrl + Shift + K, Win + Alt + J, and a lone letter, which says it won't type elsewhere.
+                            mainframe.PickKeys(0);
+                            mainframe.TakeKeys(Keys.F8);
+                            mainframe.ConfirmKeys();
+                            string loneF8 = mainframe.KeysNoteText;
+                            bool f8Saved = preferences.TalkMods == 0 && preferences.TalkVk == 0x77 && TalkKeyName == "F8";
+                            mainframe.PickKeys(1);
+                            mainframe.TakeKeys(Keys.Control | Keys.Shift | Keys.K);
+                            mainframe.ConfirmKeys();
+                            bool ctrlShiftK = preferences.MuteMods == 6 && preferences.MuteVk == 0x4B && MuteKeyName == "Ctrl + Shift + K";
+                            mainframe.PickKeys(3);
+                            mainframe.TakeKeys(Keys.LWin, false);
+                            bool winAlone = !mainframe.ConfirmReady && mainframe.KeysShown.EndsWith("| Hide/show: Win + ...", StringComparison.Ordinal);
+                            mainframe.TakeKeys(Keys.Alt | Keys.J, true);
+                            mainframe.ConfirmKeys();
+                            bool winAltJ = preferences.HideMods == 9 && preferences.HideVk == 0x4A && HideKeyName == "Win + Alt + J";
+                            mainframe.PickKeys(2);
+                            mainframe.TakeKeys(Keys.Q);
+                            string loneLetter = mainframe.KeysNoteText;
+                            mainframe.ConfirmKeys();
+                            string loneSaved = mainframe.KeysNoteText, anyShown = mainframe.KeysShown;
+                            bool qSaved = preferences.TypeMods == 0 && preferences.TypeVk == 0x51;
+                            string comma = KeyName(4, 0xBC), pageUp = KeyName(2, 0x21), pad = KeyName(0, 0x65), twelve = KeyName(1, 0x7B), f24 = KeyName(0, 0x87);
+                            if (loneF8 != "Saved. F8 starts voice chat." || !f8Saved || !ctrlShiftK || !winAlone || !winAltJ || loneLetter != "Q won't type in other apps while she runs. Confirm to keep it." || loneSaved != "Saved. Q opens her typing box. It won't type in other apps while she runs." || !qSaved
+                                || anyShown != "Talk: F8 | Mute mic: Ctrl + Shift + K | Type: Q | Hide/show: Win + Alt + J" || !comma.StartsWith("Shift + ", StringComparison.Ordinal) || comma.Length != 9 || pageUp != "Ctrl + Page Up" || pad != "Num 5" || twelve != "Alt + F12" || f24 != "F24")
+                                throw new Exception("Any key didn't save: " + loneF8 + " / " + f8Saved + " " + ctrlShiftK + " " + winAlone + " " + winAltJ + " " + qSaved + " / " + loneLetter + " / " + loneSaved + " / " + anyShown + " / " + comma + " " + pageUp + " " + pad + " " + twelve + " " + f24);
+                            checks.Add("PASS any key: F8 on its own, Ctrl + Shift + K and Win + Alt + J all save and show by name, Win alone can't be confirmed, and a lone Q says it won't type in other apps");
+                            // Windows itself takes them: no modifier at all (F8, and F23, which nothing else uses), Ctrl with Shift, and Win with Alt.
+                            int[,] probes = { { 0, 0x77 }, { 0, 0x86 }, { 6, 0x4B }, { 9, 0x4A } };
+                            System.Collections.Generic.List<string> registered = new System.Collections.Generic.List<string>(), heldElsewhere = new System.Collections.Generic.List<string>();
+                            for (int i = 0; i < probes.GetLength(0); i++)
+                            {
+                                string probeName = KeyName(probes[i, 0], probes[i, 1]);
+                                if (Native.RegisterHotKey(Handle, DismountId + 2, probes[i, 0] | 0x4000, probes[i, 1])) { Native.UnregisterHotKey(Handle, DismountId + 2); registered.Add(probeName); continue; }
+                                int why = Marshal.GetLastWin32Error();
+                                // 1409 is "already registered": another app on this PC holds it, which Capri shows as "(taken)".
+                                if (why != 1409) throw new Exception("Windows refused " + probeName + " as a hotkey: error " + why);
+                                heldElsewhere.Add(probeName);
+                            }
+                            bool loneRegistered = registered.Contains("F8") || registered.Contains("F23");
+                            string heldNote = heldElsewhere.Count == 0 ? "" : " (another app on this PC holds " + string.Join(", ", heldElsewhere.ToArray()) + ")";
+                            checks.Add(loneRegistered && registered.Contains("Ctrl + Shift + K") && registered.Contains("Win + Alt + J") ? "PASS Windows registers a key with no modifier, Ctrl + Shift + K and Win + Alt + J as hotkeys: " + string.Join(", ", registered.ToArray()) + heldNote : "LIMIT Windows registering keys couldn't all be checked" + heldNote + "; registered " + string.Join(", ", registered.ToArray()));
+                            // Keys saved by 0.7.2 and 0.7.3 load as they were, new ones load too, and a value that isn't a key goes back to its default.
+                            Preferences oldKeys = Voice.Read<Preferences>(System.Text.Encoding.UTF8.GetBytes("{\"TalkMods\":3,\"TalkVk\":75,\"MuteMods\":6,\"MuteVk\":120,\"TypeMods\":1,\"TypeVk\":49,\"HideMods\":2,\"HideVk\":112}"));
+                            Preferences newKeys = Voice.Read<Preferences>(System.Text.Encoding.UTF8.GetBytes("{\"TalkMods\":0,\"TalkVk\":119,\"MuteMods\":9,\"MuteVk\":74,\"TypeMods\":0,\"TypeVk\":81,\"HideMods\":4,\"HideVk\":27}"));
+                            Preferences badKeys = Voice.Read<Preferences>(System.Text.Encoding.UTF8.GetBytes("{\"TalkMods\":0,\"TalkVk\":17,\"MuteMods\":32,\"MuteVk\":65,\"TypeMods\":3,\"TypeVk\":0,\"HideMods\":0,\"HideVk\":1}"));
+                            CheckKeys(oldKeys);
+                            CheckKeys(newKeys);
+                            CheckKeys(badKeys);
+                            if (KeyName(oldKeys.TalkMods, oldKeys.TalkVk) + " | " + KeyName(oldKeys.MuteMods, oldKeys.MuteVk) + " | " + KeyName(oldKeys.TypeMods, oldKeys.TypeVk) + " | " + KeyName(oldKeys.HideMods, oldKeys.HideVk) != "Ctrl + Alt + K | Ctrl + Shift + F9 | Alt + 1 | Ctrl + F1"
+                                || KeyName(newKeys.TalkMods, newKeys.TalkVk) + " | " + KeyName(newKeys.MuteMods, newKeys.MuteVk) + " | " + KeyName(newKeys.TypeMods, newKeys.TypeVk) + " | " + KeyName(newKeys.HideMods, newKeys.HideVk) != "F8 | Win + Alt + J | Q | Shift + Esc"
+                                || KeyName(badKeys.TalkMods, badKeys.TalkVk) + " | " + KeyName(badKeys.MuteMods, badKeys.MuteVk) + " | " + KeyName(badKeys.TypeMods, badKeys.TypeVk) + " | " + KeyName(badKeys.HideMods, badKeys.HideVk) != "Ctrl + Alt + V | Ctrl + Alt + N | Ctrl + Alt + T | Ctrl + Alt + H")
+                                throw new Exception("Saved keys didn't load right: " + KeyName(oldKeys.TalkMods, oldKeys.TalkVk) + " / " + KeyName(newKeys.MuteMods, newKeys.MuteVk) + " / " + KeyName(badKeys.TalkMods, badKeys.TalkVk));
+                            checks.Add("PASS saved keys: 0.7.2 and 0.7.3 keys load as they were, new keys like F8 or Win + Alt + J load too, and a saved value that isn't a key goes back to its default");
+                            if (SetHotkey(0, Keys.Control | Keys.Alt | Keys.V) != null || SetHotkey(1, Keys.Control | Keys.Alt | Keys.N) != null || SetHotkey(2, Keys.Control | Keys.Alt | Keys.T) != null || SetHotkey(3, Keys.Control | Keys.Alt | Keys.H) != null) throw new Exception("Her default keys didn't come back.");
                             mainframe.ShowSettings(false);
-                            if (pageClash != "Ctrl + Alt + V is already her talk key." || pageSaved != "Saved. Ctrl + Alt + Y opens her typing box." || !mainNoteKept || pageCrowded != null || typeBack != null || preferences.TypeVk != 0x54)
-                                throw new Exception("The KEYS row's messages didn't show in Settings: " + pageClash + " / " + pageSaved + " / main kept " + mainNoteKept + " / overlap " + pageCrowded);
-                            checks.Add("PASS KEYS messages: changing a key in Settings says \"Saved.\" or \"already her talk key\" under the KEYS row, where they're looking, not on the hidden main page");
                             snap("mainframe-voice.png");
                             string crowded = mainframe.Overlap();
                             if (crowded != null) throw new Exception("Mainframe voice controls overlap: " + crowded);
@@ -11443,8 +11547,10 @@ namespace CapriDesktop
         [DllImport("user32.dll")] internal static extern bool SetProcessDpiAwarenessContext(IntPtr context);
         [DllImport("user32.dll")] internal static extern int GetWindowLong(IntPtr window, int index);
         [DllImport("user32.dll")] internal static extern int SetWindowLong(IntPtr window, int index, int value);
-        [DllImport("user32.dll")] internal static extern bool RegisterHotKey(IntPtr window, int id, int modifiers, int key);
+        [DllImport("user32.dll", SetLastError = true)] internal static extern bool RegisterHotKey(IntPtr window, int id, int modifiers, int key);
         [DllImport("user32.dll")] internal static extern bool UnregisterHotKey(IntPtr window, int id);
+        [DllImport("user32.dll")] internal static extern short GetKeyState(int key);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern int MapVirtualKey(int code, int type);
         [DllImport("user32.dll")] internal static extern IntPtr WindowFromPoint(Point point);
         [DllImport("user32.dll")] internal static extern IntPtr GetAncestor(IntPtr window, int flags);
         [DllImport("user32.dll")] internal static extern void keybd_event(byte key, byte scan, int flags, UIntPtr extra);

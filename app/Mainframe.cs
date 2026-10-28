@@ -72,6 +72,12 @@ namespace CapriDesktop
         private readonly Key muteKeys;
         private readonly Key typeKeys;
         private readonly Key hideKeys;
+        private readonly Key confirmKeys;
+        private readonly Key cancelKeys;
+        // The keys pressed so far while one of her keys is being picked: -1 until a real key comes, then its modifiers.
+        private int pendingMods = -1;
+        private int pendingVk;
+        private int heldMods;
         private readonly Toggle watch;
         private readonly Label voiceHead;
         private readonly Rung[] voiceRungs = new Rung[3];
@@ -225,7 +231,8 @@ namespace CapriDesktop
             shortcut.TextAlign = ContentAlignment.MiddleRight;
             shortcut.Bounds = new Rectangle(156, 182, 200, 20);
             shortcut.Cursor = Cursors.Hand;
-            shortcut.Click += delegate { PickKeys(0); };
+            // Keys are picked in Settings, where Confirm and Cancel sit beside them.
+            shortcut.Click += delegate { ShowSettings(true); PickKeys(0); };
             Lower(shortcut);
             string[,] voiceTiers = { { "OFF", "Silent · text only" }, { "FREE VOICE", "Free · runs on your PC" }, { "ELEVENLABS", "Sounds amazing · paid" } };
             for (int i = 0; i < voiceRungs.Length; i++)
@@ -279,8 +286,8 @@ namespace CapriDesktop
             Lower(Make("Test", 280, 358, 76, 28, delegate { capri.TestVoice(); }));
             muteShortcut = Lower(Caption("Ctrl + Alt + N mutes mic", 28, 393, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim));
             muteShortcut.Cursor = Cursors.Hand;
-            muteShortcut.Click += delegate { PickKeys(1); };
-            Deactivate += delegate { if (capturing == 0) return; capturing = 0; KeyLabels(); };
+            muteShortcut.Click += delegate { ShowSettings(true); PickKeys(1); };
+            Deactivate += delegate { CancelKeys(); };
             voiceNote = Lower(Caption("", 28, InstallAt, Font, Look.Dim));
             installNote = Caption("", 28, InstallAt + 2, Font, Look.Ink);
             installNote.Visible = false;
@@ -397,20 +404,31 @@ namespace CapriDesktop
             blackwallNote.Bounds = new Rectangle(28 + c, 526, 328, 18);
             Caption("KEYS >", 28, 576, Look.Mono(9f, FontStyle.Bold, GraphicsUnit.Point), Look.Yellow);
             talkKeys = Make("Talk: Ctrl + Alt + V", 96, 570, 250, 28, delegate { PickKeys(0); });
-            talkKeys.AccessibleName = "Her talk key. Click, then press new keys";
+            talkKeys.AccessibleName = "Her talk key. Click, press new keys, then Confirm";
             muteKeys = Make("Mute mic: Ctrl + Alt + N", 358, 570, 250, 28, delegate { PickKeys(1); });
-            muteKeys.AccessibleName = "Her mute key. Click, then press new keys";
+            muteKeys.AccessibleName = "Her mute key. Click, press new keys, then Confirm";
             typeKeys = Make("Type: Ctrl + Alt + T", 96, 604, 250, 28, delegate { PickKeys(2); });
-            typeKeys.AccessibleName = "Her typing key. Click, then press new keys";
+            typeKeys.AccessibleName = "Her typing key. Click, press new keys, then Confirm";
             hideKeys = Make("Hide/show: Ctrl + Alt + H", 358, 604, 250, 28, delegate { PickKeys(3); });
-            hideKeys.AccessibleName = "Her hide key. Click, then press new keys";
+            hideKeys.AccessibleName = "Her hide key. Click, press new keys, then Confirm";
+            // Only a click ends picking a key, so Enter, Esc and Tab can be her keys too.
+            confirmKeys = Make("Confirm", 620, 570, 116, 28, delegate { ConfirmKeys(); });
+            confirmKeys.Accent = Look.Cyan;
+            confirmKeys.Loud = true;
+            confirmKeys.AccessibleName = "Confirm her new keys";
+            cancelKeys = Make("Cancel", 620, 604, 116, 28, delegate { CancelKeys(); });
+            cancelKeys.AccessibleName = "Cancel and keep her old keys";
+            confirmKeys.Visible = cancelKeys.Visible = false;
             keysNote = Caption("", 96, 640, Look.Mono(8.5f, FontStyle.Regular, GraphicsUnit.Point), Look.Dim);
             keysNote.MaximumSize = new Size(512, 0);
             for (int i = first; i < Controls.Count; i++)
             {
-                pageLeft.Add(new KeyValuePair<Control, int>(Controls[i], Controls[i].Left));
-                Controls[i].Left += Far;
-                Reachable(Controls[i], false);
+                Control control = Controls[i];
+                pageLeft.Add(new KeyValuePair<Control, int>(control, control.Left));
+                control.Left += Far;
+                Reachable(control, false);
+                // Clicking into anything else while a key is being picked keeps the old key, so typing in a box is never swallowed.
+                control.Enter += delegate { if (capturing != 0 && control != confirmKeys && control != cancelKeys && control != PickedKey) CancelKeys(); };
             }
             Searching();
             Sync();
@@ -458,6 +476,7 @@ namespace CapriDesktop
 
         internal void ShowSettings(bool on)
         {
+            if (!on) CancelKeys();
             paged = on;
             more.Text = on ? "Back" : "Settings";
             more.Invalidate();
@@ -1000,24 +1019,65 @@ namespace CapriDesktop
         }
 
         // Which of her keys to change: 0 talk, 1 mute mic, 2 type to her, 3 hide or show her.
+        // Opening another key while one is being picked drops what was pressed, so the old key stays.
         internal void PickKeys(int slot)
         {
             capturing = slot + 1;
+            pendingMods = -1;
+            heldMods = 0;
             if (keysNote != null) keysNote.Text = "";
             KeyLabels();
         }
 
-        internal void TakeKeys(Keys keys)
+        internal void TakeKeys(Keys keys) { TakeKeys(keys, false); }
+
+        // Every press shows in her key's button until Confirm or Cancel is clicked. The latest key with what was held wins.
+        internal void TakeKeys(Keys keys, bool win)
         {
+            if (capturing == 0) return;
             Keys key = keys & Keys.KeyCode;
-            if (capturing == 0 || key == Keys.ControlKey || key == Keys.Menu || key == Keys.ShiftKey || key == Keys.LWin || key == Keys.RWin) return;
-            int slot = capturing - 1;
-            capturing = 0;
-            string problem = key == Keys.Escape ? null : capri.SetHotkey(slot, keys);
+            int mods = Companion.HotMods(keys, win || key == Keys.LWin || key == Keys.RWin);
+            if (key == Keys.ControlKey || key == Keys.LControlKey || key == Keys.RControlKey || key == Keys.Menu || key == Keys.LMenu || key == Keys.RMenu || key == Keys.ShiftKey || key == Keys.LShiftKey || key == Keys.RShiftKey || key == Keys.LWin || key == Keys.RWin)
+            {
+                // A modifier on its own only shows until a key joins it, and never counts as her key.
+                if (pendingMods < 0) { heldMods = mods; KeyLabels(); }
+                return;
+            }
+            if (!Companion.Bindable(mods, (int)key)) return;
+            pendingMods = mods;
+            pendingVk = (int)key;
             KeyLabels();
-            if (problem != null) KeysNote(problem, true);
-            else if (key != Keys.Escape) KeysNote("Saved. " + (slot == 0 ? talkName + " starts voice chat." : slot == 1 ? muteName + " mutes your mic." : slot == 2 ? typeName + " opens her typing box." : hideName + " hides or shows her."), false);
+            string name = Companion.KeyName(pendingMods, pendingVk);
+            KeysNote(Companion.Swallows(pendingMods, pendingVk) ? name + " won't type in other apps while she runs. Confirm to keep it." : "Confirm to keep " + name + ", or Cancel.", false);
         }
+
+        internal void ConfirmKeys()
+        {
+            if (capturing == 0 || pendingMods < 0) return;
+            int slot = capturing - 1, mods = pendingMods, vk = pendingVk;
+            string problem = capri.SetHotkey(slot, mods, vk);
+            // A key that's taken or already hers keeps the picking open, so another can be pressed straight away.
+            if (problem != null) { KeysNote(problem, true); return; }
+            capturing = 0;
+            pendingMods = -1;
+            KeyLabels();
+            KeysNote("Saved. " + (slot == 0 ? talkName + " starts voice chat." : slot == 1 ? muteName + " mutes your mic." : slot == 2 ? typeName + " opens her typing box." : hideName + " hides or shows her.") + (Companion.Swallows(mods, vk) ? " It won't type in other apps while she runs." : ""), false);
+        }
+
+        internal void CancelKeys()
+        {
+            if (capturing == 0) return;
+            capturing = 0;
+            pendingMods = -1;
+            if (keysNote != null) keysNote.Text = "";
+            KeyLabels();
+        }
+
+        internal bool ConfirmReady { get { return confirmKeys.Visible && confirmKeys.Enabled; } }
+
+        private Control PickedKey { get { return capturing == 1 ? talkKeys : capturing == 2 ? muteKeys : capturing == 3 ? typeKeys : capturing == 4 ? hideKeys : null; } }
+
+        private static bool WinHeld() { return (Native.GetKeyState(0x5B) & 0x8000) != 0 || (Native.GetKeyState(0x5C) & 0x8000) != 0; }
 
         // A key change answers where it was made: under the KEYS row in Settings, or under VOICE on the main page.
         private void KeysNote(string text, bool problem)
@@ -1032,20 +1092,32 @@ namespace CapriDesktop
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
             if (capturing == 0) return base.ProcessCmdKey(ref msg, keyData);
-            TakeKeys(keyData);
+            TakeKeys(keyData, WinHeld());
             return true;
         }
 
+        private const string Waiting = "Press new keys, then Confirm";
+
         private void KeyLabels()
         {
-            const string waiting = "Press new keys, Esc cancels";
-            shortcut.Text = capturing == 1 ? waiting : talkName + (shortcutReady ? " to talk" : " is taken");
-            muteShortcut.Text = capturing == 2 ? waiting : muteName + (muteReady ? " mutes mic" : " is taken");
-            if (hideKeys == null) return;
-            talkKeys.Text = capturing == 1 ? waiting : "Talk: " + talkName + (shortcutReady ? "" : " (taken)");
-            muteKeys.Text = capturing == 2 ? waiting : "Mute mic: " + muteName + (muteReady ? "" : " (taken)");
-            typeKeys.Text = capturing == 3 ? waiting : "Type: " + typeName + (typeReady ? "" : " (taken)");
-            hideKeys.Text = capturing == 4 ? waiting : "Hide/show: " + hideName + (hideReady ? "" : " (taken)");
+            shortcut.Text = capturing == 1 ? Waiting : talkName + (shortcutReady ? " to talk" : " is taken");
+            muteShortcut.Text = capturing == 2 ? Waiting : muteName + (muteReady ? " mutes mic" : " is taken");
+            if (cancelKeys == null) return;
+            talkKeys.Text = capturing == 1 ? PickingText("Talk: ") : "Talk: " + talkName + (shortcutReady ? "" : " (taken)");
+            muteKeys.Text = capturing == 2 ? PickingText("Mute mic: ") : "Mute mic: " + muteName + (muteReady ? "" : " (taken)");
+            typeKeys.Text = capturing == 3 ? PickingText("Type: ") : "Type: " + typeName + (typeReady ? "" : " (taken)");
+            hideKeys.Text = capturing == 4 ? PickingText("Hide/show: ") : "Hide/show: " + hideName + (hideReady ? "" : " (taken)");
+            confirmKeys.Visible = cancelKeys.Visible = capturing != 0;
+            confirmKeys.Enabled = pendingMods >= 0;
+            confirmKeys.Invalidate();
+        }
+
+        // What the key being picked shows: the keys pressed so far, the modifiers held so far, or what to do.
+        private string PickingText(string job)
+        {
+            if (pendingMods >= 0) return job + Companion.KeyName(pendingMods, pendingVk);
+            if (heldMods != 0) return job + Companion.ModNames(heldMods) + "...";
+            return Waiting;
         }
 
         internal string TierNote { get { return tierNote.Text; } }

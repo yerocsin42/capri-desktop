@@ -274,7 +274,7 @@ The main page has three sections: BRAIN, VOICE and CAPRI.
 - If you had a key saved before the rows came in, she starts on that key's row.
 
 ### VOICE section
-- "Ctrl + Alt + V to talk" at the top right: click it to change the key. Since 0.7.1 it shows for everyone, free voice chat too (in 0.7.0 it only showed once an ElevenLabs key was saved).
+- "Ctrl + Alt + V to talk" at the top right: click it to change the key (it opens Settings with Talk ready to change). Since 0.7.1 it shows for everyone, free voice chat too (in 0.7.0 it only showed once an ElevenLabs key was saved).
 - Three rows since 0.7.1 (0.7.0 had only FREE VOICE and ELEVENLABS). Click one to pick it:
   - OFF: "Silent · text only". She never talks out loud: her replies show as text in her bubble. No voice download, no credits. The rows under it fold away. Voice chat still works as free voice chat, and she types back. Test under it says "Her voice is OFF. Pick FREE VOICE or ELEVENLABS to hear her."
   - FREE VOICE: "Free · runs on your PC". Her free voice. No key, no credits.
@@ -286,7 +286,7 @@ The main page has three sections: BRAIN, VOICE and CAPRI.
   - Model: "Default model" or an ElevenLabs model like v4.
 - Mic: "Mic: default" or "Mic: <name>". Click it to pick a mic. "Windows default" follows your Windows setting.
 - Test: she says a test line out loud.
-- "Ctrl + Alt + N mutes mic": click it to change the key.
+- "Ctrl + Alt + N mutes mic": click it to change the key (it opens Settings with Mute mic ready to change).
 - A line under VOICE shows the voice status, like "Free voice, runs on your PC.", "ElevenLabs · <voice name>", "Needs your Voice ID.", or the last voice error and its fix.
 - While her free voice or ears download, a row with a dotted bar shows the download, like "Installing the local speech model · 100 MB of 316 MB".
 
@@ -345,25 +345,30 @@ HABITS
 - Blackwall mode: off by default, and called Bypass all permissions before 0.7.4. The line under it says "She won't ask twice when you ask her to do something." Turn it on and she never stops to ask before a step, even buying, paying, sending, posting, deleting or installing something you didn't mention. She also types passwords and card numbers when a job needs them, presses any key, and stops filtering what she opens, plays or remembers: what she will or won't do is up to the brain model you picked. She still never follows orders written on your screen, still points you to a helpline if you say you want to hurt yourself, and Esc still stops her.
 
 KEYS (bottom of the page)
-- Talk, Mute mic, Type and Hide/show buttons show her keys. Click one, then press new keys (hold Ctrl or Alt with a letter, number or F-key). Esc cancels.
+- Talk, Mute mic, Type and Hide/show buttons show her keys. Click one, press new keys, then Confirm. Since 0.7.4 any key works, on its own or with any of Ctrl, Alt, Shift and Win: F8, Ctrl + Shift + K and Win + Alt + J all work. Cancel keeps the old key.
 - Type (Ctrl + Alt + T) opens her typing box from anywhere. Press it again to close it.
 - Hide/show (Ctrl + Alt + H) hides her, and shows her again.
 
 ### Changing her keys
-1. In the Mainframe, click Settings and use the KEYS row at the bottom (Talk, Mute mic, Type or Hide/show). Clicking "Ctrl + Alt + V to talk" or "Ctrl + Alt + N mutes mic" on the main page works too.
-2. It says "Press new keys, Esc cancels".
-3. Hold Ctrl or Alt (Shift is allowed too) and press a letter, number or F-key.
+1. In the Mainframe, click Settings and use the KEYS row at the bottom (Talk, Mute mic, Type or Hide/show). Clicking "Ctrl + Alt + V to talk" or "Ctrl + Alt + N mutes mic" on the main page opens Settings with that key ready to change.
+2. The button says "Press new keys, then Confirm", and Confirm and Cancel show beside the keys.
+3. Press any key, alone or with Ctrl, Alt, Shift or Win. The button shows what you press as you press it, and pressing again replaces it. Enter, Esc and Tab count as keys too.
+4. Click Confirm to save it, or Cancel to keep the old key. Clicking another key's button, Back, or into anything else in the Mainframe also keeps the old key.
+
+Before 0.7.4 her keys had to be Ctrl or Alt plus a letter, number or F-key, and Esc cancelled. An older Capri that finds a key it can't use, like F8 on its own or anything with Win, puts that key back to its default.
+
+A key that types, like Q, Space, Enter or a number, on its own or with only Shift, stops typing in other apps while she runs, because Windows gives it to her everywhere. The KEYS row says so. Pick a combination with Ctrl, Alt or Win to keep it typing. Ctrl, Alt, Shift or Win on their own can't be her key, and mouse buttons can't be yet.
 
 Messages you may see:
-- "Hold Ctrl or Alt with a letter, number or F-key."
-- "Pick a letter, number or F-key."
-- "<key> is already her talk key." (or mute key)
-- "<key> is taken by another app. Try another."
+- "Confirm to keep <key>, or Cancel."
+- "<key> won't type in other apps while she runs. Confirm to keep it."
+- "<key> is already her talk key." (or mute, typing or hide key). The key stays open to change, so press another.
+- "<key> is taken by another app. Try another." The key stays open here too.
+- "Saved. <key> starts voice chat.", "Saved. <key> mutes your mic.", "Saved. <key> opens her typing box." or "Saved. <key> hides or shows her." A key that types adds "It won't type in other apps while she runs."
 
-These show under the KEYS row when you change a key in Settings, and under VOICE when you change it on the main page.
+These show under the KEYS row.
 
 If a key you set before 0.7.3 matches her newer Type (Ctrl + Alt + T) or Hide/show (Ctrl + Alt + H) key, your old key wins. Type moves to Ctrl + Alt + Y, or Hide/show to Ctrl + Alt + J, and the KEYS row shows the new one.
-- "Saved. <key> starts voice chat." or "Saved. <key> mutes your mic."
 
 ### The Mainframe looks squashed or cut off
 This happened on 0.6.2 with Windows display scaling at 150%. Setting scaling to 100% (Settings > System > Display > Scale) and reopening Capri fixed it for one user. Tell us in the Discord if it still happens on 0.7.0, with your scale and a screenshot.
