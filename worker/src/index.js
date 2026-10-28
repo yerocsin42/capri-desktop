@@ -13,7 +13,7 @@ const models = [
   { name: '@cf/google/gemma-4-26b-a4b-it', vision: true, options: { max_completion_tokens: 260, temperature: 0.3, chat_template_kwargs: { enable_thinking: false } } },
   { name: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', options: { max_tokens: 260, temperature: 0.3 } }
 ];
-const claudeModel = 'claude-opus-5-5';
+const claudeModel = 'claude-haiku-5-5';
 const perVisitor = 40;
 const perVisitorPictures = 10;
 const perDay = 2000;
@@ -139,7 +139,7 @@ const clip = reply => reply.length > 700 ? reply.slice(0, 697).replace(/\s+\S*$/
 // Claude answers when the worker has an ANTHROPIC_API_KEY secret, and Workers AI is the fallback. null means Claude refused.
 const ask = async (env, messages, max_tokens, system) => {
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 1, timeout: 20000 });
-  const response = await client.beta.messages.create({ model: claudeModel, max_tokens, system, messages, output_config: { effort: 'low' }, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' });
+  const response = await client.messages.create({ model: claudeModel, max_tokens, system, messages, output_config: { effort: 'low' } });
   return response.stop_reason === 'refusal' ? null : said(response.content.filter(block => block.type === 'text').map(block => block.text).join(' '));
 };
 
