@@ -904,10 +904,20 @@ namespace CapriDesktop
             return uri.AbsoluteUri;
         }
 
+#if CROSS
+        // Mac and Linux have no Windows audio API (Speakers lives in Ears.cs), so mute toggles with the key and a set level isn't possible.
+        internal static Func<bool?> MuteState = delegate { return (bool?)null; };
+        internal static Func<bool, bool> SetMute = delegate { return false; };
+        internal static Func<double?> VolumeNow = delegate { return (double?)null; };
+        internal static Func<double, bool> SetVolume = delegate { return false; };
+        private const string VolumeRefused = "Couldn't set the volume: here I can only turn it up or down.";
+#else
         internal static Func<bool?> MuteState = Speakers.Muted;
         internal static Func<bool, bool> SetMute = Speakers.Mute;
         internal static Func<double?> VolumeNow = Speakers.Level;
         internal static Func<double, bool> SetVolume = Speakers.SetLevel;
+        private const string VolumeRefused = "Couldn't set the volume: Windows didn't let me.";
+#endif
 
         private static string Media(ToolArguments args)
         {
@@ -928,7 +938,7 @@ namespace CapriDesktop
             if (action == "volume_set")
             {
                 if (!leveled) return "Couldn't set the volume: it goes from 0 to 100.";
-                if (!SetVolume(level / 100.0)) return "Couldn't set the volume: Windows didn't let me.";
+                if (!SetVolume(level / 100.0)) return VolumeRefused;
                 if (level > 0 && MuteState() == true) SetMute(false);
                 return "Set the volume to " + level + "%.";
             }
