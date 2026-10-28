@@ -67,7 +67,7 @@ namespace CapriDesktop
             "\nYou have tools for their PC: open (launch, play) their apps and games, switch to, minimize or close apps that are open, play songs or videos they name, open websites or search them, control their music and volume, look at their screen, and use their mouse and keyboard for jobs inside apps and sites. " +
             "Use a tool whenever they ask you to do something like that, and never say you did or are doing it without one. Look at their screen when they ask what you see or what you think of something on it. Only close an app when they ask you to. You can't touch their files. " +
             "Your own website, where people download you, is " + Home + ". " +
-            "When a request is clear enough, just do it: never ask which option they meant, and never ask if they're sure about something they just told you to do. " +
+            "They've already given you permission for anything they ask you to do on their PC, so do all of it straight away: never ask which option they meant, never ask if they're sure, never make them confirm or ask for things one at a time, and when they leave the choice to you, like which song, video or game, pick one yourself. " +
             "You can do anything on their PC they ask: send messages and DMs, reply, post, join, leave or end calls, and any other job in their apps with use_computer. Never ask if they want you to, never read a message back to check it first, and never tell them to do it themselves. Mute my mic means mute their mic, not deafen them. Never say you can't do something your tools can do. " +
             "You can press shortcuts: mute or deafen them in Discord, screenshots, clips, recording, Game Bar, show desktop, Task Manager, clipboard history and emoji. " +
             "You can shut down, restart, sleep, lock or sign out of their PC with power: when they ask, do it straight away and never ask if they're sure. " +
@@ -77,11 +77,11 @@ namespace CapriDesktop
 
         internal const string Prompt =
             "You are the hands of Capri, a desktop companion on the user's Windows PC. You don't chat.\n" +
-            "Act only on their latest request. Earlier messages are context for names, not commands to repeat. Call one tool: open an app, game or website, search a site, play music, control media or volume, check the current song, switch to, minimize or close an app, or look at their screen when asked about it. Use the names they gave.\n" +
+            "Act only on their latest request. Earlier messages are context for names, not commands to repeat. Call one tool for each thing they ask for, up to three (open Discord and Spotify is two open_app calls): open an app, game or website, search a site, play music, control media or volume, check the current song, switch to, minimize or close an app, or look at their screen when asked about it. Use the names they gave.\n" +
             "If the job needs clicking, typing or more than one step, like opening an app and then searching, going somewhere or making something in it, call use_computer once with the whole job in their words.\n" +
             "Sending a message, DM, reply or post, joining, leaving or ending a call, and any other job inside an app are use_computer jobs: pass their exact words, including what to send. They asked, so it's a job even when it sends, deletes or ends something.\n" +
             "When they name an app, never guess a website for it: use open_app, or use_computer if there's more to do.\n" +
-            "If they want music but name none, pick a popular song that fits.\n" +
+            "If they leave the pick to you, like a song or a video, pick one yourself that fits.\n" +
             "Your own website is " + Home + ": when they ask for your website or page, call open_website with that address.\n" +
             "If they ask something you'd have to look up, like the weather, news, scores, prices, times or facts you're unsure of, call open_website with site google and their question as the search.\n" +
             "To mute, unmute or turn off their mic, call shortcut with discord_mute; to deafen or undeafen them, discord_deafen. Don't ask which: mute means the mic. Screenshots, clips, recording, Game Bar, show desktop, Task Manager, clipboard and emoji are shortcuts too.\n" +
@@ -603,9 +603,28 @@ namespace CapriDesktop
             return tool == "play_music" && Named(args.Song) && (string.IsNullOrEmpty(args.Kind) || Regex.IsMatch(args.Kind, @"\A(song|playlist|album|artist)\z")) && (string.IsNullOrEmpty(args.App) || args.App == "spotify" || args.App == "youtube");
         }
 
+        // "Open Discord and Spotify" opens both, so nobody has to ask for each app on its own. Anything she doesn't know goes to her brain.
+        internal static bool Several(string said, List<KeyValuePair<string, ToolArguments>> calls)
+        {
+            Match found = Regex.Match(Asked(said), @"^(?:open|launch|start|run|load up|boot up|fire up)\s+(?:up\s+)?(.+)$", RegexOptions.IgnoreCase);
+            if (!found.Success) return false;
+            string[] parts = Regex.Split(found.Groups[1].Value.Trim(), @"\s*,\s*(?:and\s+|&\s*)?|\s+and\s+|\s*&\s*", RegexOptions.IgnoreCase);
+            if (parts.Length < 2 || parts.Length > 3) return false;
+            List<KeyValuePair<string, ToolArguments>> opening = new List<KeyValuePair<string, ToolArguments>>();
+            foreach (string part in parts)
+            {
+                string target = Regex.Replace(part.Trim(), @"^(?:open|launch|start|run)\s+", "", RegexOptions.IgnoreCase);
+                if (Installed(target)) opening.Add(new KeyValuePair<string, ToolArguments>("open_app", new ToolArguments { Name = target }));
+                else if (Site(target)) opening.Add(new KeyValuePair<string, ToolArguments>("open_website", new ToolArguments { Site = target }));
+                else return false;
+            }
+            calls.AddRange(opening);
+            return true;
+        }
+
         private static bool Named(string text) { return !string.IsNullOrWhiteSpace(text) && text.Trim() != "..."; }
 
-        private static bool Installed(string target)
+        internal static bool Installed(string target)
         {
             string want = Regex.Replace(Plain(target), @"^the |( app| application| game)$", "");
             if (want.Length == 0) return false;

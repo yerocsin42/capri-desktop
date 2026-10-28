@@ -622,9 +622,12 @@ namespace CapriDesktop
             else if (act != null && (agreed || Hands.Wants(request) || follows))
             {
                 reached = true;
-                string handed = Reach(model, request, follows ? recent : new List<ChatMessage>(), calls, ticket);
-                Hands.Rescue(request, calls);
-                if (calls.Count == 0 && (agreed || Hands.Hesitant(handed, request))) calls.Add(Hands.Forced(request));
+                if (!Hands.Several(request, calls))
+                {
+                    string handed = Reach(model, request, follows ? recent : new List<ChatMessage>(), calls, ticket);
+                    Hands.Rescue(request, calls);
+                    if (calls.Count == 0 && (agreed || Hands.Hesitant(handed, request))) calls.Add(Hands.Forced(request));
+                }
             }
             if (calls.Count == 0)
             {
