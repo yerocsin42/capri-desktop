@@ -218,10 +218,6 @@ Who she is and how she talks lives in `personality.md`, a plain text file you ca
 - [ ] The Mainframe fitting any screen shape and scaling, like Virtual Super Resolution
 - [ ] Code signing, so Windows stops warning you about her
 
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build her, test her and send a pull request.
-
 ## Licence
 
 Free for anything non-commercial: use her, share her, change her. No selling her or putting her in paid products. Full terms in [LICENSE.md](LICENSE.md) (PolyForm Noncommercial 1.0.0).
