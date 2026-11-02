@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  Bring Capri (back lol) to life as a desktop companion! Inspired by jpartnma_'s tiktok video.
+  Bring Capri (back lol) to life as a desktop companion!
 </p>
 
 <p align="center">
